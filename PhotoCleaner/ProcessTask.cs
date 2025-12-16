@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -6,6 +7,7 @@ using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
 using CliWrap.Exceptions;
+using Serilog;
 
 namespace PhotoCleaner;
 
@@ -69,7 +71,7 @@ public class ProcessTask(
         {
             if (!_unknownExtensionBag.Contains(_fileInfo.Extension.ToLower()))
             {
-                Console.WriteLine($"WARNING: Skipping non-media file: '{_fileInfo.FullName}'.");
+                Log.Warning("Skipping non-media file: '{FileName}'.", _fileInfo.FullName);
                 _unknownExtensionBag.Add(_fileInfo.Extension.ToLower());
             }
             return false;
@@ -84,6 +86,7 @@ public class ProcessTask(
             json,
             SourceGenerationContext.Default.ExifToolJson
         );
+        Debug.Assert(_exifToolJson != null, "ExifToolJson should not be null here.");
 
         // Process files in order of validation to modification to verification
         if (
@@ -104,7 +107,7 @@ public class ProcessTask(
 
     private async Task<bool> DetectDoubleExtensions()
     {
-        string[] parts = _fileInfo!.Name.ToLower().Split('.');
+        string[] parts = _fileInfo.Name.ToLower().Split('.');
         string[] extensions = _processExtensions.Select(item => item.Trim('.').ToLower()).ToArray();
         int extensionCount = 0;
         foreach (string part in parts)
@@ -116,7 +119,7 @@ public class ProcessTask(
         }
         if (extensionCount > 1)
         {
-            Console.WriteLine($"WARNING: Multiple extensions detected: '{_fileInfo!.FullName}'.");
+            Log.Warning("Multiple extensions detected: '{FileName}'.", _fileInfo.FullName);
             return false;
         }
 
@@ -126,12 +129,14 @@ public class ProcessTask(
     private async Task<bool> DetectMixedCaseExtensions()
     {
         if (
-            _fileInfo!.Extension != _fileInfo!.Extension.ToLower()
-            && _fileInfo!.Extension != _fileInfo!.Extension.ToUpper()
+            _fileInfo.Extension != _fileInfo.Extension.ToLower()
+            && _fileInfo.Extension != _fileInfo.Extension.ToUpper()
         )
         {
-            Console.WriteLine(
-                $"WARNING: Mixed case extension detected '{_fileInfo!.Extension}': '{_fileInfo.FullName}'."
+            Log.Warning(
+                "Mixed case extension detected '{Extension}': '{FileName}'.",
+                _fileInfo.Extension,
+                _fileInfo.FullName
             );
             return false;
         }
@@ -142,7 +147,7 @@ public class ProcessTask(
     private async Task<bool> DetectMismatchedMimeExtension()
     {
         bool match = true;
-        string extension = _fileInfo!.Extension.ToLower();
+        string extension = _fileInfo.Extension.ToLower();
         string expectedExtension = extension;
         switch (_exifToolJson!.MIMEType)
         {
@@ -190,17 +195,22 @@ public class ProcessTask(
         if (!match)
         {
             // Rename extensions to match MIME type
-            Console.WriteLine(
-                $"WARNING: MIME type '{_exifToolJson!.MIMEType}' does not match file extension '{extension}' : '{_fileInfo!.FullName}'."
+            Log.Warning(
+                "MIME type '{MimeType}' does not match file extension '{Extension}' : '{FileName}'.",
+                _exifToolJson!.MIMEType,
+                extension,
+                _fileInfo.FullName
             );
-            string outputFile = Path.ChangeExtension(_fileInfo!.FullName, expectedExtension);
-            Console.WriteLine(
-                $"INFORMATION: Renaming '{_fileInfo!.FullName}' to '{outputFile}' ..."
+            string outputFile = Path.ChangeExtension(_fileInfo.FullName, expectedExtension);
+            Log.Information(
+                "Renaming '{OldFileName}' to '{NewFileName}' ...",
+                _fileInfo.FullName,
+                outputFile
             );
-            File.Move(_fileInfo!.FullName, outputFile, false);
+            File.Move(_fileInfo.FullName, outputFile, false);
 
             // Queue renamed file for further processing
-            Console.WriteLine($"INFORMATION: Queuing '{outputFile}' for further processing.");
+            Log.Information("Queuing '{FileName}' for further processing.", outputFile);
             _fileNameBag.Add(outputFile);
             return false;
         }
@@ -212,7 +222,7 @@ public class ProcessTask(
     {
         if (!_exifToolJson!.IsDateSet())
         {
-            Console.WriteLine($"WARNING: Missing created date: '{_fileInfo!.FullName}'.");
+            Log.Warning("Missing created date: '{FileName}'.", _fileInfo.FullName);
             return false;
         }
 
@@ -231,7 +241,7 @@ public class ProcessTask(
                 "stream=codec_name",
                 "-of",
                 "default=nw=1:nk=1",
-                _fileInfo!.FullName,
+                _fileInfo.FullName,
             ])
             .ExecuteBufferedAsync();
         string audioFormat = result.StandardOutput.Trim().ToLower();
@@ -241,14 +251,14 @@ public class ProcessTask(
     private async Task<bool> DetectPcmAudio()
     {
         string[] audioExtensions = [".mov", ".mp4"];
-        if (!audioExtensions.Contains(_fileInfo!.Extension.ToLower()))
+        if (!audioExtensions.Contains(_fileInfo.Extension.ToLower()))
         {
             return true;
         }
 
         if (await IsAudioPcm())
         {
-            Console.WriteLine($"WARNING: PCM audio detected: '{_fileInfo!.FullName}'.");
+            Log.Warning("PCM audio detected: '{FileName}'.", _fileInfo.FullName);
             return false;
         }
 
@@ -258,7 +268,7 @@ public class ProcessTask(
     private async Task<bool> DeleteLivePhotos()
     {
         string[] liveExtensions = [".mp4", ".mov"];
-        if (!liveExtensions.Contains(_fileInfo!.Extension.ToLower()))
+        if (!liveExtensions.Contains(_fileInfo.Extension.ToLower()))
         {
             return true;
         }
@@ -274,7 +284,7 @@ public class ProcessTask(
                 "format=duration",
                 "-of",
                 "default=nw=1:nk=1",
-                _fileInfo!.FullName,
+                _fileInfo.FullName,
             ])
             .ExecuteBufferedAsync();
         float duration = float.Parse(result.StandardOutput.Trim());
@@ -282,14 +292,18 @@ public class ProcessTask(
         // Very short videos
         if (duration <= 0.5)
         {
-            Console.WriteLine(
-                $"INFORMATION: {duration}s video clip detected: '{_fileInfo!.FullName}'."
+            Log.Information(
+                "{Duration}s video clip detected: '{FileName}'.",
+                duration,
+                _fileInfo.FullName
             );
-            string backupFile = GetBackupFileName(_fileInfo!.FullName);
-            Console.WriteLine(
-                $"INFORMATION: Renaming '{_fileInfo!.FullName}' to '{backupFile}' ..."
+            string backupFile = GetBackupFileName(_fileInfo.FullName);
+            Log.Information(
+                "Renaming '{OldFileName}' to '{NewFileName}' ...",
+                _fileInfo.FullName,
+                backupFile
             );
-            File.Move(_fileInfo!.FullName, backupFile, false);
+            File.Move(_fileInfo.FullName, backupFile, false);
             return false;
         }
 
@@ -304,14 +318,18 @@ public class ProcessTask(
                     || File.Exists(Path.ChangeExtension(_fileInfo.FullName, extension.ToUpper()))
                 )
                 {
-                    Console.WriteLine(
-                        $"INFORMATION: {duration}s video clip detected with matching image file: '{_fileInfo!.FullName}'."
+                    Log.Information(
+                        "{Duration}s video clip detected with matching image file: '{FileName}'.",
+                        duration,
+                        _fileInfo.FullName
                     );
-                    string backupFile = GetBackupFileName(_fileInfo!.FullName);
-                    Console.WriteLine(
-                        $"INFORMATION: Renaming '{_fileInfo!.FullName}' to '{backupFile}' ..."
+                    string backupFile = GetBackupFileName(_fileInfo.FullName);
+                    Log.Information(
+                        "Renaming '{OldFileName}' to '{NewFileName}' ...",
+                        _fileInfo.FullName,
+                        backupFile
                     );
-                    File.Move(_fileInfo!.FullName, backupFile, false);
+                    File.Move(_fileInfo.FullName, backupFile, false);
                     return false;
                 }
             }
@@ -323,9 +341,9 @@ public class ProcessTask(
     private async Task<bool> ConvertVideo()
     {
         // Convert to MP4 if needed
-        string outputFile = Path.ChangeExtension(_fileInfo!.FullName, ".mp4");
+        string outputFile = Path.ChangeExtension(_fileInfo.FullName, ".mp4");
         string[] ffmpegArguments;
-        if (_remuxExtensions.Contains(_fileInfo!.Extension.ToLower()))
+        if (_remuxExtensions.Contains(_fileInfo.Extension.ToLower()))
         {
             // Remux audio and video
             ffmpegArguments =
@@ -333,7 +351,7 @@ public class ProcessTask(
                 "-nostdin",
                 "-y",
                 "-i",
-                _fileInfo!.FullName,
+                _fileInfo.FullName,
                 "-c",
                 "copy",
                 "-movflags",
@@ -341,7 +359,7 @@ public class ProcessTask(
                 outputFile,
             ];
         }
-        else if (_reencodeExtensions.Contains(_fileInfo!.Extension.ToLower()))
+        else if (_reencodeExtensions.Contains(_fileInfo.Extension.ToLower()))
         {
             // Reencode audio and video
             ffmpegArguments =
@@ -349,7 +367,7 @@ public class ProcessTask(
                 "-nostdin",
                 "-y",
                 "-i",
-                _fileInfo!.FullName,
+                _fileInfo.FullName,
                 "-c:v",
                 "libx264",
                 "-crf",
@@ -367,7 +385,7 @@ public class ProcessTask(
                 outputFile,
             ];
         }
-        else if (_reencodeAudioExtensions.Contains(_fileInfo!.Extension.ToLower()))
+        else if (_reencodeAudioExtensions.Contains(_fileInfo.Extension.ToLower()))
         {
             // Only if audio is PCM
             if (!await IsAudioPcm())
@@ -381,7 +399,7 @@ public class ProcessTask(
                 "-nostdin",
                 "-y",
                 "-i",
-                _fileInfo!.FullName,
+                _fileInfo.FullName,
                 "-c:v",
                 "copy",
                 "-c:a",
@@ -400,10 +418,14 @@ public class ProcessTask(
         }
 
         // Destination file must not already exist
-        Console.WriteLine($"INFORMATION: Converting '{_fileInfo!.FullName}' to '{outputFile}' ...");
+        Log.Information(
+            "Converting '{OldFileName}' to '{NewFileName}' ...",
+            _fileInfo.FullName,
+            outputFile
+        );
         if (File.Exists(outputFile))
         {
-            Console.WriteLine($"WARNING: Target file already exists: '{outputFile}'.");
+            Log.Warning("Target file already exists: '{FileName}'.", outputFile);
             return false;
         }
 
@@ -413,9 +435,13 @@ public class ProcessTask(
             .ExecuteBufferedAsync();
 
         // Backup original file
-        string backupFile = GetBackupFileName(_fileInfo!.FullName);
-        Console.WriteLine($"INFORMATION: Renaming '{_fileInfo!.FullName}' to '{backupFile}' ...");
-        File.Move(_fileInfo!.FullName, backupFile, false);
+        string backupFile = GetBackupFileName(_fileInfo.FullName);
+        Log.Information(
+            "Renaming '{OldFileName}' to '{NewFileName}' ...",
+            _fileInfo.FullName,
+            backupFile
+        );
+        File.Move(_fileInfo.FullName, backupFile, false);
 
         // Set timestamps on remuxed file from original timestamps
         string? createdDate = _exifToolJson!.GetDateString();
@@ -436,7 +462,7 @@ public class ProcessTask(
         }
 
         // Queue remuxed file for further processing
-        Console.WriteLine($"INFORMATION: Queuing '{outputFile}' for further processing.");
+        Log.Information("Queuing '{FileName}' for further processing.", outputFile);
         _fileNameBag.Add(outputFile);
         return false;
     }
@@ -450,31 +476,35 @@ public class ProcessTask(
         }
 
         // Only some file types are supported
-        if (!_setdateExtensions.Contains(_fileInfo!.Extension.ToLower()))
+        if (!_setdateExtensions.Contains(_fileInfo.Extension.ToLower()))
         {
             return true;
         }
 
         // Try to infer the date from the path
         string createdDate = "";
-        if (!InferCreatedDate(ref createdDate))
+        if (!DateFromPath.InferCreatedDate(_fileInfo.FullName, ref createdDate))
         {
             return true;
         }
 
         // Backup original file
-        string backupFile = GetBackupFileName(_fileInfo!.FullName);
-        Console.WriteLine(
-            $"INFORMATION: Creating backup '{_fileInfo!.FullName}' to '{backupFile}' ..."
+        string backupFile = GetBackupFileName(_fileInfo.FullName);
+        Log.Information(
+            "Creating backup '{OldFileName}' to '{NewFileName}' ...",
+            _fileInfo.FullName,
+            backupFile
         );
-        File.Copy(_fileInfo!.FullName, backupFile, false);
+        File.Copy(_fileInfo.FullName, backupFile, false);
 
         // Set the created date using exiftool
-        Console.WriteLine(
-            $"INFORMATION: Setting created date to '{createdDate}': '{_fileInfo!.FullName}'."
+        Log.Information(
+            "Setting created date to '{CreatedDate}': '{FileName}'.",
+            createdDate,
+            _fileInfo.FullName
         );
         string[] arguments;
-        if (_fileInfo!.Extension.ToLower() == ".mp4")
+        if (_fileInfo.Extension.ToLower() == ".mp4")
         {
             arguments =
             [
@@ -482,7 +512,7 @@ public class ProcessTask(
                 "-overwrite_original",
                 $"-QuickTime:CreateDate={createdDate}",
                 $"-QuickTime:ModifyDate={createdDate}",
-                _fileInfo!.FullName,
+                _fileInfo.FullName,
             ];
         }
         else
@@ -493,7 +523,7 @@ public class ProcessTask(
                 "-overwrite_original",
                 $"-EXIF:CreateDate={createdDate}",
                 $"-EXIF:DateTimeOriginal={createdDate}",
-                _fileInfo!.FullName,
+                _fileInfo.FullName,
             ];
         }
         BufferedCommandResult result = await Cli.Wrap("exiftool")
@@ -501,209 +531,9 @@ public class ProcessTask(
             .ExecuteBufferedAsync();
 
         // Queue file for further processing
-        Console.WriteLine($"INFORMATION: Queuing '{_fileInfo!.FullName}' for further processing.");
-        _fileNameBag.Add(_fileInfo!.FullName);
+        Log.Information("Queuing '{FileName}' for further processing.", _fileInfo.FullName);
+        _fileNameBag.Add(_fileInfo.FullName);
         return false;
-    }
-
-    private bool InferCreatedDate(ref string createdDate)
-    {
-        // Try to extract date from filename
-        DateTime? dateFromPath = ExtractDateFromFilename(_fileInfo!.Name);
-        if (IsDateValid(dateFromPath))
-        {
-            createdDate = dateFromPath!.Value.ToString("yyyy:MM:dd HH:mm:ss");
-            return true;
-        }
-
-        // Try to extract date from directory path
-        dateFromPath = ExtractDateFromPath(_fileInfo!.FullName);
-        if (IsDateValid(dateFromPath))
-        {
-            createdDate = dateFromPath!.Value.ToString("yyyy:MM:dd HH:mm:ss");
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsDateValid(DateTime? date)
-    {
-        return date != null
-            && date.HasValue
-            && date.Value.Year >= 1900
-            && date.Value.Year <= DateTime.Now.Year;
-    }
-
-    private static DateTime? ExtractDateFromFilename(string fileName)
-    {
-        // Pattern 1: YYYYMMDD_HHMMSS format (e.g., 20210502_200152957_iOS-1747.jpg)
-        var pattern1 = new Regex(@"(\d{8})_(\d{6,9})");
-        var match1 = pattern1.Match(fileName);
-        if (match1.Success)
-        {
-            if (
-                DateTime.TryParseExact(
-                    match1.Groups[1].Value,
-                    "yyyyMMdd",
-                    null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime date1
-                )
-            )
-            {
-                string timeStr = match1.Groups[2].Value.PadRight(6, '0').Substring(0, 6); // Take first 6 digits for HHMMSS
-                if (
-                    DateTime.TryParseExact(
-                        timeStr,
-                        "HHmmss",
-                        null,
-                        System.Globalization.DateTimeStyles.None,
-                        out DateTime time1
-                    )
-                )
-                {
-                    return date1.Date.Add(time1.TimeOfDay);
-                }
-                return date1;
-            }
-        }
-
-        // Pattern 2: YYYYMMDD format without time (e.g., EX_20030219_3378.jpg, PV_20090709_0081.mp4)
-        var pattern2 = new Regex(@"(\d{8})");
-        var match2 = pattern2.Match(fileName);
-        if (match2.Success)
-        {
-            if (
-                DateTime.TryParseExact(
-                    match2.Groups[1].Value,
-                    "yyyyMMdd",
-                    null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime date2
-                )
-            )
-            {
-                return date2;
-            }
-        }
-
-        // Pattern 3: YYYY-MM-DD format (e.g., PHOTO-2024-06-22-07-56-41, WhatsApp Image 2024-06-30)
-        var pattern3 = new Regex(@"(\d{4})-(\d{2})-(\d{2})");
-        var match3 = pattern3.Match(fileName);
-        if (match3.Success)
-        {
-            if (
-                DateTime.TryParse(
-                    $"{match3.Groups[1].Value}-{match3.Groups[2].Value}-{match3.Groups[3].Value}",
-                    out DateTime date3
-                )
-            )
-            {
-                // Try to extract time if present (HH-MM-SS format)
-                var timePattern = new Regex(
-                    $@"{Regex.Escape(match3.Value)}-(\d{{2}})-(\d{{2}})-(\d{{2}})"
-                );
-                var timeMatch = timePattern.Match(fileName);
-                if (timeMatch.Success)
-                {
-                    if (
-                        int.TryParse(timeMatch.Groups[1].Value, out int hours)
-                        && int.TryParse(timeMatch.Groups[2].Value, out int minutes)
-                        && int.TryParse(timeMatch.Groups[3].Value, out int seconds)
-                        && hours <= 23
-                        && minutes <= 59
-                        && seconds <= 59
-                    )
-                    {
-                        return date3.Date.Add(new TimeSpan(hours, minutes, seconds));
-                    }
-                }
-                return date3;
-            }
-        }
-
-        // Pattern 4: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
-        var pattern4 = new Regex(@"(\d{4})\s+(\d{2})\s+(\d{2})");
-        var match4 = pattern4.Match(fileName);
-        if (match4.Success)
-        {
-            if (
-                DateTime.TryParse(
-                    $"{match4.Groups[1].Value}-{match4.Groups[2].Value}-{match4.Groups[3].Value}",
-                    out DateTime date4
-                )
-            )
-            {
-                return date4;
-            }
-        }
-
-        // /data/media/Pictures_Archive/Lumia/2015-11-18/garden-photo.jpg
-        // /data/media/Pictures_Archive/DV7/MP Navigator EX/2014_07_14/scan 2014 07 03_0003.tif
-
-        return null;
-    }
-
-    private static DateTime? ExtractDateFromPath(string fullPath)
-    {
-        // Extract date from directory structure (e.g., /2021/2021-05-02/)
-        var pathPattern = new Regex(@"[/\\](\d{4})[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
-        var pathMatch = pathPattern.Match(fullPath);
-        if (pathMatch.Success)
-        {
-            string yearFromDir = pathMatch.Groups[1].Value;
-            string fullDate =
-                $"{pathMatch.Groups[2].Value}-{pathMatch.Groups[3].Value}-{pathMatch.Groups[4].Value}";
-
-            if (DateTime.TryParse(fullDate, out DateTime pathDate))
-            {
-                return pathDate;
-            }
-        }
-
-        // Extract YYYY-MM-DD format anywhere in the path (e.g., /Lumia/2015-11-18/)
-        var dateAnywherePattern = new Regex(@"[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
-        var dateAnywhereMatch = dateAnywherePattern.Match(fullPath);
-        if (dateAnywhereMatch.Success)
-        {
-            string dateString =
-                $"{dateAnywhereMatch.Groups[1].Value}-{dateAnywhereMatch.Groups[2].Value}-{dateAnywhereMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime dateAnywhere))
-            {
-                return dateAnywhere;
-            }
-        }
-
-        // Extract YYYY_MM_DD format anywhere in the path (e.g., /MP Navigator EX/2010_01_21/)
-        var dateUnderscorePattern = new Regex(@"[/\\](\d{4})_(\d{2})_(\d{2})[/\\]");
-        var dateUnderscoreMatch = dateUnderscorePattern.Match(fullPath);
-        if (dateUnderscoreMatch.Success)
-        {
-            string dateString =
-                $"{dateUnderscoreMatch.Groups[1].Value}-{dateUnderscoreMatch.Groups[2].Value}-{dateUnderscoreMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime dateUnderscore))
-            {
-                return dateUnderscore;
-            }
-        }
-
-        // Fallback: Try to extract just year from path
-        var yearPattern = new Regex(@"[/\\](\d{4})[/\\]");
-        var yearMatch = yearPattern.Match(fullPath);
-        if (yearMatch.Success)
-        {
-            if (
-                int.TryParse(yearMatch.Groups[1].Value, out int year)
-                && year >= 1900
-                && year <= DateTime.Now.Year
-            )
-            {
-                return new DateTime(year, 1, 1);
-            }
-        }
-
-        return null;
     }
 
     private static string GetBackupFileName(string originalFileName)

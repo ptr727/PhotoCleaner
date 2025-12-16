@@ -85,5 +85,41 @@
                 "clear": false
             }
         },
+        {
+            "label": "Test PhotoCleaner",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "PhotoCleanerTests/PhotoCleanerTests.csproj",
+                "--verbosity",
+                "normal"
+            ],
+            "group": "test",
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            },
+            "dependsOn": [".Net Build"]
+        },
+        {
+            "label": "Test with Coverage",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "PhotoCleanerTests/PhotoCleanerTests.csproj",
+                "--collect",
+                "XPlat Code Coverage",
+                "--verbosity",
+                "normal"
+            ],
+            "group": "test",
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            },
+            "dependsOn": [".Net Build"]
+        }
     ]
 }

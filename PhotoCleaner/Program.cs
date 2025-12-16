@@ -1,105 +1,105 @@
 using System.Collections.Concurrent;
+using System.Globalization;
+using System.Reflection;
+using Serilog;
+using Serilog.Debugging;
+using Serilog.Events;
+using Serilog.Sinks.SystemConsole.Themes;
 
-namespace PhotoCleaner
+namespace PhotoCleaner;
+
+internal class Program
 {
-    internal class Program
+    private readonly ConcurrentBag<string> _fileNameBag = [];
+    private readonly ConcurrentBag<string> _unknownExtensionBag = [];
+
+    public static async Task<int> Main(string[] args)
     {
-        public static async Task<int> Main(string[] args)
+        CreateLogger();
+
+        return await CommandLine.Invoke(args);
+    }
+
+    internal async Task<int> Execute(string directoryPath, bool dryRun)
+    {
+        int failedCount = 0;
+        try
         {
-            if (args.Length == 0)
+            // Get all files in root directory
+            Log.Information("Enumerating files in '{DirectoryPath}' ...", directoryPath);
+            DirectoryInfo rootDir = new(directoryPath);
+            foreach (FileInfo file in rootDir.GetFiles("*", SearchOption.TopDirectoryOnly))
             {
-                Console.WriteLine("Please provide a directory path as an argument.");
-                return 1;
+                _fileNameBag.Add(file.FullName);
             }
 
-            string directoryPath = args[0];
-            if (!Directory.Exists(directoryPath))
-            {
-                Console.WriteLine($"Directory not found: '{directoryPath}'");
-                return 1;
-            }
+            // Get all top level directories
+            DirectoryInfo[] topLevelDirs = rootDir.GetDirectories();
+            topLevelDirs
+                .AsParallel()
+                .ForAll(dir =>
+                {
+                    // Get all files in each directory
+                    foreach (FileInfo file in dir.GetFiles("*", SearchOption.AllDirectories))
+                    {
+                        _fileNameBag.Add(file.FullName);
+                    }
+                });
 
-            Program program = new();
-            return await program.Execute(directoryPath);
+            // Process files in parallel
+            Log.Information("Processing {FileCount} files ...", _fileNameBag.Count);
+            _fileNameBag
+                .AsParallel()
+                .ForAll(async fileName =>
+                {
+                    ProcessTask processTask = new(
+                        _fileNameBag,
+                        _unknownExtensionBag,
+                        new FileInfo(fileName)
+                    );
+                    if (!await processTask.Execute())
+                    {
+                        Interlocked.Increment(ref failedCount);
+                    }
+                });
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex, MethodBase.GetCurrentMethod()?.Name))
+        {
+            return 1;
+        }
+        Log.Information("Processing complete.");
+
+        if (_unknownExtensionBag.Count > 0)
+        {
+            List<string> unknownExtensionList = _unknownExtensionBag.ToList();
+            unknownExtensionList.Sort();
+            foreach (string extension in unknownExtensionList)
+            {
+                Log.Warning("Unknown file extension: '{Extension}'", extension);
+            }
         }
 
-        private readonly ConcurrentBag<string> _fileNameBag = [];
-        private readonly ConcurrentBag<string> _unknownExtensionBag = [];
-        const int _threadCount = 2;
-
-        private async Task<int> Execute(string directoryPath)
+        if (failedCount > 0)
         {
-            int failedCount = 0;
-            try
-            {
-                Console.WriteLine($"Enumerating files in '{directoryPath}' ...");
-
-                // Get all files in root directory
-                DirectoryInfo rootDir = new(directoryPath);
-                foreach (FileInfo file in rootDir.GetFiles("*", SearchOption.TopDirectoryOnly))
-                {
-                    _fileNameBag.Add(file.FullName);
-                }
-
-                // Get all top level directories
-                DirectoryInfo[] topLevelDirs = rootDir.GetDirectories();
-                topLevelDirs
-                    .AsParallel()
-                    .WithDegreeOfParallelism(_threadCount)
-                    .ForAll(dir =>
-                    {
-                        // Get all files in each directory
-                        foreach (FileInfo file in dir.GetFiles("*", SearchOption.AllDirectories))
-                        {
-                            _fileNameBag.Add(file.FullName);
-                        }
-                    });
-
-                // Process files in parallel
-                Console.WriteLine($"Processing {_fileNameBag.Count} files ...");
-                _fileNameBag
-                    .AsParallel()
-                    .WithDegreeOfParallelism(_threadCount)
-                    .ForAll(async fileName =>
-                    {
-                        ProcessTask processTask = new(
-                            _fileNameBag,
-                            _unknownExtensionBag,
-                            new FileInfo(fileName)
-                        );
-                        if (!await processTask.Execute())
-                        {
-                            Interlocked.Increment(ref failedCount);
-                        }
-                    });
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.ToString());
-                return 1;
-            }
-            Console.WriteLine("");
-            Console.WriteLine("Processing complete.");
-
-            if (_unknownExtensionBag.Count > 0)
-            {
-                List<string> unknownExtensionList = _unknownExtensionBag.ToList();
-                unknownExtensionList.Sort();
-                Console.WriteLine("");
-                Console.WriteLine("Unknown extensions:");
-                foreach (string extension in unknownExtensionList)
-                {
-                    Console.WriteLine($"'{extension}'");
-                }
-            }
-
-            if (failedCount > 0)
-            {
-                Console.WriteLine("");
-                Console.WriteLine($"Potential problem files: {failedCount}");
-            }
-
-            return 0;
+            Log.Warning("Potential problem files: {FailedCount}", failedCount);
         }
+
+        return 0;
+    }
+
+    private static void CreateLogger()
+    {
+        // Enable Serilog debug output to the console
+        SelfLog.Enable(Console.Error);
+        LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
+            .MinimumLevel.Is(LogEventLevel.Information)
+            .Enrich.WithThreadId()
+            .WriteTo.Console(
+                theme: AnsiConsoleTheme.Code,
+                // Remove lj from default to quote strings
+                outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] <{ThreadId}> {Message}{NewLine}{Exception}",
+                formatProvider: CultureInfo.InvariantCulture
+            );
+        Log.Logger = loggerConfiguration.CreateLogger();
     }
 }
