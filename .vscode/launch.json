@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": ".NET Core Attach",
+            "type": "coreclr",
+            "request": "attach"
+        },
+        {
+            "name": "Test",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "/data/media/AImport",
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+    ]
+}

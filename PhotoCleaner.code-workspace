@@ -1,0 +1,46 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "cSpell.words": [
+            "Exif",
+            "Xunit"
+        ],
+        "dotnet.defaultSolution": "PhotoCleaner.slnx",
+        "files.trimTrailingWhitespace": true,
+        "[markdown]": {
+            "files.trimTrailingWhitespace": false
+        },
+        "[plaintext]": {
+            "files.trimTrailingWhitespace": false
+        },
+        "[csharp]": {
+            "editor.formatOnSave": true,
+            "editor.defaultFormatter": "csharpier.csharpier-vscode"
+        },
+        "[json][jsonc]": {
+            "editor.defaultFormatter": "vscode.json-language-features"
+        },
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.renderWhitespace": "boundary",
+        "dotnet.formatting.organizeImportsOnFormat": true,
+        "csharp.debug.symbolOptions.searchNuGetOrgSymbolServer": true,
+        "csharp.debug.symbolOptions.searchMicrosoftSymbolServer": true,
+        "files.encoding": "utf8",
+        "csharp.debug.justMyCode": false
+    },
+    "extensions": {
+        "recommendations": [
+            "davidanson.vscode-markdownlint",
+            "gruntfuggly.todo-tree",
+            "ms-dotnettools.csdevkit",
+            "streetsidesoftware.code-spell-checker",
+            "editorconfig.editorconfig",
+            "csharpier.csharpier-vscode",
+            "github.vscode-github-actions"
+        ]
+    }
+}

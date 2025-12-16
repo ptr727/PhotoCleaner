@@ -1,0 +1,89 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": ".Net Build",
+            "type": "dotnet",
+            "task": "build",
+            "group": "build",
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": ".Net Format",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "format",
+                "--verify-no-changes",
+                "--verbosity=detailed"
+            ],
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            },
+            "dependsOn": [
+                ".Net Build"
+            ]
+        },
+        {
+            "label": "CSharpier Format",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "csharpier",
+                "format",
+                "--log-level=debug",
+                "."
+            ],
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": ".Net Tool Update",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "tool",
+                "update",
+                "--all"
+            ],
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Husky.Net Run",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "husky",
+                "run"
+            ],
+            "problemMatcher": [
+                "$msCompile"
+            ],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+    ]
+}
