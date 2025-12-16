@@ -96,7 +96,7 @@ dotnet csharpier format --log-level=debug .
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
 - **Test Categories**:
   - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
-  - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests) 
+  - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests)
   - `CommandLineTests.cs`: Command line parsing and validation (17 tests)
 - **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling), integration scenarios
 
