@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -292,22 +293,27 @@ public class ProcessTask(
             return false;
         }
 
-        // Short videos with matching HEIC file
+        // Live photos, short videos with matching HEIC or JPEG file
         if (duration <= 3.0)
         {
-            string heicFilePathLower = Path.ChangeExtension(_fileInfo.FullName, ".heic");
-            string heicFilePathUpper = Path.ChangeExtension(_fileInfo.FullName, ".HEIC");
-            if (File.Exists(heicFilePathLower) || File.Exists(heicFilePathUpper))
+            string[] videoImageExtensions = [".heic", ".jpg", ".jpeg"];
+            foreach (string extension in videoImageExtensions)
             {
-                Console.WriteLine(
-                    $"INFORMATION: {duration}s video clip detected with matching HEIC file: '{_fileInfo!.FullName}'."
-                );
-                string backupFile = GetBackupFileName(_fileInfo!.FullName);
-                Console.WriteLine(
-                    $"INFORMATION: Renaming '{_fileInfo!.FullName}' to '{backupFile}' ..."
-                );
-                File.Move(_fileInfo!.FullName, backupFile, false);
-                return false;
+                if (
+                    File.Exists(Path.ChangeExtension(_fileInfo.FullName, extension.ToLower()))
+                    || File.Exists(Path.ChangeExtension(_fileInfo.FullName, extension.ToUpper()))
+                )
+                {
+                    Console.WriteLine(
+                        $"INFORMATION: {duration}s video clip detected with matching image file: '{_fileInfo!.FullName}'."
+                    );
+                    string backupFile = GetBackupFileName(_fileInfo!.FullName);
+                    Console.WriteLine(
+                        $"INFORMATION: Renaming '{_fileInfo!.FullName}' to '{backupFile}' ..."
+                    );
+                    File.Move(_fileInfo!.FullName, backupFile, false);
+                    return false;
+                }
             }
         }
 
