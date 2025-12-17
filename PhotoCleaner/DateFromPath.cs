@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace PhotoCleaner;
 
-internal static class DateFromPath
+internal static partial class DateFromPath
 {
     internal static bool InferCreatedDate(string fullPath, ref string createdDate)
     {
@@ -35,7 +35,7 @@ internal static class DateFromPath
     internal static DateTime? ExtractDateFromFilename(string fileName)
     {
         // Pattern 1: YYYYMMDD_HHMMSS format (e.g., 20210502_200152957_iOS-1747.jpg)
-        Regex pattern1 = new(@"(\d{8})_(\d{6,9})");
+        Regex pattern1 = MyRegex12();
         Match match1 = pattern1.Match(fileName);
         if (match1.Success)
         {
@@ -63,7 +63,7 @@ internal static class DateFromPath
         }
 
         // Pattern 2: YYYYMMDD format without time (e.g., EX_20030219_3378.jpg, PV_20090709_0081.mp4)
-        Regex pattern2 = new(@"(\d{8})");
+        Regex pattern2 = MyRegex11();
         Match match2 = pattern2.Match(fileName);
         if (match2.Success)
         {
@@ -82,7 +82,7 @@ internal static class DateFromPath
         }
 
         // Pattern 3: YYYY-MM-DD with underscore time separator (e.g., Foo_2021-05-02_200152957_iOS.jpg)
-        Regex pattern3 = new(@"(\d{4})-(\d{2})-(\d{2})_(\d{6,9})");
+        Regex pattern3 = MyRegex10();
         Match match3 = pattern3.Match(fileName);
         if (match3.Success)
         {
@@ -107,7 +107,7 @@ internal static class DateFromPath
         }
 
         // Pattern 3b: YYYY-MM-DD format with HH-MM-SS time (e.g., PHOTO-2024-06-22-07-56-41)
-        Regex pattern3b = new(@"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})");
+        Regex pattern3b = MyRegex9();
         Match match3b = pattern3b.Match(fileName);
         if (match3b.Success)
         {
@@ -134,7 +134,7 @@ internal static class DateFromPath
         }
 
         // Pattern 3c: YYYY-MM-DD format without time (e.g., WhatsApp Image 2024-06-30)
-        Regex pattern3c = new(@"(\d{4})-(\d{2})-(\d{2})");
+        Regex pattern3c = MyRegex8();
         Match match3c = pattern3c.Match(fileName);
         if (match3c.Success)
         {
@@ -150,7 +150,7 @@ internal static class DateFromPath
         }
 
         // Pattern 4: YYYY_MM_DD format with optional time (e.g., Foo_2021_05_02_200152957_iOS-1747.jpg)
-        Regex pattern4 = new(@"(\d{4})_(\d{2})_(\d{2})_(\d{6,9})");
+        Regex pattern4 = MyRegex7();
         Match match4 = pattern4.Match(fileName);
         if (match4.Success)
         {
@@ -175,7 +175,7 @@ internal static class DateFromPath
         }
 
         // Pattern 5: YYYY_MM_DD format without time (e.g., Photo_2021_05_02.jpg)
-        Regex pattern5 = new(@"(\d{4})_(\d{2})_(\d{2})");
+        Regex pattern5 = MyRegex6();
         Match match5 = pattern5.Match(fileName);
         if (match5.Success)
         {
@@ -191,7 +191,7 @@ internal static class DateFromPath
         }
 
         // Pattern 6: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
-        Regex pattern6 = new(@"(\d{4})\s+(\d{2})\s+(\d{2})");
+        Regex pattern6 = MyRegex5();
         Match match6 = pattern6.Match(fileName);
         if (!match6.Success)
         {
@@ -214,7 +214,7 @@ internal static class DateFromPath
     internal static DateTime? ExtractDateFromPath(string fullPath)
     {
         // Extract date from directory structure (e.g., /2021/2021-05-02/)
-        Regex pathPattern = new(@"[/\\](\d{4})[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
+        Regex pathPattern = MyRegex();
         Match pathMatch = pathPattern.Match(fullPath);
         if (pathMatch.Success)
         {
@@ -228,7 +228,7 @@ internal static class DateFromPath
         }
 
         // Extract YYYY-MM-DD format anywhere in the path (e.g., /Lumia/2015-11-18/)
-        Regex dateAnywherePattern = new(@"[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
+        Regex dateAnywherePattern = MyRegex4();
         Match dateAnywhereMatch = dateAnywherePattern.Match(fullPath);
         if (dateAnywhereMatch.Success)
         {
@@ -241,7 +241,7 @@ internal static class DateFromPath
         }
 
         // Extract YYYY_MM_DD format anywhere in the path (e.g., /MP Navigator EX/2010_01_21/)
-        Regex dateUnderscorePattern = new(@"[/\\](\d{4})_(\d{2})_(\d{2})[/\\]");
+        Regex dateUnderscorePattern = MyRegex3();
         Match dateUnderscoreMatch = dateUnderscorePattern.Match(fullPath);
         if (dateUnderscoreMatch.Success)
         {
@@ -254,7 +254,7 @@ internal static class DateFromPath
         }
 
         // Extract YYYYMMDD format anywhere in the path (e.g., /photos/20210502/)
-        Regex dateCompactPattern = new(@"[/\\](\d{8})[/\\]");
+        Regex dateCompactPattern = MyRegex2();
         Match dateCompactMatch = dateCompactPattern.Match(fullPath);
         if (dateCompactMatch.Success)
         {
@@ -273,22 +273,52 @@ internal static class DateFromPath
         }
 
         // Fallback: Try to extract just year from path
-        Regex yearPattern = new(@"[/\\](\d{4})[/\\]");
+        Regex yearPattern = MyRegex1();
         Match yearMatch = yearPattern.Match(fullPath);
-        if (!yearMatch.Success)
-        {
-            return null;
-        }
-
-        if (
-            int.TryParse(yearMatch.Groups[1].Value, out int year)
+        return !yearMatch.Success ? null
+            : int.TryParse(yearMatch.Groups[1].Value, out int year)
             && year >= 1900
             && year <= DateTime.Now.Year
-        )
-        {
-            return new DateTime(year, 1, 1);
-        }
-
-        return null;
+                ? new DateTime(year, 1, 1)
+            : null;
     }
+
+    [GeneratedRegex(@"[/\\](\d{4})[/\\](\d{4})-(\d{2})-(\d{2})[/\\]")]
+    private static partial Regex MyRegex();
+
+    [GeneratedRegex(@"[/\\](\d{4})[/\\]")]
+    private static partial Regex MyRegex1();
+
+    [GeneratedRegex(@"[/\\](\d{8})[/\\]")]
+    private static partial Regex MyRegex2();
+
+    [GeneratedRegex(@"[/\\](\d{4})_(\d{2})_(\d{2})[/\\]")]
+    private static partial Regex MyRegex3();
+
+    [GeneratedRegex(@"[/\\](\d{4})-(\d{2})-(\d{2})[/\\]")]
+    private static partial Regex MyRegex4();
+
+    [GeneratedRegex(@"(\d{4})\s+(\d{2})\s+(\d{2})")]
+    private static partial Regex MyRegex5();
+
+    [GeneratedRegex(@"(\d{4})_(\d{2})_(\d{2})")]
+    private static partial Regex MyRegex6();
+
+    [GeneratedRegex(@"(\d{4})_(\d{2})_(\d{2})_(\d{6,9})")]
+    private static partial Regex MyRegex7();
+
+    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})")]
+    private static partial Regex MyRegex8();
+
+    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})")]
+    private static partial Regex MyRegex9();
+
+    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})_(\d{6,9})")]
+    private static partial Regex MyRegex10();
+
+    [GeneratedRegex(@"(\d{8})")]
+    private static partial Regex MyRegex11();
+
+    [GeneratedRegex(@"(\d{8})_(\d{6,9})")]
+    private static partial Regex MyRegex12();
 }

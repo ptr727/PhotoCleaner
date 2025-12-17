@@ -16,13 +16,13 @@ internal static class CommandLine
         Option<DirectoryInfo> pathOption = new("--path", "-p")
         {
             Description = "The directory path to process.",
-            Required = true
+            Required = true,
         };
-        pathOption.AcceptExistingOnly();
+        _ = pathOption.AcceptExistingOnly();
 
         Option<bool> dryRunOption = new("--dryrun", "-d")
         {
-            Description = "Perform a dry run without making changes."
+            Description = "Perform a dry run without making changes.",
         };
 
         RootCommand rootCommand = new(
@@ -30,7 +30,7 @@ internal static class CommandLine
         )
         {
             pathOption,
-            dryRunOption
+            dryRunOption,
         };
         rootCommand.SetAction(parseResult =>
         {

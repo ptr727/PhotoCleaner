@@ -7,7 +7,7 @@ namespace PhotoCleanerTests;
 public class CommandLineTests
 {
     [Fact]
-    public void ParseArguments_ValidPathAndDryRun_ParsesCorrectly()
+    public void ParseArgumentsValidPathAndDryRunParsesCorrectly()
     {
         // Arrange - Use current directory which should exist
         string existingPath = Directory.GetCurrentDirectory();
@@ -25,7 +25,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_ValidPathWithShortOptions_ParsesCorrectly()
+    public void ParseArgumentsValidPathWithShortOptionsParsesCorrectly()
     {
         // Arrange - Use current directory which should exist
         string existingPath = Directory.GetCurrentDirectory();
@@ -43,7 +43,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_ValidPathOnly_ParsesCorrectly()
+    public void ParseArgumentsValidPathOnlyParsesCorrectly()
     {
         // Arrange - Use current directory which should exist
         string existingPath = Directory.GetCurrentDirectory();
@@ -61,7 +61,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_MissingPath_ReturnsError()
+    public void ParseArgumentsMissingPathReturnsError()
     {
         // Arrange
         string[] args = ["--dryrun"];
@@ -76,7 +76,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_EmptyArgs_ReturnsError()
+    public void ParseArgumentsEmptyArgsReturnsError()
     {
         // Arrange
         string[] args = [];
@@ -91,7 +91,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_NonExistentDirectory_ReturnsValidationError()
+    public void ParseArgumentsNonExistentDirectoryReturnsValidationError()
     {
         // Arrange
         const string nonExistentPath = "/this/path/should/not/exist/123456";
@@ -107,7 +107,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_ExistingDirectory_NoValidationErrors()
+    public void ParseArgumentsExistingDirectoryNoValidationErrors()
     {
         // Arrange - Use current directory which should exist
         string existingPath = Directory.GetCurrentDirectory();
@@ -124,7 +124,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_InvalidOption_ReturnsError()
+    public void ParseArgumentsInvalidOptionReturnsError()
     {
         // Arrange
         string[] args = ["--path", "/test/path", "--invalid-option"];
@@ -139,7 +139,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_PathWithoutValue_ReturnsError()
+    public void ParseArgumentsPathWithoutValueReturnsError()
     {
         // Arrange
         string[] args = ["--path"];
@@ -153,7 +153,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void ParseArguments_HelpOption_ParsesCorrectly()
+    public void ParseArgumentsHelpOptionParsesCorrectly()
     {
         // Arrange
         string[] args = ["--help"];
@@ -172,7 +172,7 @@ public class CommandLineTests
     [InlineData("-p", "/test", "-d")]
     [InlineData("--path", "/test/with spaces")]
     [InlineData("-p", "/test/with-dashes")]
-    public void ParseArguments_VariousValidInputs_ParsesWithoutErrors(params string[] args)
+    public void ParseArgumentsVariousValidInputsParsesWithoutErrors(params string[] args)
     {
         // Act
         (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
@@ -187,7 +187,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void RootCommand_HasCorrectDescription()
+    public void RootCommandHasCorrectDescription()
     {
         // Act
         (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
@@ -200,7 +200,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void PathOption_HasCorrectProperties()
+    public void PathOptionHasCorrectProperties()
     {
         // Act
         (Option<DirectoryInfo> pathOption, Option<bool> _, RootCommand _) = CreateTestCommand();
@@ -212,7 +212,7 @@ public class CommandLineTests
     }
 
     [Fact]
-    public void DryRunOption_HasCorrectProperties()
+    public void DryRunOptionHasCorrectProperties()
     {
         // Act
         (Option<DirectoryInfo> _, Option<bool> dryRunOption, RootCommand _) = CreateTestCommand();

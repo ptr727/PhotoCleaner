@@ -126,7 +126,7 @@ public class ProcessTask(
     private bool DetectDoubleExtensions()
     {
         string[] parts = fileInfo.Name.ToLower().Split('.');
-        string[] extensions = _processExtensions.Select(item => item.Trim('.').ToLower()).ToArray();
+        string[] extensions = [.. _processExtensions.Select(item => item.Trim('.').ToLower())];
         int extensionCount = parts.Count(part => extensions.Contains(part));
         if (extensionCount <= 1)
         {

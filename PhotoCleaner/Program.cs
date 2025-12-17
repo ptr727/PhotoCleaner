@@ -13,7 +13,7 @@ internal class Program
     private readonly List<string> _unknownExtensionsList = [];
     private readonly Lock _unknownExtensionsLock = new();
 
-    private const int DegreeOfParallelism = 2;
+    private readonly int _degreeOfParallelism = int.Max(Environment.ProcessorCount, 4);
 
     public static async Task<int> Main(string[] args)
     {
@@ -39,7 +39,7 @@ internal class Program
             DirectoryInfo[] topLevelDirs = rootDir.GetDirectories();
             topLevelDirs
                 .AsParallel()
-                .WithDegreeOfParallelism(DegreeOfParallelism)
+                .WithDegreeOfParallelism(_degreeOfParallelism)
                 .ForAll(dir =>
                 {
                     // Get all files in each directory
@@ -53,7 +53,7 @@ internal class Program
             Log.Information("Processing {FileCount} files ...", _fileNameBag.Count);
             _fileNameBag
                 .AsParallel()
-                .WithDegreeOfParallelism(DegreeOfParallelism)
+                .WithDegreeOfParallelism(_degreeOfParallelism)
                 .ForAll(fileName =>
                 {
                     if (
