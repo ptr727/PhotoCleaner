@@ -74,9 +74,11 @@ public class ExifToolJson
     {
         // EXIF:DateTimeOriginal
         // EXIF:CreateDate
+        // XMP:CreateDate
         // QuickTime:CreateDate
         return !string.IsNullOrEmpty(EXIFDateTimeOriginal)
             || !string.IsNullOrEmpty(EXIFCreateDate)
+            || !string.IsNullOrEmpty(XMPCreateDate)
             || (
                 !string.IsNullOrEmpty(QuickTimeCreateDate)
                 && QuickTimeCreateDate != "0000:00:00 00:00:00"
@@ -85,16 +87,25 @@ public class ExifToolJson
 
     public string? GetDateString()
     {
+        // EXIF:DateTimeOriginal
         if (!string.IsNullOrEmpty(EXIFDateTimeOriginal))
         {
             return EXIFDateTimeOriginal;
         }
 
+        // EXIF:CreateDate
         if (!string.IsNullOrEmpty(EXIFCreateDate))
         {
             return EXIFCreateDate;
         }
 
+        // XMP:CreateDate
+        if (!string.IsNullOrEmpty(XMPCreateDate))
+        {
+            return XMPCreateDate;
+        }
+
+        // QuickTime:CreateDate
         if (
             !string.IsNullOrEmpty(QuickTimeCreateDate)
             && QuickTimeCreateDate != "0000:00:00 00:00:00"
@@ -103,16 +114,19 @@ public class ExifToolJson
             return QuickTimeCreateDate;
         }
 
+        // H264:DateTimeOriginal
         if (!string.IsNullOrEmpty(H264DateTimeOriginal))
         {
             return H264DateTimeOriginal;
         }
 
+        // ASF:CreationDate
         if (!string.IsNullOrEmpty(ASFCreationDate))
         {
             return ASFCreationDate;
         }
 
+        // Matroska:DateTimeOriginal
         return !string.IsNullOrEmpty(RIFFDateTimeOriginal) ? RIFFDateTimeOriginal : null;
     }
 }

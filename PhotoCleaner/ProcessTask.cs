@@ -38,6 +38,7 @@ public class ProcessTask(
         ".nef",
         ".orf",
         ".png",
+        ".psd",
         ".rw2",
         ".tif",
         ".tiff",
@@ -48,13 +49,14 @@ public class ProcessTask(
     private readonly string[] _reencodeAudioExtensions = [".mov"];
     private readonly string[] _setdateExtensions =
     [
-        ".jpg",
+        ".heic",
         ".jpeg",
+        ".jpg",
         ".mp4",
         ".png",
+        ".psd",
         ".tif",
         ".tiff",
-        ".heic",
     ];
     private readonly string[] _liveVideoExtensions = [".mp4", ".mov"];
     private readonly string[] _liveVideoImageExtensions = [".heic", ".jpg", ".jpeg"];
@@ -570,6 +572,7 @@ public class ProcessTask(
         // Only some file types are supported
         if (!_setdateExtensions.Contains(fileInfo.Extension.ToLower()))
         {
+            // Not supported for this file type
             return true;
         }
 
@@ -577,6 +580,7 @@ public class ProcessTask(
         string createdDate = "";
         if (!DateFromPath.InferCreatedDate(fileInfo.FullName, ref createdDate))
         {
+            // No date inferred from path
             return true;
         }
         Log.Information(
