@@ -5,9 +5,14 @@ namespace PhotoCleanerTests;
 public class DateInferenceTests
 {
     [Theory]
+    [InlineData("Foo_2021_05_02_200152957_iOS-1747.jpg", "2021:05:02 20:01:52")]
+    [InlineData("Foo_2021_05_02_iOS-1747.jpg", "2021:05:02 00:00:00")]
+    [InlineData("Foo_2021-05-02_200152957_iOS-1747.jpg", "2021:05:02 20:01:52")]
+    [InlineData("Foo_2021-05-02_iOS-1747.jpg", "2021:05:02 00:00:00")]
     [InlineData("20210502_200152957_iOS-1747.jpg", "2021:05:02 20:01:52")]
     [InlineData("20030219_123456.jpg", "2003:02:19 12:34:56")]
     [InlineData("20090709_081500.mov", "2009:07:09 08:15:00")] // 6 digits needed for time
+    [InlineData("20090709.mov", "2009:07:09 00:00:00")]
     [InlineData("20090709_0815.mov", "2009:07:09 00:00:00")] // 4 digits - no time parsing
     [InlineData("EX_20030219_3378.jpg", "2003:02:19 00:00:00")]
     [InlineData("PV_20090709_0081.mp4", "2009:07:09 00:00:00")]
@@ -45,6 +50,8 @@ public class DateInferenceTests
 
     [Theory]
     [InlineData("/photos/2021/2021-05-02/vacation.jpg", "2021:05:02 00:00:00")]
+    [InlineData("/photos/2021/20210502/vacation.jpg", "2021:05:02 00:00:00")]
+    [InlineData("/photos/2021/2021_05_02/vacation.jpg", "2021:05:02 00:00:00")]
     [InlineData("/data/media/Pictures/Lumia/2015-11-18/image.jpg", "2015:11:18 00:00:00")]
     [InlineData("/archive/MP Navigator EX/2014_07_14/scan.tif", "2014:07:14 00:00:00")]
     [InlineData("/backup/photos/2020/file.jpg", "2020:01:01 00:00:00")] // Year only fallback

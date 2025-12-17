@@ -48,6 +48,37 @@ PhotoCleaner -p /home/user/Photos -d
 - **Videos**: MP4, MOV, MTS, M2TS, MKV, AVI, WMV, 3GP
 - **Other**: GIF
 
+## Development Tooling
+
+### Fresh Install
+
+```shell
+winget install Microsoft.DotNet.SDK.10
+winget install Microsoft.VisualStudioCode
+winget install nektos.act
+```
+
+```shell
+dotnet new tool-manifest
+dotnet tool install csharpier
+dotnet tool install husky
+dotnet tool install dotnet-outdated-tool
+dotnet husky install
+dotnet husky add pre-commit -c "dotnet husky run"
+```
+
+### Update Dependencies
+
+```shell
+winget upgrade Microsoft.DotNet.SDK.10
+winget upgrade Microsoft.VisualStudioCode
+winget upgrade nektos.act
+
+```shell
+dotnet tool update --all
+dotnet outdated --upgrade:prompt
+```
+
 ## License
 
 Licensed under the [MIT License][license-link]\

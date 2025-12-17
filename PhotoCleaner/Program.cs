@@ -11,7 +11,10 @@ namespace PhotoCleaner;
 internal class Program
 {
     private readonly ConcurrentBag<string> _fileNameBag = [];
-    private readonly ConcurrentBag<string> _unknownExtensionBag = [];
+    private readonly List<string> _unknownExtensionsList = [];
+    private readonly Lock _unknownExtensionsLock = new();
+
+    private const int _degreeOfParallelism = 1;
 
     public static async Task<int> Main(string[] args)
     {
@@ -37,6 +40,7 @@ internal class Program
             DirectoryInfo[] topLevelDirs = rootDir.GetDirectories();
             topLevelDirs
                 .AsParallel()
+                .WithDegreeOfParallelism(_degreeOfParallelism)
                 .ForAll(dir =>
                 {
                     // Get all files in each directory
@@ -48,32 +52,39 @@ internal class Program
 
             // Process files in parallel
             Log.Information("Processing {FileCount} files ...", _fileNameBag.Count);
-            _fileNameBag
-                .AsParallel()
-                .ForAll(async fileName =>
+            //_fileNameBag
+            //    .AsParallel()
+            //    .WithDegreeOfParallelism(_degreeOfParallelism)
+            //    .ForAll(async fileName =>
+            _ = Parallel.ForEach(
+                _fileNameBag,
+                new ParallelOptions { MaxDegreeOfParallelism = _degreeOfParallelism },
+                async fileName =>
                 {
                     ProcessTask processTask = new(
                         _fileNameBag,
-                        _unknownExtensionBag,
+                        _unknownExtensionsList,
+                        _unknownExtensionsLock,
                         new FileInfo(fileName)
                     );
                     if (!await processTask.Execute())
                     {
-                        Interlocked.Increment(ref failedCount);
+                        _ = Interlocked.Increment(ref failedCount);
                     }
-                });
+                }
+            );
         }
-        catch (Exception ex) when (Log.Logger.LogAndHandle(ex, MethodBase.GetCurrentMethod()?.Name))
+        catch (Exception ex) // when (Log.Logger.LogAndHandle(ex, MethodBase.GetCurrentMethod()?.Name))
         {
+            Log.Fatal(ex, "Fatal error in processing.");
             return 1;
         }
         Log.Information("Processing complete.");
 
-        if (_unknownExtensionBag.Count > 0)
+        if (_unknownExtensionsList.Count > 0)
         {
-            List<string> unknownExtensionList = _unknownExtensionBag.ToList();
-            unknownExtensionList.Sort();
-            foreach (string extension in unknownExtensionList)
+            _unknownExtensionsList.Sort();
+            foreach (string extension in _unknownExtensionsList)
             {
                 Log.Warning("Unknown file extension: '{Extension}'", extension);
             }

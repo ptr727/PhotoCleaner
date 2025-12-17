@@ -87,8 +87,8 @@ internal static class DateFromPath
             }
         }
 
-        // Pattern 3: YYYY-MM-DD format (e.g., PHOTO-2024-06-22-07-56-41, WhatsApp Image 2024-06-30)
-        var pattern3 = new Regex(@"(\d{4})-(\d{2})-(\d{2})");
+        // Pattern 3: YYYY-MM-DD with underscore time separator (e.g., Foo_2021-05-02_200152957_iOS.jpg)
+        var pattern3 = new Regex(@"(\d{4})-(\d{2})-(\d{2})_(\d{6,9})");
         var match3 = pattern3.Match(fileName);
         if (match3.Success)
         {
@@ -99,31 +99,68 @@ internal static class DateFromPath
                 )
             )
             {
-                // Try to extract time if present (HH-MM-SS format)
-                var timePattern = new Regex(
-                    $@"{Regex.Escape(match3.Value)}-(\d{{2}})-(\d{{2}})-(\d{{2}})"
-                );
-                var timeMatch = timePattern.Match(fileName);
-                if (timeMatch.Success)
-                {
-                    if (
-                        int.TryParse(timeMatch.Groups[1].Value, out int hours)
-                        && int.TryParse(timeMatch.Groups[2].Value, out int minutes)
-                        && int.TryParse(timeMatch.Groups[3].Value, out int seconds)
-                        && hours <= 23
-                        && minutes <= 59
-                        && seconds <= 59
+                string timeStr = match3.Groups[4].Value.PadRight(6, '0').Substring(0, 6); // Take first 6 digits for HHMMSS
+                if (
+                    DateTime.TryParseExact(
+                        timeStr,
+                        "HHmmss",
+                        null,
+                        System.Globalization.DateTimeStyles.None,
+                        out DateTime time3
                     )
-                    {
-                        return date3.Date.Add(new TimeSpan(hours, minutes, seconds));
-                    }
+                )
+                {
+                    return date3.Date.Add(time3.TimeOfDay);
                 }
                 return date3;
             }
         }
 
-        // Pattern 4: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
-        var pattern4 = new Regex(@"(\d{4})\s+(\d{2})\s+(\d{2})");
+        // Pattern 3b: YYYY-MM-DD format with HH-MM-SS time (e.g., PHOTO-2024-06-22-07-56-41)
+        var pattern3b = new Regex(@"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})");
+        var match3b = pattern3b.Match(fileName);
+        if (match3b.Success)
+        {
+            if (
+                DateTime.TryParse(
+                    $"{match3b.Groups[1].Value}-{match3b.Groups[2].Value}-{match3b.Groups[3].Value}",
+                    out DateTime date3b
+                )
+            )
+            {
+                if (
+                    int.TryParse(match3b.Groups[4].Value, out int hours)
+                    && int.TryParse(match3b.Groups[5].Value, out int minutes)
+                    && int.TryParse(match3b.Groups[6].Value, out int seconds)
+                    && hours <= 23
+                    && minutes <= 59
+                    && seconds <= 59
+                )
+                {
+                    return date3b.Date.Add(new TimeSpan(hours, minutes, seconds));
+                }
+                return date3b;
+            }
+        }
+
+        // Pattern 3c: YYYY-MM-DD format without time (e.g., WhatsApp Image 2024-06-30)
+        var pattern3c = new Regex(@"(\d{4})-(\d{2})-(\d{2})");
+        var match3c = pattern3c.Match(fileName);
+        if (match3c.Success)
+        {
+            if (
+                DateTime.TryParse(
+                    $"{match3c.Groups[1].Value}-{match3c.Groups[2].Value}-{match3c.Groups[3].Value}",
+                    out DateTime date3c
+                )
+            )
+            {
+                return date3c;
+            }
+        }
+
+        // Pattern 4: YYYY_MM_DD format with optional time (e.g., Foo_2021_05_02_200152957_iOS-1747.jpg)
+        var pattern4 = new Regex(@"(\d{4})_(\d{2})_(\d{2})_(\d{6,9})");
         var match4 = pattern4.Match(fileName);
         if (match4.Success)
         {
@@ -134,7 +171,52 @@ internal static class DateFromPath
                 )
             )
             {
+                string timeStr = match4.Groups[4].Value.PadRight(6, '0').Substring(0, 6); // Take first 6 digits for HHMMSS
+                if (
+                    DateTime.TryParseExact(
+                        timeStr,
+                        "HHmmss",
+                        null,
+                        System.Globalization.DateTimeStyles.None,
+                        out DateTime time4
+                    )
+                )
+                {
+                    return date4.Date.Add(time4.TimeOfDay);
+                }
                 return date4;
+            }
+        }
+
+        // Pattern 5: YYYY_MM_DD format without time (e.g., Photo_2021_05_02.jpg)
+        var pattern5 = new Regex(@"(\d{4})_(\d{2})_(\d{2})");
+        var match5 = pattern5.Match(fileName);
+        if (match5.Success)
+        {
+            if (
+                DateTime.TryParse(
+                    $"{match5.Groups[1].Value}-{match5.Groups[2].Value}-{match5.Groups[3].Value}",
+                    out DateTime date5
+                )
+            )
+            {
+                return date5;
+            }
+        }
+
+        // Pattern 6: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
+        var pattern6 = new Regex(@"(\d{4})\s+(\d{2})\s+(\d{2})");
+        var match6 = pattern6.Match(fileName);
+        if (match6.Success)
+        {
+            if (
+                DateTime.TryParse(
+                    $"{match6.Groups[1].Value}-{match6.Groups[2].Value}-{match6.Groups[3].Value}",
+                    out DateTime date6
+                )
+            )
+            {
+                return date6;
             }
         }
 
@@ -181,6 +263,25 @@ internal static class DateFromPath
             if (DateTime.TryParse(dateString, out DateTime dateUnderscore))
             {
                 return dateUnderscore;
+            }
+        }
+
+        // Extract YYYYMMDD format anywhere in the path (e.g., /photos/20210502/)
+        var dateCompactPattern = new Regex(@"[/\\](\d{8})[/\\]");
+        var dateCompactMatch = dateCompactPattern.Match(fullPath);
+        if (dateCompactMatch.Success)
+        {
+            if (
+                DateTime.TryParseExact(
+                    dateCompactMatch.Groups[1].Value,
+                    "yyyyMMdd",
+                    null,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTime dateCompact
+                )
+            )
+            {
+                return dateCompact;
             }
         }
 
