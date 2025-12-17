@@ -2,13 +2,13 @@ using System.CommandLine;
 
 namespace PhotoCleaner;
 
-internal class CommandLine
+internal static class CommandLine
 {
     public static async Task<int> Invoke(string[] args)
     {
         RootCommand rootCommand = CreateRootCommand();
         ParseResult parseResult = rootCommand.Parse(args);
-        return parseResult.Invoke();
+        return await parseResult.InvokeAsync();
     }
 
     internal static RootCommand CreateRootCommand()
@@ -16,13 +16,13 @@ internal class CommandLine
         Option<DirectoryInfo> pathOption = new("--path", "-p")
         {
             Description = "The directory path to process.",
-            Required = true,
+            Required = true
         };
         pathOption.AcceptExistingOnly();
 
         Option<bool> dryRunOption = new("--dryrun", "-d")
         {
-            Description = "Perform a dry run without making changes.",
+            Description = "Perform a dry run without making changes."
         };
 
         RootCommand rootCommand = new(
@@ -30,12 +30,12 @@ internal class CommandLine
         )
         {
             pathOption,
-            dryRunOption,
+            dryRunOption
         };
-        rootCommand.SetAction(async parseResult =>
+        rootCommand.SetAction(parseResult =>
         {
             Program program = new();
-            return await program.Execute(
+            return program.Execute(
                 parseResult.GetValue(pathOption)!.FullName,
                 parseResult.GetValue(dryRunOption)
             );

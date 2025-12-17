@@ -13,7 +13,7 @@ internal class Program
     private readonly List<string> _unknownExtensionsList = [];
     private readonly Lock _unknownExtensionsLock = new();
 
-    private const int _degreeOfParallelism = 1;
+    private const int DegreeOfParallelism = 2;
 
     public static async Task<int> Main(string[] args)
     {
@@ -22,7 +22,7 @@ internal class Program
         return await CommandLine.Invoke(args);
     }
 
-    internal async Task<int> Execute(string directoryPath, bool dryRun)
+    internal int Execute(string directoryPath, bool dryRun)
     {
         int failedCount = 0;
         try
@@ -39,7 +39,7 @@ internal class Program
             DirectoryInfo[] topLevelDirs = rootDir.GetDirectories();
             topLevelDirs
                 .AsParallel()
-                .WithDegreeOfParallelism(_degreeOfParallelism)
+                .WithDegreeOfParallelism(DegreeOfParallelism)
                 .ForAll(dir =>
                 {
                     // Get all files in each directory
@@ -53,24 +53,25 @@ internal class Program
             Log.Information("Processing {FileCount} files ...", _fileNameBag.Count);
             _fileNameBag
                 .AsParallel()
-                .WithDegreeOfParallelism(_degreeOfParallelism)
-                .ForAll(async fileName =>
+                .WithDegreeOfParallelism(DegreeOfParallelism)
+                .ForAll(fileName =>
                 {
-                    ProcessTask processTask = new(
-                        _fileNameBag,
-                        _unknownExtensionsList,
-                        _unknownExtensionsLock,
-                        new FileInfo(fileName)
-                    );
-                    if (!await processTask.Execute())
+                    if (
+                        !ProcessTask.Execute(
+                            _fileNameBag,
+                            _unknownExtensionsList,
+                            _unknownExtensionsLock,
+                            new FileInfo(fileName),
+                            dryRun
+                        )
+                    )
                     {
                         _ = Interlocked.Increment(ref failedCount);
                     }
                 });
         }
-        catch (Exception ex) // when (Log.Logger.LogAndHandle(ex, MethodBase.GetCurrentMethod()?.Name))
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
         {
-            Log.Fatal(ex, "Fatal error in processing.");
             return 1;
         }
         Log.Information("Processing complete.");

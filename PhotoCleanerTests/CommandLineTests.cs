@@ -14,7 +14,8 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--dryrun"];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> pathOption, Option<bool> dryRunOption, RootCommand rootCommand) =
+            CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -31,7 +32,8 @@ public class CommandLineTests
         string[] args = ["-p", existingPath, "-d"];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> pathOption, Option<bool> dryRunOption, RootCommand rootCommand) =
+            CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -48,7 +50,8 @@ public class CommandLineTests
         string[] args = ["--path", existingPath];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> pathOption, Option<bool> dryRunOption, RootCommand rootCommand) =
+            CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -64,7 +67,7 @@ public class CommandLineTests
         string[] args = ["--dryrun"];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -79,7 +82,7 @@ public class CommandLineTests
         string[] args = [];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -91,11 +94,11 @@ public class CommandLineTests
     public void ParseArguments_NonExistentDirectory_ReturnsValidationError()
     {
         // Arrange
-        string nonExistentPath = "/this/path/should/not/exist/123456";
+        const string nonExistentPath = "/this/path/should/not/exist/123456";
         string[] args = ["--path", nonExistentPath];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -111,7 +114,8 @@ public class CommandLineTests
         string[] args = ["--path", existingPath];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> pathOption, Option<bool> _, RootCommand rootCommand) =
+            CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -126,7 +130,7 @@ public class CommandLineTests
         string[] args = ["--path", "/test/path", "--invalid-option"];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -141,7 +145,7 @@ public class CommandLineTests
         string[] args = ["--path"];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -155,7 +159,7 @@ public class CommandLineTests
         string[] args = ["--help"];
 
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -171,7 +175,7 @@ public class CommandLineTests
     public void ParseArguments_VariousValidInputs_ParsesWithoutErrors(params string[] args)
     {
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert - Focus on parsing, not directory validation for this test
@@ -186,7 +190,7 @@ public class CommandLineTests
     public void RootCommand_HasCorrectDescription()
     {
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> _, RootCommand rootCommand) = CreateTestCommand();
 
         // Assert
         Assert.Equal(
@@ -199,7 +203,7 @@ public class CommandLineTests
     public void PathOption_HasCorrectProperties()
     {
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> pathOption, Option<bool> _, RootCommand _) = CreateTestCommand();
 
         // Assert
         Assert.True(pathOption.Required);
@@ -211,7 +215,7 @@ public class CommandLineTests
     public void DryRunOption_HasCorrectProperties()
     {
         // Act
-        var (pathOption, dryRunOption, rootCommand) = CreateTestCommand();
+        (Option<DirectoryInfo> _, Option<bool> dryRunOption, RootCommand _) = CreateTestCommand();
 
         // Assert
         Assert.False(dryRunOption.Required);

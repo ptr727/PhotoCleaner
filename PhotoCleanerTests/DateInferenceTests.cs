@@ -29,7 +29,7 @@ public class DateInferenceTests
 
         // Assert
         Assert.NotNull(result);
-        string actualDateString = result!.Value.ToString("yyyy:MM:dd HH:mm:ss");
+        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
         Assert.Equal(expectedDateString, actualDateString);
     }
 
@@ -65,7 +65,7 @@ public class DateInferenceTests
 
         // Assert
         Assert.NotNull(result);
-        string actualDateString = result!.Value.ToString("yyyy:MM:dd HH:mm:ss");
+        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
         Assert.Equal(expectedDateString, actualDateString);
     }
 
@@ -95,7 +95,7 @@ public class DateInferenceTests
 
         // Assert
         Assert.NotNull(result);
-        string actualDateString = result!.Value.ToString("yyyy:MM:dd HH:mm:ss");
+        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
         Assert.Equal(expectedDateString, actualDateString);
     }
 
@@ -109,7 +109,7 @@ public class DateInferenceTests
     public void IsDateValid_VariousDates_ReturnsExpectedValidation(int year, bool expectedValid)
     {
         // Arrange
-        DateTime testDate = new DateTime(year, 6, 15, 12, 30, 45);
+        DateTime testDate = new(year, 6, 15, 12, 30, 45);
 
         // Act
         bool result = PhotoCleaner.DateFromPath.IsDateValid(testDate);

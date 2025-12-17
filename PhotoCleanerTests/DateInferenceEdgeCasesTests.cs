@@ -21,7 +21,7 @@ public class DateInferenceEdgeCasesTests
 
     [Theory]
     [InlineData("/Volumes/External/Photos/2023/Christmas/2023-12-25/family_dinner.jpg")]
-    [InlineData("C:\\Users\\Photos\\Vacation\\2022\\2022-07-15\\beach.png")]
+    [InlineData(@"C:\Users\Photos\Vacation\2022\2022-07-15\beach.png")]
     [InlineData("/storage/emulated/0/DCIM/Camera/2021/2021-01-01/new_year.mp4")]
     public void ExtractDateFromPath_WindowsAndLinuxPaths_ExtractsCorrectly(string fullPath)
     {
@@ -69,8 +69,8 @@ public class DateInferenceEdgeCasesTests
     public void InferCreatedDate_FilenameOverridesPath_ReturnsFilenameDate()
     {
         // Arrange - filename has 2024 date, path has 2023 date
-        string filename = "IMG_20240315_143000.jpg";
-        string directoryPath = "/photos/2023/2023-01-01/";
+        const string filename = "IMG_20240315_143000.jpg";
+        const string directoryPath = "/photos/2023/2023-01-01/";
         string tempFilePath = Path.Combine(directoryPath, filename);
 
         // Act

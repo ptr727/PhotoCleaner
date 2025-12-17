@@ -50,7 +50,9 @@ PhotoCleaner -p /home/user/Photos -d
 
 ## Development Tooling
 
-### Fresh Install
+### Install
+
+#### Windows
 
 ```shell
 winget install Microsoft.DotNet.SDK.10
@@ -59,6 +61,16 @@ winget install nektos.act
 winget install Gyan.FFmpeg
 winget install OliverBetz.ExifTool
 ```
+
+#### Linux
+
+```shell
+apt install dotnet-sdk-10.0
+apt install ffmpeg
+apt install exiftool
+```
+
+#### .NET Tools
 
 ```shell
 dotnet new tool-manifest
@@ -69,7 +81,9 @@ dotnet husky install
 dotnet husky add pre-commit -c "dotnet husky run"
 ```
 
-### Update Dependencies
+### Update
+
+#### Windows
 
 ```shell
 winget upgrade Microsoft.DotNet.SDK.10
@@ -78,6 +92,15 @@ winget upgrade nektos.act
 winget upgrade Gyan.FFmpeg
 winget upgrade OliverBetz.ExifTool
 ```
+
+#### Linux
+
+```shell
+apt update
+apt upgrade
+```
+
+#### .NET Tools
 
 ```shell
 dotnet tool restore

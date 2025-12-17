@@ -17,13 +17,13 @@ internal static class DateFromPath
 
         // Try to extract date from directory path
         dateFromPath = ExtractDateFromPath(fullPath);
-        if (IsDateValid(dateFromPath))
+        if (!IsDateValid(dateFromPath))
         {
-            createdDate = dateFromPath!.Value.ToString("yyyy:MM:dd HH:mm:ss");
-            return true;
+            return false;
         }
 
-        return false;
+        createdDate = dateFromPath!.Value.ToString("yyyy:MM:dd HH:mm:ss");
+        return true;
     }
 
     internal static bool IsDateValid(DateTime? date) =>
@@ -49,20 +49,16 @@ internal static class DateFromPath
                 )
             )
             {
-                string timeStr = match1.Groups[2].Value.PadRight(6, '0').Substring(0, 6); // Take first 6 digits for HHMMSS
-                if (
-                    DateTime.TryParseExact(
-                        timeStr,
-                        "HHmmss",
-                        null,
-                        System.Globalization.DateTimeStyles.None,
-                        out DateTime time1
-                    )
+                string timeStr = match1.Groups[2].Value.PadRight(6, '0')[..6]; // Take first 6 digits for HHMMSS
+                return DateTime.TryParseExact(
+                    timeStr,
+                    "HHmmss",
+                    null,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTime time1
                 )
-                {
-                    return date1.Date.Add(time1.TimeOfDay);
-                }
-                return date1;
+                    ? date1.Date.Add(time1.TimeOfDay)
+                    : date1;
             }
         }
 
@@ -97,20 +93,16 @@ internal static class DateFromPath
                 )
             )
             {
-                string timeStr = match3.Groups[4].Value.PadRight(6, '0').Substring(0, 6); // Take first 6 digits for HHMMSS
-                if (
-                    DateTime.TryParseExact(
-                        timeStr,
-                        "HHmmss",
-                        null,
-                        System.Globalization.DateTimeStyles.None,
-                        out DateTime time3
-                    )
+                string timeStr = match3.Groups[4].Value.PadRight(6, '0')[..6]; // Take first 6 digits for HHMMSS
+                return DateTime.TryParseExact(
+                    timeStr,
+                    "HHmmss",
+                    null,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTime time3
                 )
-                {
-                    return date3.Date.Add(time3.TimeOfDay);
-                }
-                return date3;
+                    ? date3.Date.Add(time3.TimeOfDay)
+                    : date3;
             }
         }
 
@@ -169,20 +161,16 @@ internal static class DateFromPath
                 )
             )
             {
-                string timeStr = match4.Groups[4].Value.PadRight(6, '0').Substring(0, 6); // Take first 6 digits for HHMMSS
-                if (
-                    DateTime.TryParseExact(
-                        timeStr,
-                        "HHmmss",
-                        null,
-                        System.Globalization.DateTimeStyles.None,
-                        out DateTime time4
-                    )
+                string timeStr = match4.Groups[4].Value.PadRight(6, '0')[..6]; // Take first 6 digits for HHMMSS
+                return DateTime.TryParseExact(
+                    timeStr,
+                    "HHmmss",
+                    null,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTime time4
                 )
-                {
-                    return date4.Date.Add(time4.TimeOfDay);
-                }
-                return date4;
+                    ? date4.Date.Add(time4.TimeOfDay)
+                    : date4;
             }
         }
 
@@ -205,17 +193,19 @@ internal static class DateFromPath
         // Pattern 6: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
         Regex pattern6 = new(@"(\d{4})\s+(\d{2})\s+(\d{2})");
         Match match6 = pattern6.Match(fileName);
-        if (match6.Success)
+        if (!match6.Success)
         {
-            if (
-                DateTime.TryParse(
-                    $"{match6.Groups[1].Value}-{match6.Groups[2].Value}-{match6.Groups[3].Value}",
-                    out DateTime date6
-                )
+            return null;
+        }
+
+        if (
+            DateTime.TryParse(
+                $"{match6.Groups[1].Value}-{match6.Groups[2].Value}-{match6.Groups[3].Value}",
+                out DateTime date6
             )
-            {
-                return date6;
-            }
+        )
+        {
+            return date6;
         }
 
         return null;
@@ -228,7 +218,6 @@ internal static class DateFromPath
         Match pathMatch = pathPattern.Match(fullPath);
         if (pathMatch.Success)
         {
-            string yearFromDir = pathMatch.Groups[1].Value;
             string fullDate =
                 $"{pathMatch.Groups[2].Value}-{pathMatch.Groups[3].Value}-{pathMatch.Groups[4].Value}";
 
@@ -286,16 +275,18 @@ internal static class DateFromPath
         // Fallback: Try to extract just year from path
         Regex yearPattern = new(@"[/\\](\d{4})[/\\]");
         Match yearMatch = yearPattern.Match(fullPath);
-        if (yearMatch.Success)
+        if (!yearMatch.Success)
         {
-            if (
-                int.TryParse(yearMatch.Groups[1].Value, out int year)
-                && year >= 1900
-                && year <= DateTime.Now.Year
-            )
-            {
-                return new DateTime(year, 1, 1);
-            }
+            return null;
+        }
+
+        if (
+            int.TryParse(yearMatch.Groups[1].Value, out int year)
+            && year >= 1900
+            && year <= DateTime.Now.Year
+        )
+        {
+            return new DateTime(year, 1, 1);
         }
 
         return null;

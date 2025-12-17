@@ -89,36 +89,34 @@ public class ExifToolJson
         {
             return EXIFDateTimeOriginal;
         }
-        else if (!string.IsNullOrEmpty(EXIFCreateDate))
+
+        if (!string.IsNullOrEmpty(EXIFCreateDate))
         {
             return EXIFCreateDate;
         }
-        else if (
+
+        if (
             !string.IsNullOrEmpty(QuickTimeCreateDate)
             && QuickTimeCreateDate != "0000:00:00 00:00:00"
         )
         {
             return QuickTimeCreateDate;
         }
-        else if (!string.IsNullOrEmpty(H264DateTimeOriginal))
+
+        if (!string.IsNullOrEmpty(H264DateTimeOriginal))
         {
             return H264DateTimeOriginal;
         }
-        else if (!string.IsNullOrEmpty(ASFCreationDate))
+
+        if (!string.IsNullOrEmpty(ASFCreationDate))
         {
             return ASFCreationDate;
         }
-        else if (!string.IsNullOrEmpty(RIFFDateTimeOriginal))
-        {
-            return RIFFDateTimeOriginal;
-        }
-        else
-        {
-            return null;
-        }
+
+        return !string.IsNullOrEmpty(RIFFDateTimeOriginal) ? RIFFDateTimeOriginal : null;
     }
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(ExifToolJson))]
-internal partial class SourceGenerationContext : JsonSerializerContext { }
+internal partial class SourceGenerationContext : JsonSerializerContext;

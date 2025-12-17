@@ -4,20 +4,24 @@ namespace PhotoCleaner;
 
 public static class Extensions
 {
-    public static bool LogAndPropagate(this ILogger logger, Exception exception, string? function)
+    extension(ILogger logger)
     {
-        logger.Error(exception, "{Function}", function);
-        return false;
+        public bool LogAndPropagate(
+            Exception exception,
+            [System.Runtime.CompilerServices.CallerMemberName] string function = "unknown"
+        )
+        {
+            logger.Error(exception, "{Function}", function);
+            return false;
+        }
+
+        public bool LogAndHandle(
+            Exception exception,
+            [System.Runtime.CompilerServices.CallerMemberName] string function = "unknown"
+        )
+        {
+            logger.Error(exception, "{Function}", function);
+            return true;
+        }
     }
-
-    public static bool LogAndHandle(this ILogger logger, Exception exception, string? function)
-    {
-        logger.Error(exception, "{Function}", function);
-        return true;
-    }
-
-    public static ILogger LogOverrideContext(this ILogger logger) =>
-        logger.ForContext<LogOverride>();
-
-    public class LogOverride;
 }
