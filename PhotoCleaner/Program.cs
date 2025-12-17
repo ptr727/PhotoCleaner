@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Reflection;
 using Serilog;
 using Serilog.Debugging;
 using Serilog.Events;
@@ -52,14 +51,10 @@ internal class Program
 
             // Process files in parallel
             Log.Information("Processing {FileCount} files ...", _fileNameBag.Count);
-            //_fileNameBag
-            //    .AsParallel()
-            //    .WithDegreeOfParallelism(_degreeOfParallelism)
-            //    .ForAll(async fileName =>
-            _ = Parallel.ForEach(
-                _fileNameBag,
-                new ParallelOptions { MaxDegreeOfParallelism = _degreeOfParallelism },
-                async fileName =>
+            _fileNameBag
+                .AsParallel()
+                .WithDegreeOfParallelism(_degreeOfParallelism)
+                .ForAll(async fileName =>
                 {
                     ProcessTask processTask = new(
                         _fileNameBag,
@@ -71,8 +66,7 @@ internal class Program
                     {
                         _ = Interlocked.Increment(ref failedCount);
                     }
-                }
-            );
+                });
         }
         catch (Exception ex) // when (Log.Logger.LogAndHandle(ex, MethodBase.GetCurrentMethod()?.Name))
         {

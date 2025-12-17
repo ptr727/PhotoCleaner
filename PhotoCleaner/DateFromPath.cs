@@ -26,19 +26,17 @@ internal static class DateFromPath
         return false;
     }
 
-    internal static bool IsDateValid(DateTime? date)
-    {
-        return date != null
-            && date.HasValue
-            && date.Value.Year >= 1900
-            && date.Value.Year <= DateTime.Now.Year;
-    }
+    internal static bool IsDateValid(DateTime? date) =>
+        date != null
+        && date.HasValue
+        && date.Value.Year >= 1900
+        && date.Value.Year <= DateTime.Now.Year;
 
     internal static DateTime? ExtractDateFromFilename(string fileName)
     {
         // Pattern 1: YYYYMMDD_HHMMSS format (e.g., 20210502_200152957_iOS-1747.jpg)
-        var pattern1 = new Regex(@"(\d{8})_(\d{6,9})");
-        var match1 = pattern1.Match(fileName);
+        Regex pattern1 = new(@"(\d{8})_(\d{6,9})");
+        Match match1 = pattern1.Match(fileName);
         if (match1.Success)
         {
             if (
@@ -69,8 +67,8 @@ internal static class DateFromPath
         }
 
         // Pattern 2: YYYYMMDD format without time (e.g., EX_20030219_3378.jpg, PV_20090709_0081.mp4)
-        var pattern2 = new Regex(@"(\d{8})");
-        var match2 = pattern2.Match(fileName);
+        Regex pattern2 = new(@"(\d{8})");
+        Match match2 = pattern2.Match(fileName);
         if (match2.Success)
         {
             if (
@@ -88,8 +86,8 @@ internal static class DateFromPath
         }
 
         // Pattern 3: YYYY-MM-DD with underscore time separator (e.g., Foo_2021-05-02_200152957_iOS.jpg)
-        var pattern3 = new Regex(@"(\d{4})-(\d{2})-(\d{2})_(\d{6,9})");
-        var match3 = pattern3.Match(fileName);
+        Regex pattern3 = new(@"(\d{4})-(\d{2})-(\d{2})_(\d{6,9})");
+        Match match3 = pattern3.Match(fileName);
         if (match3.Success)
         {
             if (
@@ -117,8 +115,8 @@ internal static class DateFromPath
         }
 
         // Pattern 3b: YYYY-MM-DD format with HH-MM-SS time (e.g., PHOTO-2024-06-22-07-56-41)
-        var pattern3b = new Regex(@"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})");
-        var match3b = pattern3b.Match(fileName);
+        Regex pattern3b = new(@"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})");
+        Match match3b = pattern3b.Match(fileName);
         if (match3b.Success)
         {
             if (
@@ -144,8 +142,8 @@ internal static class DateFromPath
         }
 
         // Pattern 3c: YYYY-MM-DD format without time (e.g., WhatsApp Image 2024-06-30)
-        var pattern3c = new Regex(@"(\d{4})-(\d{2})-(\d{2})");
-        var match3c = pattern3c.Match(fileName);
+        Regex pattern3c = new(@"(\d{4})-(\d{2})-(\d{2})");
+        Match match3c = pattern3c.Match(fileName);
         if (match3c.Success)
         {
             if (
@@ -160,8 +158,8 @@ internal static class DateFromPath
         }
 
         // Pattern 4: YYYY_MM_DD format with optional time (e.g., Foo_2021_05_02_200152957_iOS-1747.jpg)
-        var pattern4 = new Regex(@"(\d{4})_(\d{2})_(\d{2})_(\d{6,9})");
-        var match4 = pattern4.Match(fileName);
+        Regex pattern4 = new(@"(\d{4})_(\d{2})_(\d{2})_(\d{6,9})");
+        Match match4 = pattern4.Match(fileName);
         if (match4.Success)
         {
             if (
@@ -189,8 +187,8 @@ internal static class DateFromPath
         }
 
         // Pattern 5: YYYY_MM_DD format without time (e.g., Photo_2021_05_02.jpg)
-        var pattern5 = new Regex(@"(\d{4})_(\d{2})_(\d{2})");
-        var match5 = pattern5.Match(fileName);
+        Regex pattern5 = new(@"(\d{4})_(\d{2})_(\d{2})");
+        Match match5 = pattern5.Match(fileName);
         if (match5.Success)
         {
             if (
@@ -205,8 +203,8 @@ internal static class DateFromPath
         }
 
         // Pattern 6: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
-        var pattern6 = new Regex(@"(\d{4})\s+(\d{2})\s+(\d{2})");
-        var match6 = pattern6.Match(fileName);
+        Regex pattern6 = new(@"(\d{4})\s+(\d{2})\s+(\d{2})");
+        Match match6 = pattern6.Match(fileName);
         if (match6.Success)
         {
             if (
@@ -226,8 +224,8 @@ internal static class DateFromPath
     internal static DateTime? ExtractDateFromPath(string fullPath)
     {
         // Extract date from directory structure (e.g., /2021/2021-05-02/)
-        var pathPattern = new Regex(@"[/\\](\d{4})[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
-        var pathMatch = pathPattern.Match(fullPath);
+        Regex pathPattern = new(@"[/\\](\d{4})[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
+        Match pathMatch = pathPattern.Match(fullPath);
         if (pathMatch.Success)
         {
             string yearFromDir = pathMatch.Groups[1].Value;
@@ -241,8 +239,8 @@ internal static class DateFromPath
         }
 
         // Extract YYYY-MM-DD format anywhere in the path (e.g., /Lumia/2015-11-18/)
-        var dateAnywherePattern = new Regex(@"[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
-        var dateAnywhereMatch = dateAnywherePattern.Match(fullPath);
+        Regex dateAnywherePattern = new(@"[/\\](\d{4})-(\d{2})-(\d{2})[/\\]");
+        Match dateAnywhereMatch = dateAnywherePattern.Match(fullPath);
         if (dateAnywhereMatch.Success)
         {
             string dateString =
@@ -254,8 +252,8 @@ internal static class DateFromPath
         }
 
         // Extract YYYY_MM_DD format anywhere in the path (e.g., /MP Navigator EX/2010_01_21/)
-        var dateUnderscorePattern = new Regex(@"[/\\](\d{4})_(\d{2})_(\d{2})[/\\]");
-        var dateUnderscoreMatch = dateUnderscorePattern.Match(fullPath);
+        Regex dateUnderscorePattern = new(@"[/\\](\d{4})_(\d{2})_(\d{2})[/\\]");
+        Match dateUnderscoreMatch = dateUnderscorePattern.Match(fullPath);
         if (dateUnderscoreMatch.Success)
         {
             string dateString =
@@ -267,8 +265,8 @@ internal static class DateFromPath
         }
 
         // Extract YYYYMMDD format anywhere in the path (e.g., /photos/20210502/)
-        var dateCompactPattern = new Regex(@"[/\\](\d{8})[/\\]");
-        var dateCompactMatch = dateCompactPattern.Match(fullPath);
+        Regex dateCompactPattern = new(@"[/\\](\d{8})[/\\]");
+        Match dateCompactMatch = dateCompactPattern.Match(fullPath);
         if (dateCompactMatch.Success)
         {
             if (
@@ -286,8 +284,8 @@ internal static class DateFromPath
         }
 
         // Fallback: Try to extract just year from path
-        var yearPattern = new Regex(@"[/\\](\d{4})[/\\]");
-        var yearMatch = yearPattern.Match(fullPath);
+        Regex yearPattern = new(@"[/\\](\d{4})[/\\]");
+        Match yearMatch = yearPattern.Match(fullPath);
         if (yearMatch.Success)
         {
             if (

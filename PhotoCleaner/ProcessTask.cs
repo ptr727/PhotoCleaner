@@ -1,12 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
-using CliWrap.Exceptions;
 using Serilog;
 
 namespace PhotoCleaner;
@@ -104,15 +100,15 @@ public class ProcessTask(
         Debug.Assert(_exifToolJson != null, "ExifToolJson should not be null here.");
 
         // Process files
-        return await DetectDoubleExtensions() // Need to manually correct
+        return await DetectDoubleExtensions() // Need to manually correct double extensions
             && await RenameMixedCaseExtensions()
             && await RenameMismatchedMimeExtensions()
             && await RenamePreferredExtensions()
             && await DeleteLivePhotos()
             && await ConvertVideo()
             && await SetMissingCreateDate()
-            && await DetectPcmAudio()
-            && await DetectMissingCreateDate();
+            && await DetectPcmAudio() // Should already be fixed
+            && await DetectMissingCreateDate(); // Could not determine a date from the path
     }
 
     private async Task<bool> DetectDoubleExtensions()
@@ -138,10 +134,7 @@ public class ProcessTask(
 
     private async Task<bool> RenameMixedCaseExtensions()
     {
-        if (
-            _fileInfo.Extension != _fileInfo.Extension.ToLower()
-            && _fileInfo.Extension != _fileInfo.Extension.ToUpper()
-        )
+        if (_fileInfo.Extension.Any(char.IsLower) && _fileInfo.Extension.Any(char.IsUpper))
         {
             Log.Warning(
                 "Mixed case extension detected '{Extension}': '{FileName}'.",
@@ -212,6 +205,8 @@ public class ProcessTask(
 
                 match = _mkvExtensions.Contains(extension);
                 expectedExtension = _mkvExtensions[0];
+                break;
+            default:
                 break;
         }
         if (!match)
@@ -494,9 +489,7 @@ public class ProcessTask(
         }
 
         // Run ffmpeg
-        BufferedCommandResult result = await Cli.Wrap("ffmpeg")
-            .WithArguments(ffmpegArguments)
-            .ExecuteBufferedAsync();
+        _ = await Cli.Wrap("ffmpeg").WithArguments(ffmpegArguments).ExecuteAsync();
 
         // Backup original file
         string backupFile = GetBackupFileName(_fileInfo.FullName);
@@ -514,15 +507,15 @@ public class ProcessTask(
             Console.WriteLine(
                 $"INFORMATION: Setting timestamps on '{outputFile}' to '{createdDate}' ..."
             );
-            result = await Cli.Wrap("exiftool")
+            _ = await Cli.Wrap("exiftool")
                 .WithArguments([
-                    "-v2",
+                    // "-v2",
                     "-overwrite_original",
                     $"-QuickTime:CreateDate={createdDate}",
                     $"-QuickTime:ModifyDate={createdDate}",
                     outputFile,
                 ])
-                .ExecuteBufferedAsync();
+                .ExecuteAsync();
         }
 
         // Queue remuxed file for further processing
@@ -567,32 +560,27 @@ public class ProcessTask(
             createdDate,
             _fileInfo.FullName
         );
-        string[] arguments;
-        if (_fileInfo.Extension.ToLower() == ".mp4")
-        {
-            arguments =
+        string[] arguments = _fileInfo.Extension.Equals(
+            ".mp4",
+            StringComparison.CurrentCultureIgnoreCase
+        )
+            ?
             [
-                "-v2",
+                // "-v2",
                 "-overwrite_original",
                 $"-QuickTime:CreateDate={createdDate}",
                 $"-QuickTime:ModifyDate={createdDate}",
                 _fileInfo.FullName,
-            ];
-        }
-        else
-        {
-            arguments =
+            ]
+            :
             [
-                "-v2",
+                // "-v2",
                 "-overwrite_original",
                 $"-EXIF:CreateDate={createdDate}",
                 $"-EXIF:DateTimeOriginal={createdDate}",
                 _fileInfo.FullName,
             ];
-        }
-        BufferedCommandResult result = await Cli.Wrap("exiftool")
-            .WithArguments(arguments)
-            .ExecuteBufferedAsync();
+        _ = await Cli.Wrap("exiftool").WithArguments(arguments).ExecuteAsync();
 
         // Queue file for further processing
         Log.Information("Queuing '{FileName}' for further processing.", _fileInfo.FullName);

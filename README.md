@@ -56,6 +56,8 @@ PhotoCleaner -p /home/user/Photos -d
 winget install Microsoft.DotNet.SDK.10
 winget install Microsoft.VisualStudioCode
 winget install nektos.act
+winget install Gyan.FFmpeg
+winget install OliverBetz.ExifTool
 ```
 
 ```shell
@@ -73,8 +75,12 @@ dotnet husky add pre-commit -c "dotnet husky run"
 winget upgrade Microsoft.DotNet.SDK.10
 winget upgrade Microsoft.VisualStudioCode
 winget upgrade nektos.act
+winget upgrade Gyan.FFmpeg
+winget upgrade OliverBetz.ExifTool
+```
 
 ```shell
+dotnet tool restore
 dotnet tool update --all
 dotnet outdated --upgrade:prompt
 ```

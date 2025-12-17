@@ -1,11 +1,4 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
-using System.Globalization;
-using System.Reflection;
-using Serilog;
-using Serilog.Debugging;
-using Serilog.Events;
-using Serilog.Sinks.SystemConsole.Themes;
 
 namespace PhotoCleaner;
 
