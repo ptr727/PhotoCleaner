@@ -526,7 +526,7 @@ public class ProcessTask(
         }
 
         // Run ffmpeg
-        _ = await Cli.Wrap("ffmpeg").WithArguments(ffmpegArguments).ExecuteAsync();
+        _ = await Cli.Wrap("ffmpeg").WithArguments(ffmpegArguments).ExecuteBufferedAsync();
 
         // Backup original file
         string backupFile = GetBackupFileName(fileInfo.FullName);
@@ -552,7 +552,7 @@ public class ProcessTask(
                     $"-QuickTime:ModifyDate={createdDate}",
                     outputFile,
                 ])
-                .ExecuteAsync();
+                .ExecuteBufferedAsync();
         }
 
         // Queue remuxed file for further processing
@@ -623,7 +623,7 @@ public class ProcessTask(
                 $"-EXIF:DateTimeOriginal={createdDate}",
                 fileInfo.FullName,
             ];
-        _ = await Cli.Wrap("exiftool").WithArguments(arguments).ExecuteAsync();
+        _ = await Cli.Wrap("exiftool").WithArguments(arguments).ExecuteBufferedAsync();
 
         // Queue file for further processing
         Log.Information("Queuing '{FileName}' for further processing.", fileInfo.FullName);
