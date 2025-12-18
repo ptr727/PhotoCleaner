@@ -86,11 +86,7 @@ dotnet husky add pre-commit -c "dotnet husky run"
 #### Windows
 
 ```shell
-winget upgrade Microsoft.DotNet.SDK.10
-winget upgrade Microsoft.VisualStudioCode
-winget upgrade nektos.act
-winget upgrade Gyan.FFmpeg
-winget upgrade OliverBetz.ExifTool
+winget upgrade --all --accept-package-agreements --include-unknown
 ```
 
 #### Linux
