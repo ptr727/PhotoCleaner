@@ -272,6 +272,19 @@ internal static partial class DateFromPath
             }
         }
 
+        // Extract YYYY/MM/DD format anywhere in the path (e.g., /photos/2021/05/02/file.heic)
+        Regex dateSlashPattern = MyRegex13();
+        Match dateSlashMatch = dateSlashPattern.Match(fullPath);
+        if (dateSlashMatch.Success)
+        {
+            string dateString =
+                $"{dateSlashMatch.Groups[1].Value}-{dateSlashMatch.Groups[2].Value}-{dateSlashMatch.Groups[3].Value}";
+            if (DateTime.TryParse(dateString, out DateTime dateSlash))
+            {
+                return dateSlash;
+            }
+        }
+
         // Fallback: Try to extract just year from path
         Regex yearPattern = MyRegex1();
         Match yearMatch = yearPattern.Match(fullPath);
@@ -321,4 +334,7 @@ internal static partial class DateFromPath
 
     [GeneratedRegex(@"(\d{8})_(\d{6,9})")]
     private static partial Regex MyRegex12();
+
+    [GeneratedRegex(@"[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\]")]
+    private static partial Regex MyRegex13();
 }

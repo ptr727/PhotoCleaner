@@ -25,6 +25,7 @@ internal class Program
     internal int Execute(string directoryPath, bool dryRun)
     {
         int failedCount = 0;
+        int modifiedCount = 0;
         try
         {
             // Get all files in root directory
@@ -56,8 +57,8 @@ internal class Program
                 .WithDegreeOfParallelism(_degreeOfParallelism)
                 .ForAll(fileName =>
                 {
-                    if (
-                        !ProcessTask.Execute(
+                    switch (
+                        ProcessTask.Execute(
                             _fileNameBag,
                             _unknownExtensionsList,
                             _unknownExtensionsLock,
@@ -66,7 +67,18 @@ internal class Program
                         )
                     )
                     {
-                        _ = Interlocked.Increment(ref failedCount);
+                        case ProcessTask.ProcessResult.Failure:
+                        case ProcessTask.ProcessResult.DoubleExtensions:
+                            _ = Interlocked.Increment(ref failedCount);
+                            break;
+                        case ProcessTask.ProcessResult.Modified:
+                        case ProcessTask.ProcessResult.Reprocess:
+                            _ = Interlocked.Increment(ref modifiedCount);
+                            break;
+                        case ProcessTask.ProcessResult.UnknownExtension:
+                        case ProcessTask.ProcessResult.Success:
+                        default:
+                            break;
                     }
                 });
         }
@@ -87,7 +99,12 @@ internal class Program
 
         if (failedCount > 0)
         {
-            Log.Warning("Potential problem files: {FailedCount}", failedCount);
+            Log.Warning("Failed files: {FailedCount}", failedCount);
+        }
+
+        if (modifiedCount > 0)
+        {
+            Log.Information("Modified files: {ModifiedCount}", modifiedCount);
         }
 
         return 0;

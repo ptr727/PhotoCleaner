@@ -49,6 +49,7 @@ public class DateInferenceTests
     }
 
     [Theory]
+    [InlineData("/photos/2021/05/02/vacation.jpg", "2021:05:02 00:00:00")]
     [InlineData("/photos/2021/2021-05-02/vacation.jpg", "2021:05:02 00:00:00")]
     [InlineData("/photos/2021/20210502/vacation.jpg", "2021:05:02 00:00:00")]
     [InlineData("/photos/2021/2021_05_02/vacation.jpg", "2021:05:02 00:00:00")]
