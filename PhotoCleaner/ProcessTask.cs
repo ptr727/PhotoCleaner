@@ -56,10 +56,11 @@ public class ProcessTask(
     ];
     private static readonly string[] s_remuxExtensions = [".mts", ".m2ts", ".mkv"];
     private static readonly string[] s_reencodeExtensions = [".wmv", ".avi", ".3gp", ".gif"];
-    private static readonly string[] s_reencodeAudioExtensions = [".mov"];
+    private static readonly string[] s_reencodeAudioExtensions = [".mov", ".mp4"];
     private static readonly string[] s_setdateExtensions =
     [
         ".heic",
+        ".heif",
         ".jpeg",
         ".jpg",
         ".mov",
@@ -71,14 +72,44 @@ public class ProcessTask(
     ];
     private static readonly string[] s_liveVideoExtensions = [".mp4", ".mov"];
     private static readonly string[] s_liveVideoImageExtensions = [".heic", ".jpg", ".jpeg"];
-    private static readonly string[] s_quicktimeExtensions = [".mov", ".mp4"];
+    private static readonly string[] s_quicktimeExtensions = [".mp4", ".mov"];
     private static readonly string[] s_jpegExtensions = [".jpg", ".jpeg"];
     private static readonly string[] s_pngExtensions = [".png"];
     private static readonly string[] s_heicExtensions = [".heic", ".heif"];
+    private static readonly string[] s_heifExtensions = s_heicExtensions;
     private static readonly string[] s_tiffExtensions = [".tif", ".tiff"];
     private static readonly string[] s_dngExtensions = [".dng"];
     private static readonly string[] s_mp4Extensions = [".mp4"];
     private static readonly string[] s_mkvExtensions = [".mkv"];
+    private static readonly string[] s_cr2Extensions = [".cr2"];
+    private static readonly string[] s_nefExtensions = [".nef"];
+    private static readonly string[] s_orfExtensions = [".orf"];
+    private static readonly string[] s_wmvExtensions = [".wmv"];
+    private static readonly string[] s_3gpExtensions = [".3gp"];
+    private static readonly string[] s_aviExtensions = [".avi"];
+    private static readonly string[] s_gifExtensions = [".gif"];
+    private static readonly string[] s_psdExtensions = [".psd"];
+
+    private static readonly Dictionary<string, string[]> s_mimeTypeExtensions = new()
+    {
+        { "application/vnd.adobe.photoshop", s_psdExtensions },
+        { "image/gif", s_gifExtensions },
+        { "image/heic", s_heicExtensions },
+        { "image/heif", s_heifExtensions },
+        { "image/jpeg", s_jpegExtensions },
+        { "image/png", s_pngExtensions },
+        { "image/tiff", s_tiffExtensions },
+        { "image/x-adobe-dng", s_dngExtensions },
+        { "image/x-canon-cr2", s_cr2Extensions },
+        { "image/x-nikon-nef", s_nefExtensions },
+        { "image/x-olympus-orf", s_orfExtensions },
+        { "video/3gpp", s_3gpExtensions },
+        { "video/mp4", s_mp4Extensions },
+        { "video/quicktime", s_quicktimeExtensions },
+        { "video/x-matroska", s_mkvExtensions },
+        { "video/x-ms-asf", s_wmvExtensions },
+        { "video/x-msvideo", s_aviExtensions },
+    };
 
     public static ProcessResult Execute(
         ConcurrentBag<string> fileNameBag,
@@ -116,91 +147,19 @@ public class ProcessTask(
         _exifToolJson = await GetExifToolJsonAsync();
         ArgumentNullException.ThrowIfNull(_exifToolJson);
 
-        // Special handling for Foo.HEIC.JPG with HEIC MIME type
-        // Need to manually correct double extensions
-        if (!RenameDoubleExtensions() || !DetectDoubleExtensions())
-        {
-            return ProcessResult.DoubleExtensions;
-        }
-
         // Process files
-        if (
-            !RenameMixedCaseExtensions()
-            || !RenameMismatchedMimeExtensions()
-            || !RenamePreferredExtensions()
+        return
+            !RenameMismatchedMimeExtensions()
+            || !RenameMixedCaseExtensions()
             || !await DeleteLivePhotosAsync()
             || !await ConvertVideoAsync()
             || !await SetMissingCreateDateAsync()
-        )
-        {
-            return _reprocess ? ProcessResult.Reprocess : ProcessResult.Failure;
-        }
-        return _modified ? ProcessResult.Modified : ProcessResult.Success;
-    }
-
-    private bool RenameDoubleExtensions()
-    {
-        // Special handling for Foo.HEIC.JPG with HEIC MIME type
-        string outputFile = fileInfo.FullName;
-        if (
-            fileInfo.FullName.ToLower().EndsWith(".heic.jpg")
-            && _exifToolJson!.MIMEType == "image/heic"
-        )
-        {
-            Log.Warning(
-                ".HEIC.JPG extension in HEIC format detected: '{FileName}'.",
-                fileInfo.FullName
-            );
-
-            // Rename to .heic.jpg to .heic
-            outputFile = fileInfo.FullName[..^4];
-        }
-        // Special handling for Foo.MOV.3GP with Quicktime MIME type
-        else if (
-            fileInfo.FullName.ToLower().EndsWith(".mov.3gp")
-            && _exifToolJson!.MIMEType == "video/quicktime"
-        )
-        {
-            Log.Warning(
-                ".MOV.3GP extension in Quicktime format detected: '{FileName}'.",
-                fileInfo.FullName
-            );
-            if (dryRun)
-            {
-                return false;
-            }
-
-            // Rename to .mov.3gp to .mov
-            outputFile = fileInfo.FullName[..^4];
-        }
-        else
-        {
-            return true;
-        }
-        if (dryRun)
-        {
-            return false;
-        }
-
-        _modified = true;
-        MoveFile(fileInfo.FullName, outputFile);
-
-        // Queue renamed file for further processing
-        return ReProcess(outputFile);
-    }
-
-    private bool DetectDoubleExtensions()
-    {
-        string[] parts = fileInfo.Name.ToLower().Split('.');
-        string[] extensions = [.. s_processExtensions.Select(item => item.Trim('.').ToLower())];
-        int extensionCount = parts.Count(part => extensions.Contains(part));
-        if (extensionCount <= 1)
-        {
-            return true;
-        }
-
-        Log.Warning("Multiple extensions detected: '{FileName}'.", fileInfo.FullName);
-        return false;
+            ? _reprocess
+                ? ProcessResult.Reprocess
+                : ProcessResult.Failure
+            : _modified
+                ? ProcessResult.Modified
+                : ProcessResult.Success;
     }
 
     private bool RenameMixedCaseExtensions()
@@ -231,107 +190,68 @@ public class ProcessTask(
 
     private bool RenameMismatchedMimeExtensions()
     {
-        bool match = true;
-        string extension = fileInfo.Extension.ToLower();
-        string expectedExtension = extension;
-        switch (_exifToolJson!.MIMEType)
+        // Lookup extension list from MIME type
+        if (
+            !s_mimeTypeExtensions.TryGetValue(
+                _exifToolJson!.MIMEType!,
+                out string[]? expectedExtensions
+            )
+        )
         {
-            case "image/jpeg":
-                match = s_jpegExtensions.Contains(extension);
-                expectedExtension = s_jpegExtensions[0];
-                break;
-            case "image/png":
-                match = s_pngExtensions.Contains(extension);
-                expectedExtension = s_pngExtensions[0];
-                break;
-            case "image/heic":
-                match = s_heicExtensions.Contains(extension);
-                expectedExtension = s_heicExtensions[0];
-                break;
-            case "image/tiff":
-                match = s_tiffExtensions.Contains(extension);
-                expectedExtension = s_tiffExtensions[0];
-                break;
-            case "image/x-adobe-dng":
-                match = s_dngExtensions.Contains(extension);
-                expectedExtension = s_dngExtensions[0];
-                break;
-            case "video/mp4":
-                match = s_mp4Extensions.Contains(extension);
-                expectedExtension = s_mp4Extensions[0];
-                break;
-            case "video/quicktime":
-                match = s_quicktimeExtensions.Contains(extension);
-                expectedExtension = s_quicktimeExtensions[0];
-                break;
-            case "video/x-matroska":
-                match = s_mkvExtensions.Contains(extension);
-                expectedExtension = s_mkvExtensions[0];
-                break;
+            // Add the missing type?
+            Log.Error(
+                "Unknown MIME type '{MimeType}' for file: '{FileName}'.",
+                _exifToolJson!.MIMEType,
+                fileInfo.FullName
+            );
+            return false;
         }
-        if (match)
+
+        // Get the normalized media extension for the file
+        GetFileMediaExtension(fileInfo.FullName, out string baseName, out string mediaExtensions);
+
+        // Does the extension match the MIME type?
+        bool rename = false;
+        if (!expectedExtensions.Contains(mediaExtensions.ToLower()))
+        {
+            rename = true;
+            Log.Warning(
+                "File extension '{Extension}' does not match MIME type '{MimeType}' '{Extensions}': '{FileName}'.",
+                mediaExtensions,
+                _exifToolJson!.MIMEType,
+                expectedExtensions,
+                fileInfo.FullName
+            );
+        }
+        // Is it the preferred extension for this MIME type?
+        else if (
+            !mediaExtensions.Equals(
+                expectedExtensions[0],
+                StringComparison.CurrentCultureIgnoreCase
+            )
+        )
+        {
+            rename = true;
+            Log.Warning(
+                "File extension '{Extension}' is not preferred for MIME type '{MimeType}' '{Extensions}': '{FileName}'.",
+                mediaExtensions,
+                _exifToolJson!.MIMEType,
+                expectedExtensions,
+                fileInfo.FullName
+            );
+        }
+        if (!rename)
         {
             return true;
         }
-        Log.Warning(
-            "MIME type '{MimeType}' does not match file extension '{Extension}': '{FileName}'.",
-            _exifToolJson!.MIMEType,
-            extension,
-            fileInfo.FullName
-        );
         if (dryRun)
         {
             return false;
         }
 
-        // Rename extensions to match MIME type
+        // Rename extension to match MIME type
         _modified = true;
-        string outputFile = Path.ChangeExtension(fileInfo.FullName, expectedExtension);
-        MoveFile(fileInfo.FullName, outputFile);
-
-        // Queue renamed file for further processing
-        return ReProcess(outputFile);
-    }
-
-    private bool RenamePreferredExtensions()
-    {
-        // .jpeg and .jpg
-        string extension = fileInfo.Extension.ToLower();
-        string preferredExtension = extension;
-        if (s_jpegExtensions.Contains(extension) && extension != s_jpegExtensions[0])
-        {
-            // .jpg
-            preferredExtension = s_jpegExtensions[0];
-        }
-
-        // .tiff and .tif
-        if (s_tiffExtensions.Contains(extension) && extension != s_tiffExtensions[0])
-        {
-            // .tif
-            preferredExtension = s_tiffExtensions[0];
-        }
-
-        // Good
-        if (extension == preferredExtension)
-        {
-            return true;
-        }
-
-        // Extensions not preferred type
-        Log.Warning(
-            "Extension '{Extension}' does not match preferred extension '{PreferredExtension}': '{FileName}'.",
-            fileInfo.Extension,
-            preferredExtension,
-            fileInfo.FullName
-        );
-        if (dryRun)
-        {
-            return false;
-        }
-
-        // Rename extensions to match preferred type
-        _modified = true;
-        string outputFile = Path.ChangeExtension(fileInfo.FullName, preferredExtension);
+        string outputFile = baseName + expectedExtensions[0];
         MoveFile(fileInfo.FullName, outputFile);
 
         // Queue renamed file for further processing
@@ -353,8 +273,9 @@ public class ProcessTask(
                 fileInfo.FullName,
             ])
             .ExecuteBufferedAsync();
-        string audioFormat = result.StandardOutput.Trim().ToLower();
-        return audioFormat.StartsWith("pcm");
+        return result
+            .StandardOutput.Trim()
+            .StartsWith("pcm", StringComparison.CurrentCultureIgnoreCase);
     }
 
     private async Task<float> GetDurationAsync()
@@ -404,7 +325,7 @@ public class ProcessTask(
             }
 
             _modified = true;
-            BackupFile(fileInfo.FullName);
+            BackupFile(fileInfo.FullName, false);
             return false;
         }
 
@@ -429,14 +350,14 @@ public class ProcessTask(
             duration,
             fileInfo.FullName
         );
-        BackupFile(fileInfo.FullName);
+        BackupFile(fileInfo.FullName, false);
         return false;
     }
 
     private async Task<bool> ConvertVideoAsync()
     {
-        // Convert to MP4 if needed
-        string outputFile = Path.ChangeExtension(fileInfo.FullName, ".mp4");
+        // Output to temp file
+        string tempFile = Path.ChangeExtension(fileInfo.FullName, ".temp");
         string[] ffmpegArguments;
         if (s_remuxExtensions.Contains(fileInfo.Extension.ToLower()))
         {
@@ -455,7 +376,9 @@ public class ProcessTask(
                 "copy",
                 "-movflags",
                 "+faststart",
-                outputFile,
+                "-f",
+                "mp4",
+                tempFile,
             ];
         }
         else if (s_reencodeExtensions.Contains(fileInfo.Extension.ToLower()))
@@ -485,7 +408,9 @@ public class ProcessTask(
                 "128k",
                 "-movflags",
                 "+faststart",
-                outputFile,
+                "-f",
+                "mp4",
+                tempFile,
             ];
         }
         else if (s_reencodeAudioExtensions.Contains(fileInfo.Extension.ToLower()))
@@ -512,7 +437,9 @@ public class ProcessTask(
                 "128k",
                 "-movflags",
                 "+faststart",
-                outputFile,
+                "-f",
+                "mp4",
+                tempFile,
             ];
         }
         else
@@ -525,18 +452,22 @@ public class ProcessTask(
             return false;
         }
 
-        // Backup target file if it exists
-        _modified = true;
-        if (File.Exists(outputFile))
+        // Delete temp output if it exists
+        if (File.Exists(tempFile))
         {
-            BackupFile(outputFile);
+            File.Delete(tempFile);
         }
 
         // Run ffmpeg
         _ = await Cli.Wrap("ffmpeg").WithArguments(ffmpegArguments).ExecuteBufferedAsync();
 
         // Backup original file
-        BackupFile(fileInfo.FullName);
+        _modified = true;
+        BackupFile(fileInfo.FullName, false);
+
+        // Rename temp output to MP4
+        string outputFile = Path.ChangeExtension(fileInfo.FullName, ".mp4");
+        MoveFile(tempFile, outputFile);
 
         // Set timestamps on remuxed file from original timestamps
         string? createdDate = _exifToolJson!.GetDateString();
@@ -578,15 +509,9 @@ public class ProcessTask(
             return false;
         }
 
-        // Backup original file
+        // Backup original file and keep original
         _modified = true;
-        string backupFile = GetBackupFileName(fileInfo.FullName);
-        Log.Information(
-            "Creating backup '{OldFileName}' to '{NewFileName}' ...",
-            fileInfo.FullName,
-            backupFile
-        );
-        File.Copy(fileInfo.FullName, backupFile, false);
+        BackupFile(fileInfo.FullName, true);
 
         // Set the created date using exiftool
         return await SetCreateDateAsync(fileInfo.FullName, createdDate)
@@ -596,6 +521,7 @@ public class ProcessTask(
     private static async Task<bool> SetCreateDateAsync(string outputFile, string createdDate)
     {
         // Set the created date using exiftool
+        // Output file will be overwritten
         string[] arguments = s_quicktimeExtensions.Contains(Path.GetExtension(outputFile).ToLower())
             ?
             [
@@ -615,6 +541,16 @@ public class ProcessTask(
             ];
         _ = await Cli.Wrap("exiftool").WithArguments(arguments).ExecuteBufferedAsync();
         return true;
+    }
+
+    private async Task<ExifToolJson?> GetExifToolJsonAsync()
+    {
+        // Get exiftool info
+        BufferedCommandResult result = await Cli.Wrap("exiftool")
+            .WithArguments(["-groupNames", "-json", fileInfo.FullName])
+            .ExecuteBufferedAsync();
+        string json = result.StandardOutput.Trim(' ', '\n', '\r', ' ', '[', ']');
+        return JsonSerializer.Deserialize(json, SourceGenerationContext.Default.ExifToolJson);
     }
 
     private bool ReProcess(string fileName)
@@ -638,15 +574,27 @@ public class ProcessTask(
         return backupFileName;
     }
 
-    private static void BackupFile(string fileName)
+    private static void BackupFile(string fileName, bool copy)
     {
         string backupFileName = GetBackupFileName(fileName);
-        Log.Information(
-            "Renaming '{OldFileName}' to '{NewFileName}' ...",
-            fileName,
-            backupFileName
-        );
-        File.Move(fileName, backupFileName, false);
+        if (copy)
+        {
+            Log.Information(
+                "Copying '{OldFileName}' to '{NewFileName}' ...",
+                fileName,
+                backupFileName
+            );
+            File.Copy(fileName, backupFileName, false);
+        }
+        else
+        {
+            Log.Information(
+                "Renaming '{OldFileName}' to '{NewFileName}' ...",
+                fileName,
+                backupFileName
+            );
+            File.Move(fileName, backupFileName, false);
+        }
     }
 
     private static void MoveFile(string sourceFileName, string targetFileName)
@@ -654,7 +602,7 @@ public class ProcessTask(
         // Backup target if it exists
         if (File.Exists(targetFileName))
         {
-            BackupFile(targetFileName);
+            BackupFile(targetFileName, false);
         }
 
         Log.Information(
@@ -665,13 +613,66 @@ public class ProcessTask(
         File.Move(sourceFileName, targetFileName, false);
     }
 
-    private async Task<ExifToolJson?> GetExifToolJsonAsync()
+    internal static void GetFileMediaExtension(
+        string filePath,
+        out string baseName,
+        out string mediaExtension
+    )
     {
-        // Get exiftool info
-        BufferedCommandResult result = await Cli.Wrap("exiftool")
-            .WithArguments(["-groupNames", "-json", fileInfo.FullName])
-            .ExecuteBufferedAsync();
-        string json = result.StandardOutput.Trim(' ', '\n', '\r', ' ', '[', ']');
-        return JsonSerializer.Deserialize(json, SourceGenerationContext.Default.ExifToolJson);
+        // Get the base name and all media extensions as one extension
+        // E.g.:
+        // /path/to/file.ext.heic.jpg -> "/path/to/file.ext", ".heic.jpg"
+        // /path/to/file.heic.jpg.ext -> "/path/to/file.heic.jpg.ext", ""
+        // /file -> "/file", ""
+        // /file.ext -> "/file.ext", ""
+        // /path/file.jpeg.ext -> "/path/file.jpeg.ext", ""
+
+        string fileName = Path.GetFileName(filePath);
+        string directory = Path.GetDirectoryName(filePath) ?? "";
+
+        // Split filename by dots
+        string[] parts = fileName.Split('.');
+
+        // If no dots, return original path as base with empty extension
+        if (parts.Length <= 1)
+        {
+            baseName = filePath;
+            mediaExtension = "";
+            return;
+        }
+
+        // Work backwards from the end, collecting consecutive media extensions
+        List<string> mediaExtensions = [];
+        for (int i = parts.Length - 1; i >= 1; i--)
+        {
+            // If this is a known media extension, add it to our collection
+            string candidateExtension = "." + parts[i].ToLower();
+            if (s_processExtensions.Contains(candidateExtension))
+            {
+                mediaExtensions.Insert(0, candidateExtension);
+            }
+            else
+            {
+                // Stop at first non-media extension
+                break;
+            }
+        }
+
+        // Build the results
+        if (mediaExtensions.Count == 0)
+        {
+            // No media extensions found
+            baseName = filePath;
+            mediaExtension = "";
+            return;
+        }
+
+        // Reconstruct base name by removing media extensions from the end
+        string[] baseParts = parts[..^mediaExtensions.Count];
+        string baseFileName = string.Join(".", baseParts);
+        baseName = string.IsNullOrEmpty(directory)
+            ? baseFileName
+            : Path.Combine(directory, baseFileName);
+        mediaExtension = string.Join("", mediaExtensions);
     }
 }
