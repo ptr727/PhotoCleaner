@@ -22,33 +22,17 @@ internal class Program
         return await CommandLine.Invoke(args);
     }
 
-    internal int Execute(string directoryPath, bool dryRun)
+    public int Execute(List<DirectoryInfo> directoryPath, bool dryRun)
     {
         int failedCount = 0;
         int modifiedCount = 0;
         try
         {
-            // Get all files in root directory
-            Log.Information("Enumerating files in '{DirectoryPath}' ...", directoryPath);
-            DirectoryInfo rootDir = new(directoryPath);
-            foreach (FileInfo file in rootDir.GetFiles("*", SearchOption.TopDirectoryOnly))
-            {
-                _fileNameBag.Add(file.FullName);
-            }
+            // Get list of files to process
+            GetFileList(directoryPath);
 
-            // Get all top level directories
-            DirectoryInfo[] topLevelDirs = rootDir.GetDirectories();
-            topLevelDirs
-                .AsParallel()
-                .WithDegreeOfParallelism(_degreeOfParallelism)
-                .ForAll(dir =>
-                {
-                    // Get all files in each directory
-                    foreach (FileInfo file in dir.GetFiles("*", SearchOption.AllDirectories))
-                    {
-                        _fileNameBag.Add(file.FullName);
-                    }
-                });
+            // Log a warning for files with similar names but different cases
+            FindCaseConflicts();
 
             // Process files in parallel
             Log.Information("Processing {FileCount} files ...", _fileNameBag.Count);
@@ -124,5 +108,75 @@ internal class Program
                 formatProvider: CultureInfo.InvariantCulture
             );
         Log.Logger = loggerConfiguration.CreateLogger();
+    }
+
+    private void GetFileList(List<DirectoryInfo> directoryList)
+    {
+        foreach (DirectoryInfo directoryInfo in directoryList)
+        {
+            // Get all files in root directory
+            Log.Information("Enumerating files in '{DirectoryPath}' ...", directoryInfo.FullName);
+            foreach (FileInfo file in directoryInfo.GetFiles("*", SearchOption.TopDirectoryOnly))
+            {
+                _fileNameBag.Add(file.FullName);
+            }
+
+            // Get all top level directories
+            int count = 0;
+            DirectoryInfo[] topLevelDirs = directoryInfo.GetDirectories();
+            topLevelDirs
+                .AsParallel()
+                .WithDegreeOfParallelism(_degreeOfParallelism)
+                .ForAll(dir =>
+                {
+                    // Get all files in each directory
+                    foreach (FileInfo file in dir.GetFiles("*", SearchOption.AllDirectories))
+                    {
+                        _fileNameBag.Add(file.FullName);
+                        count++;
+                    }
+                });
+            Log.Information(
+                "Found {FileCount} files in '{DirectoryPath}'.",
+                count,
+                directoryInfo.FullName
+            );
+        }
+    }
+
+    private void FindCaseConflicts()
+    {
+        // Case insensitive dictionary of file names
+        Dictionary<string, List<string>> fileNameMap = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string fileName in _fileNameBag)
+        {
+            // Look for existing path ignoring case
+            if (!fileNameMap.TryGetValue(fileName, out List<string>? value))
+            {
+                // Not found, create new entry
+                value = [];
+                fileNameMap[fileName] = value;
+            }
+
+            // Add the file name to the list
+            value.Add(fileName);
+        }
+
+        // Find all conflicts
+        foreach (KeyValuePair<string, List<string>> entry in fileNameMap)
+        {
+            if (entry.Value.Count > 1)
+            {
+                foreach (string file in entry.Value)
+                {
+                    FileInfo fileInfo = new(file);
+                    Log.Warning(
+                        "File name case conflict: '{FileName}' {Size}",
+                        file,
+                        fileInfo.Length
+                    );
+                }
+            }
+        }
     }
 }

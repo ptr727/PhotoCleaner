@@ -13,7 +13,7 @@ internal static class CommandLine
 
     internal static RootCommand CreateRootCommand()
     {
-        Option<DirectoryInfo> pathOption = new("--path", "-p")
+        Option<List<DirectoryInfo>> pathOption = new("--path", "-p")
         {
             Description = "The directory path to process.",
             Required = true,
@@ -36,7 +36,7 @@ internal static class CommandLine
         {
             Program program = new();
             return program.Execute(
-                parseResult.GetValue(pathOption)!.FullName,
+                parseResult.GetValue(pathOption) ?? [],
                 parseResult.GetValue(dryRunOption)
             );
         });

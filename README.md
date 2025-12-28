@@ -20,27 +20,48 @@ The application processes files in parallel and provides detailed logging of all
 ### Command Line Syntax
 
 ```bash
-PhotoCleaner --path <directory> [--dryrun]
+PhotoCleaner --path <directory> [--path <directory> ...] [--dryrun]
 ```
 
 ### Options
 
-- `--path, -p <directory>` - **Required**. The directory path containing media files to process
+- `--path, -p <directory>` - **Required**. One or more directory paths containing media files to process. Can be specified multiple times to process multiple directories in a single run.
 - `--dryrun, -d` - **Optional**. Perform a dry run without making any actual changes
 - `--help, -h` - Display help information
 
 ### Examples
 
 ```bash
-# Process all media files in the Photos directory
+# Process all media files in a single directory
 PhotoCleaner --path /home/user/Photos
+
+# Process multiple directories in one run
+PhotoCleaner --path /home/user/Photos --path /mnt/backup/Photos
+
+# Process multiple directories using short options
+PhotoCleaner -p /home/user/Photos -p /mnt/backup/Photos -p /media/Archive
 
 # Preview what changes would be made without actually modifying files
 PhotoCleaner --path /home/user/Photos --dryrun
 
-# Using short options
+# Using short options with dry run
 PhotoCleaner -p /home/user/Photos -d
 ```
+
+## Processing Flow
+
+1. **File Enumeration**: Recursively scans all specified directories to build a list of files to process
+2. **Case Conflict Detection**: Identifies files with similar names but different cases that may cause issues
+3. **Parallel Processing**: Processes files in parallel (based on CPU core count) through the validation pipeline:
+   - Detects double file extensions (e.g., `.jpg.jpg`)
+   - Detects mixed case extensions (e.g., `.JpG`)
+   - Detects MIME type mismatches between file content and extension
+   - Identifies and handles Apple Live Photo components
+   - Converts legacy video formats (MTS, M2TS) via remuxing to MP4
+   - Converts incompatible video formats (WMV, AVI) via re-encoding to MP4
+   - Detects and reports PCM audio in MOV files
+   - Validates EXIF creation dates, inferring from filenames/paths when missing
+4. **Results Summary**: Reports counts of failed, modified, and successfully processed files
 
 ## Supported File Types
 

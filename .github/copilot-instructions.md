@@ -13,10 +13,11 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
   - `Extensions.cs`: Extension methods for logging and error handling
-- **PhotoCleanerTests/**: Comprehensive test project with 69 tests
+- **PhotoCleanerTests/**: Comprehensive test project with 107 tests
   - `DateInferenceTests.cs`: Core date inference functionality tests (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Edge cases and comprehensive scenarios (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation tests (17 tests)
+  - `CommandLineTests.cs`: Command line parsing and validation tests (21 tests)
+  - `ProcessTaskTests.cs`: Process task tests (34 tests)
 
 ### Core Processing Pipeline
 The application uses a sequential validation pipeline where each method returns `bool` - `false` stops processing the current file:
@@ -70,7 +71,8 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 
 ### Command Line Interface (CommandLine.cs)
 - **System.CommandLine Integration**: Uses modern .NET command line parsing
-- **Required `--path/-p` Parameter**: Directory path validation with `DirectoryInfo`
+- **Required `--path/-p` Parameter**: Accepts multiple directory paths using `Option<List<DirectoryInfo>>`. Each path is validated with `AcceptExistingOnly()`
+- **Multiple Path Support**: Can be specified multiple times (e.g., `--path /dir1 --path /dir2`) to process multiple directories in a single run
 - **Optional `--dryrun/-d` Flag**: Non-destructive preview mode
 - **Built-in Help System**: Automatic help generation and validation
 
@@ -92,13 +94,14 @@ dotnet csharpier format --log-level=debug .
 - **xUnit**: Testing framework for PhotoCleanerTests project
 
 ### Test Architecture
-- **PhotoCleanerTests Project**: 69 comprehensive tests covering all functionality
+- **PhotoCleanerTests Project**: 107 comprehensive tests covering all functionality
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
 - **Test Categories**:
   - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation (17 tests)
-- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling), integration scenarios
+  - `CommandLineTests.cs`: Command line parsing and validation (21 tests including multiple path scenarios)
+  - `ProcessTaskTests.cs`: Process task tests (34 tests)
+- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths), integration scenarios, process task execution
 
 ## Critical Implementation Details
 
@@ -123,8 +126,14 @@ Supported: `.3gp`, `.arw`, `.avi`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.j
 
 ## Command Line Usage
 ```bash
-# Basic usage
+# Basic usage - single directory
 PhotoCleaner --path /photos
+
+# Multiple directories
+PhotoCleaner --path /photos --path /backup/photos
+
+# Multiple directories with short options
+PhotoCleaner -p /photos -p /backup/photos -p /archive
 
 # Dry run mode
 PhotoCleaner --path /photos --dryrun
@@ -147,7 +156,8 @@ Uses `SourceGenerationContext` for AOT-compatible JSON serialization of `ExifToo
 
 ### Command Line Testing Patterns
 - **CreateTestCommand() Helper**: Uses `CommandLine.CreateRootCommand()` directly for single source of truth
-- **Type-based Option Extraction**: Identifies options by type (`Option<DirectoryInfo>`, `Option<bool>`) for reliability
-- **Real Directory Testing**: Uses `Directory.GetCurrentDirectory()` and `Guid.NewGuid()` for path validation tests
-- **Parse Result Validation**: Tests both success/error states and extracted argument values
-- **Comprehensive Scenarios**: Option properties, argument parsing, validation errors, edge cases
+- **Type-based Option Extraction**: Identifies options by type (`Option<List<DirectoryInfo>>`, `Option<bool>`) for reliability
+- **Real Directory Testing**: Uses `Directory.GetCurrentDirectory()` for path validation tests
+- **Parse Result Validation**: Tests both success/error states and extracted argument values, including list counts for multiple paths
+- **Comprehensive Scenarios**: Single path, multiple paths, option properties, argument parsing, validation errors, edge cases
+- **Multiple Path Testing**: Validates 2-path and 3-path scenarios, mixed valid/invalid paths, and proper list indexing

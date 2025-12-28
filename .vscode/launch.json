@@ -13,7 +13,12 @@
             "preLaunchTask": ".Net Build",
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
+                "--path=/data/media/AImport",
                 "--path=/data/media/iCloud",
+                "--path=/data/media/Pictures",
+                "--path=/data/media/Pictures_Archive",
+                "--path=/data/media/Pictures_Wedding",
+                "--path=/data/media/Videos",
                 "--dryrun=false"
             ],
             "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
