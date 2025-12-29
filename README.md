@@ -20,13 +20,14 @@ The application processes files in parallel and provides detailed logging of all
 ### Command Line Syntax
 
 ```bash
-PhotoCleaner --path <directory> [--path <directory> ...] [--dryrun]
+PhotoCleaner --path <directory> [--path <directory> ...] [--dryrun] [--threads <count>]
 ```
 
 ### Options
 
 - `--path, -p <directory>` - **Required**. One or more directory paths containing media files to process. Can be specified multiple times to process multiple directories in a single run.
 - `--dryrun, -d` - **Optional**. Perform a dry run without making any actual changes
+- `--threads, -t <count>` - **Optional**. Number of parallel threads to use for processing (default: Max(ProcessorCount, 4), must be 1-ProcessorCount)
 - `--help, -h` - Display help information
 
 ### Examples
@@ -46,6 +47,12 @@ PhotoCleaner --path /home/user/Photos --dryrun
 
 # Using short options with dry run
 PhotoCleaner -p /home/user/Photos -d
+
+# Process with custom thread count
+PhotoCleaner --path /home/user/Photos --threads 8
+
+# All options combined
+PhotoCleaner -p /home/user/Photos -p /mnt/backup -d -t 12
 ```
 
 ## Processing Flow

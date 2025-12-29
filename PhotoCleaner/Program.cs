@@ -7,13 +7,12 @@ using Serilog.Sinks.SystemConsole.Themes;
 
 namespace PhotoCleaner;
 
-internal class Program
+internal class Program(int degreeOfParallelism, bool dryRun)
 {
-    private readonly ConcurrentBag<string> _fileNameBag = [];
-    private readonly List<string> _unknownExtensionsList = [];
-    private readonly Lock _unknownExtensionsLock = new();
-
-    private readonly int _degreeOfParallelism = int.Max(Environment.ProcessorCount, 4);
+    private readonly ConcurrentBag<string> _fileNames = [];
+    private readonly ConcurrentDictionary<string, byte> _unknownExtensions = new(
+        StringComparer.OrdinalIgnoreCase
+    );
 
     public static async Task<int> Main(string[] args)
     {
@@ -22,7 +21,7 @@ internal class Program
         return await CommandLine.Invoke(args);
     }
 
-    public int Execute(List<DirectoryInfo> directoryPath, bool dryRun)
+    public int Execute(List<DirectoryInfo> directoryPath)
     {
         int failedCount = 0;
         int modifiedCount = 0;
@@ -35,20 +34,14 @@ internal class Program
             FindCaseConflicts();
 
             // Process files in parallel
-            Log.Information("Processing {FileCount} files ...", _fileNameBag.Count);
-            _fileNameBag
+            Log.Information("Processing {FileCount} files ...", _fileNames.Count);
+            _fileNames
                 .AsParallel()
-                .WithDegreeOfParallelism(_degreeOfParallelism)
+                .WithDegreeOfParallelism(degreeOfParallelism)
                 .ForAll(fileName =>
                 {
                     switch (
-                        ProcessTask.Execute(
-                            _fileNameBag,
-                            _unknownExtensionsList,
-                            _unknownExtensionsLock,
-                            new FileInfo(fileName),
-                            dryRun
-                        )
+                        ProcessTask.Execute(_fileNames, _unknownExtensions, new(fileName), dryRun)
                     )
                     {
                         case ProcessTask.ProcessResult.Failure:
@@ -72,10 +65,11 @@ internal class Program
         }
         Log.Information("Processing complete.");
 
-        if (_unknownExtensionsList.Count > 0)
+        if (!_unknownExtensions.IsEmpty)
         {
-            _unknownExtensionsList.Sort();
-            foreach (string extension in _unknownExtensionsList)
+            List<string> unknownExtensionsList = [.. _unknownExtensions.Keys];
+            unknownExtensionsList.Sort();
+            foreach (string extension in unknownExtensionsList)
             {
                 Log.Warning("Unknown file extension: '{Extension}'", extension);
             }
@@ -114,28 +108,19 @@ internal class Program
     {
         foreach (DirectoryInfo directoryInfo in directoryList)
         {
-            // Get all files in root directory
             Log.Information("Enumerating files in '{DirectoryPath}' ...", directoryInfo.FullName);
-            foreach (FileInfo file in directoryInfo.GetFiles("*", SearchOption.TopDirectoryOnly))
-            {
-                _fileNameBag.Add(file.FullName);
-            }
 
-            // Get all top level directories
             int count = 0;
-            DirectoryInfo[] topLevelDirs = directoryInfo.GetDirectories();
-            topLevelDirs
+            directoryInfo
+                .EnumerateFiles("*", SearchOption.AllDirectories)
                 .AsParallel()
-                .WithDegreeOfParallelism(_degreeOfParallelism)
-                .ForAll(dir =>
+                .WithDegreeOfParallelism(degreeOfParallelism)
+                .ForAll(file =>
                 {
-                    // Get all files in each directory
-                    foreach (FileInfo file in dir.GetFiles("*", SearchOption.AllDirectories))
-                    {
-                        _fileNameBag.Add(file.FullName);
-                        count++;
-                    }
+                    _fileNames.Add(file.FullName);
+                    _ = Interlocked.Increment(ref count);
                 });
+
             Log.Information(
                 "Found {FileCount} files in '{DirectoryPath}'.",
                 count,
@@ -146,36 +131,32 @@ internal class Program
 
     private void FindCaseConflicts()
     {
-        // Case insensitive dictionary of file names
-        Dictionary<string, List<string>> fileNameMap = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string fileName in _fileNameBag)
+        Dictionary<string, List<string>> fileNameMap = new(
+            _fileNames.Count,
+            StringComparer.OrdinalIgnoreCase
+        );
+        foreach (string fileName in _fileNames)
         {
-            // Look for existing path ignoring case
             if (!fileNameMap.TryGetValue(fileName, out List<string>? value))
             {
-                // Not found, create new entry
-                value = [];
-                fileNameMap[fileName] = value;
+                fileNameMap[fileName] = [fileName];
             }
-
-            // Add the file name to the list
-            value.Add(fileName);
+            else
+            {
+                value.Add(fileName);
+            }
         }
 
-        // Find all conflicts
-        foreach (KeyValuePair<string, List<string>> entry in fileNameMap)
+        foreach (List<string> files in fileNameMap.Values.Where(values => values.Count > 1))
         {
-            if (entry.Value.Count > 1)
+            foreach (string file in files)
             {
-                foreach (string file in entry.Value)
-                {
-                    FileInfo fileInfo = new(file);
-                    Log.Warning(
-                        "File name case conflict: '{FileName}' {Size}",
-                        file,
-                        fileInfo.Length
-                    );
-                }
+                FileInfo fileInfo = new(file);
+                Log.Warning(
+                    "File name case conflict: '{FileName}' ({Size})",
+                    file,
+                    fileInfo.Length
+                );
             }
         }
     }

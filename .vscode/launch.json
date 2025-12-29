@@ -19,7 +19,8 @@
                 "--path=/data/media/Pictures_Archive",
                 "--path=/data/media/Pictures_Wedding",
                 "--path=/data/media/Videos",
-                "--dryrun=false"
+                "--threads=4",
+                "--dryrun=true"
             ],
             "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
             "console": "internalConsole",

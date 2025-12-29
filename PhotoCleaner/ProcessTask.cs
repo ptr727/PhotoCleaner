@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
@@ -7,9 +8,8 @@ using Serilog;
 namespace PhotoCleaner;
 
 public class ProcessTask(
-    ConcurrentBag<string> fileNameBag,
-    List<string> unknownExtensionsList,
-    Lock unknownExtensionsListLock,
+    ConcurrentBag<string> fileNames,
+    ConcurrentDictionary<string, byte> unknownExtensions,
     FileInfo fileInfo,
     bool dryRun
 )
@@ -28,8 +28,8 @@ public class ProcessTask(
     private bool _modified;
     private bool _reprocess;
 
-    private static readonly string[] s_processExtensions =
-    [
+    private static readonly FrozenSet<string> s_processExtensions = new[]
+    {
         ".3gp",
         ".arw",
         ".avi",
@@ -53,12 +53,27 @@ public class ProcessTask(
         ".tif",
         ".tiff",
         ".wmv",
-    ];
-    private static readonly string[] s_remuxExtensions = [".mts", ".m2ts", ".mkv"];
-    private static readonly string[] s_reencodeExtensions = [".wmv", ".avi", ".3gp", ".gif"];
-    private static readonly string[] s_reencodeAudioExtensions = [".mov", ".mp4"];
-    private static readonly string[] s_setdateExtensions =
-    [
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_remuxExtensions = new[]
+    {
+        ".mts",
+        ".m2ts",
+        ".mkv",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_reencodeExtensions = new[]
+    {
+        ".wmv",
+        ".avi",
+        ".3gp",
+        ".gif",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_reencodeAudioExtensions = new[]
+    {
+        ".mov",
+        ".mp4",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_setdateExtensions = new[]
+    {
         ".heic",
         ".heif",
         ".jpeg",
@@ -69,28 +84,77 @@ public class ProcessTask(
         ".psd",
         ".tif",
         ".tiff",
-    ];
-    private static readonly string[] s_liveVideoExtensions = [".mp4", ".mov"];
-    private static readonly string[] s_liveVideoImageExtensions = [".heic", ".jpg", ".jpeg"];
-    private static readonly string[] s_quicktimeExtensions = [".mp4", ".mov"];
-    private static readonly string[] s_jpegExtensions = [".jpg", ".jpeg"];
-    private static readonly string[] s_pngExtensions = [".png"];
-    private static readonly string[] s_heicExtensions = [".heic", ".heif"];
-    private static readonly string[] s_heifExtensions = s_heicExtensions;
-    private static readonly string[] s_tiffExtensions = [".tif", ".tiff"];
-    private static readonly string[] s_dngExtensions = [".dng"];
-    private static readonly string[] s_mp4Extensions = [".mp4"];
-    private static readonly string[] s_mkvExtensions = [".mkv"];
-    private static readonly string[] s_cr2Extensions = [".cr2"];
-    private static readonly string[] s_nefExtensions = [".nef"];
-    private static readonly string[] s_orfExtensions = [".orf"];
-    private static readonly string[] s_wmvExtensions = [".wmv"];
-    private static readonly string[] s_3gpExtensions = [".3gp"];
-    private static readonly string[] s_aviExtensions = [".avi"];
-    private static readonly string[] s_gifExtensions = [".gif"];
-    private static readonly string[] s_psdExtensions = [".psd"];
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_liveVideoExtensions = new[]
+    {
+        ".mp4",
+        ".mov",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_liveVideoImageExtensions = new[]
+    {
+        ".heic",
+        ".jpg",
+        ".jpeg",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_quicktimeExtensions = new[]
+    {
+        ".mp4",
+        ".mov",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_jpegExtensions = new[]
+    {
+        ".jpg",
+        ".jpeg",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_pngExtensions = new[] { ".png" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_heicExtensions = new[]
+    {
+        ".heic",
+        ".heif",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_heifExtensions = s_heicExtensions;
+    private static readonly FrozenSet<string> s_tiffExtensions = new[]
+    {
+        ".tif",
+        ".tiff",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_dngExtensions = new[] { ".dng" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_mp4Extensions = new[] { ".mp4" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_mkvExtensions = new[] { ".mkv" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_cr2Extensions = new[] { ".cr2" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_nefExtensions = new[] { ".nef" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_orfExtensions = new[] { ".orf" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_wmvExtensions = new[] { ".wmv" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_3gpExtensions = new[] { ".3gp" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_aviExtensions = new[] { ".avi" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_gifExtensions = new[] { ".gif" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private static readonly FrozenSet<string> s_psdExtensions = new[] { ".psd" }.ToFrozenSet(
+        StringComparer.OrdinalIgnoreCase
+    );
 
-    private static readonly Dictionary<string, string[]> s_mimeTypeExtensions = new()
+    private static readonly Dictionary<string, FrozenSet<string>> s_mimeTypeExtensions = new()
     {
         { "application/vnd.adobe.photoshop", s_psdExtensions },
         { "image/gif", s_gifExtensions },
@@ -112,34 +176,26 @@ public class ProcessTask(
     };
 
     public static ProcessResult Execute(
-        ConcurrentBag<string> fileNameBag,
-        List<string> unknownExtensionsList,
-        Lock unknownExtensionsListLock,
+        ConcurrentBag<string> fileNames,
+        ConcurrentDictionary<string, byte> unknownExtensions,
         FileInfo fileInfo,
         bool dryRun
     )
     {
-        ProcessTask processTask = new(
-            fileNameBag,
-            unknownExtensionsList,
-            unknownExtensionsListLock,
-            fileInfo,
-            dryRun
-        );
+        ProcessTask processTask = new(fileNames, unknownExtensions, fileInfo, dryRun);
         return processTask.ExecuteAsync().GetAwaiter().GetResult();
     }
 
     private async Task<ProcessResult> ExecuteAsync()
     {
-        if (!s_processExtensions.Contains(fileInfo.Extension.ToLower()))
+        // Skip non-media files
+        if (!s_processExtensions.Contains(fileInfo.Extension))
         {
-            unknownExtensionsListLock.Enter();
-            if (!unknownExtensionsList.Contains(fileInfo.Extension.ToLower()))
+            if (!unknownExtensions.ContainsKey(fileInfo.Extension))
             {
                 Log.Warning("Skipping non-media file: '{FileName}'.", fileInfo.FullName);
-                unknownExtensionsList.Add(fileInfo.Extension.ToLower());
+                _ = unknownExtensions.TryAdd(fileInfo.Extension, 0);
             }
-            unknownExtensionsListLock.Exit();
             return ProcessResult.UnknownExtension;
         }
 
@@ -164,7 +220,24 @@ public class ProcessTask(
 
     private bool RenameMixedCaseExtensions()
     {
-        if (!(fileInfo.Extension.Any(char.IsLower) && fileInfo.Extension.Any(char.IsUpper)))
+        bool hasLower = false,
+            hasUpper = false;
+        foreach (char c in fileInfo.Extension)
+        {
+            if (char.IsLower(c))
+            {
+                hasLower = true;
+            }
+            else if (char.IsUpper(c))
+            {
+                hasUpper = true;
+            }
+            if (hasLower && hasUpper)
+            {
+                break;
+            }
+        }
+        if (!(hasLower && hasUpper))
         {
             return true;
         }
@@ -174,7 +247,7 @@ public class ProcessTask(
             fileInfo.Extension,
             fileInfo.FullName
         );
-        if (dryRun)
+        if (IsDryRun())
         {
             return false;
         }
@@ -194,7 +267,7 @@ public class ProcessTask(
         if (
             !s_mimeTypeExtensions.TryGetValue(
                 _exifToolJson!.MIMEType!,
-                out string[]? expectedExtensions
+                out FrozenSet<string>? expectedExtensions
             )
         )
         {
@@ -212,7 +285,7 @@ public class ProcessTask(
 
         // Does the extension match the MIME type?
         bool rename = false;
-        if (!expectedExtensions.Contains(mediaExtensions.ToLower()))
+        if (!expectedExtensions.Contains(mediaExtensions))
         {
             rename = true;
             Log.Warning(
@@ -226,7 +299,7 @@ public class ProcessTask(
         // Is it the preferred extension for this MIME type?
         else if (
             !mediaExtensions.Equals(
-                expectedExtensions[0],
+                expectedExtensions.First(),
                 StringComparison.CurrentCultureIgnoreCase
             )
         )
@@ -244,14 +317,14 @@ public class ProcessTask(
         {
             return true;
         }
-        if (dryRun)
+        if (IsDryRun())
         {
             return false;
         }
 
         // Rename extension to match MIME type
         _modified = true;
-        string outputFile = baseName + expectedExtensions[0];
+        string outputFile = baseName + expectedExtensions.First();
         MoveFile(fileInfo.FullName, outputFile);
 
         // Queue renamed file for further processing
@@ -299,7 +372,7 @@ public class ProcessTask(
 
     private async Task<bool> DeleteLivePhotosAsync()
     {
-        if (!s_liveVideoExtensions.Contains(fileInfo.Extension.ToLower()))
+        if (!s_liveVideoExtensions.Contains(fileInfo.Extension))
         {
             return true;
         }
@@ -319,7 +392,7 @@ public class ProcessTask(
                 duration,
                 fileInfo.FullName
             );
-            if (dryRun)
+            if (IsDryRun())
             {
                 return false;
             }
@@ -339,7 +412,7 @@ public class ProcessTask(
         {
             return true;
         }
-        if (dryRun)
+        if (IsDryRun())
         {
             return false;
         }
@@ -359,7 +432,7 @@ public class ProcessTask(
         // Output to temp file
         string tempFile = Path.ChangeExtension(fileInfo.FullName, ".temp");
         string[] ffmpegArguments;
-        if (s_remuxExtensions.Contains(fileInfo.Extension.ToLower()))
+        if (s_remuxExtensions.Contains(fileInfo.Extension))
         {
             // Remux audio and video
             Log.Information(
@@ -381,7 +454,7 @@ public class ProcessTask(
                 tempFile,
             ];
         }
-        else if (s_reencodeExtensions.Contains(fileInfo.Extension.ToLower()))
+        else if (s_reencodeExtensions.Contains(fileInfo.Extension))
         {
             // Reencode audio and video
             Log.Information(
@@ -413,7 +486,7 @@ public class ProcessTask(
                 tempFile,
             ];
         }
-        else if (s_reencodeAudioExtensions.Contains(fileInfo.Extension.ToLower()))
+        else if (s_reencodeAudioExtensions.Contains(fileInfo.Extension))
         {
             // Only if audio is PCM
             if (!await IsPcmAudioAsync())
@@ -447,7 +520,7 @@ public class ProcessTask(
             // Nothing to do
             return true;
         }
-        if (dryRun)
+        if (IsDryRun())
         {
             return false;
         }
@@ -485,7 +558,7 @@ public class ProcessTask(
         }
 
         // Only some file types are supported
-        if (!s_setdateExtensions.Contains(fileInfo.Extension.ToLower()))
+        if (!s_setdateExtensions.Contains(fileInfo.Extension))
         {
             // Not supported for this file type
             return true;
@@ -504,7 +577,7 @@ public class ProcessTask(
             createdDate,
             fileInfo.FullName
         );
-        if (dryRun)
+        if (IsDryRun())
         {
             return false;
         }
@@ -557,7 +630,7 @@ public class ProcessTask(
     {
         // Queue file for further processing
         Log.Information("Queuing '{FileName}' for further processing.", fileName);
-        fileNameBag.Add(fileName);
+        fileNames.Add(fileName);
         _reprocess = true;
         return false;
     }
@@ -674,5 +747,16 @@ public class ProcessTask(
             ? baseFileName
             : Path.Combine(directory, baseFileName);
         mediaExtension = string.Join("", mediaExtensions);
+    }
+
+    private bool IsDryRun(
+        [System.Runtime.CompilerServices.CallerMemberName] string function = "unknown"
+    )
+    {
+        if (dryRun)
+        {
+            Log.Information("Dry run enabled, skipping action in {Function}.", function);
+        }
+        return dryRun;
     }
 }

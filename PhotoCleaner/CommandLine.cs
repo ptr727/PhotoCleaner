@@ -22,8 +22,28 @@ internal static class CommandLine
 
         Option<bool> dryRunOption = new("--dryrun", "-d")
         {
-            Description = "Perform a dry run without making changes.",
+            Description = "Perform a dry run without making changes (default: false).",
         };
+
+        Option<int> threadsOption = new("--threads", "-t")
+        {
+            Description = "Number of parallel threads (default: Max(ProcessorCount, 4)).",
+            DefaultValueFactory = _ => Math.Max(Environment.ProcessorCount, 4),
+        };
+        threadsOption.Validators.Add(result =>
+        {
+            int value = result.GetValue(threadsOption);
+            if (value <= 0)
+            {
+                result.AddError("Thread count must be greater than 0.");
+            }
+            if (value > Environment.ProcessorCount)
+            {
+                result.AddError(
+                    $"Thread count must be less than or equal to {Environment.ProcessorCount}."
+                );
+            }
+        });
 
         RootCommand rootCommand = new(
             "PhotoCleaner - Pre-process media files for photo management systems."
@@ -31,14 +51,15 @@ internal static class CommandLine
         {
             pathOption,
             dryRunOption,
+            threadsOption,
         };
         rootCommand.SetAction(parseResult =>
         {
-            Program program = new();
-            return program.Execute(
-                parseResult.GetValue(pathOption) ?? [],
+            Program program = new(
+                parseResult.GetValue(threadsOption),
                 parseResult.GetValue(dryRunOption)
             );
+            return program.Execute(parseResult.GetValue(pathOption) ?? []);
         });
 
         return rootCommand;

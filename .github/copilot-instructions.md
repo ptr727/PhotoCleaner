@@ -13,10 +13,10 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
   - `Extensions.cs`: Extension methods for logging and error handling
-- **PhotoCleanerTests/**: Comprehensive test project with 107 tests
+- **PhotoCleanerTests/**: Comprehensive test project with 112 tests
   - `DateInferenceTests.cs`: Core date inference functionality tests (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Edge cases and comprehensive scenarios (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation tests (21 tests)
+  - `CommandLineTests.cs`: Command line parsing and validation tests (26 tests including thread option)
   - `ProcessTaskTests.cs`: Process task tests (34 tests)
 
 ### Core Processing Pipeline
@@ -32,9 +32,11 @@ if (!await DetectDoubleExtensions()
 ```
 
 ### State Management Pattern
-- **Shared Instance Variables**: `_fileNameBag`, `_unknownExtensionBag`, `_fileInfo`, `_exifToolJson` maintain state across the processing pipeline
-- **Parallel Processing**: Files processed using `AsParallel().WithDegreeOfParallelism(_threadCount)`
+- **Primary Constructor Parameters**: Both `Program` and `ProcessTask` use C# 12 primary constructors for immutable configuration (e.g., `Program(int degreeOfParallelism, bool dryRun)`)
+- **Shared Collections**: `ConcurrentBag<string>` for file names, `ConcurrentDictionary<string, byte>` for unknown extensions with case-insensitive comparison
+- **Parallel Processing**: Files processed using `AsParallel().WithDegreeOfParallelism(degreeOfParallelism)`
 - **External Tool Integration**: Uses `CliWrap` for all external command execution (exiftool, ffmpeg, ffprobe)
+- **FrozenSet Collections**: All static readonly extension collections use `FrozenSet<string>` with `StringComparer.OrdinalIgnoreCase` for O(1) lookups
 
 ## Key Patterns & Conventions
 
@@ -49,9 +51,10 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - JSON trimming pattern: `result.StandardOutput.Trim(' ', '\n', '\r', ' ', '[', ']')`
 
 ### Media File Processing Conventions
-- **Extension Arrays**: Define supported extensions as `string[]` arrays (e.g., `remuxExtensions`, `jpegExtensions`)
-- **Case-Insensitive Matching**: Always use `.ToLower()` for extension comparisons
+- **FrozenSet Extensions**: Define supported extensions as `FrozenSet<string>` with `StringComparer.OrdinalIgnoreCase` (e.g., `s_remuxExtensions`, `s_jpegExtensions`)
+- **Case-Insensitive Matching**: Use FrozenSet `.Contains()` directly without `.ToLower()` - comparer handles case-insensitivity
 - **File Type Categorization**: Group operations by file type requirements (remux vs re-encode vs audio-only)
+- **Single-Pass Optimizations**: Prefer single-loop iterations with early exit over multiple LINQ passes
 
 ### EXIF/Metadata Handling
 - Uses `ExifToolJson` class with `JsonPropertyName` attributes for precise metadata field mapping
@@ -74,6 +77,8 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Required `--path/-p` Parameter**: Accepts multiple directory paths using `Option<List<DirectoryInfo>>`. Each path is validated with `AcceptExistingOnly()`
 - **Multiple Path Support**: Can be specified multiple times (e.g., `--path /dir1 --path /dir2`) to process multiple directories in a single run
 - **Optional `--dryrun/-d` Flag**: Non-destructive preview mode
+- **Optional `--threads/-t` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Max(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()`
+- **Program Construction**: Creates `Program` instance with primary constructor: `new Program(threadsOption, dryRunOption)`
 - **Built-in Help System**: Automatic help generation and validation
 
 ## Development Workflow
@@ -94,14 +99,14 @@ dotnet csharpier format --log-level=debug .
 - **xUnit**: Testing framework for PhotoCleanerTests project
 
 ### Test Architecture
-- **PhotoCleanerTests Project**: 107 comprehensive tests covering all functionality
+- **PhotoCleanerTests Project**: 116 comprehensive tests covering all functionality
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
 - **Test Categories**:
   - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation (21 tests including multiple path scenarios)
+  - `CommandLineTests.cs`: Command line parsing and validation (30 tests including multiple path and thread validation scenarios)
   - `ProcessTaskTests.cs`: Process task tests (34 tests)
-- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths), integration scenarios, process task execution
+- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths, thread configuration and boundary validation), integration scenarios, process task execution
 
 ## Critical Implementation Details
 
@@ -138,8 +143,14 @@ PhotoCleaner -p /photos -p /backup/photos -p /archive
 # Dry run mode
 PhotoCleaner --path /photos --dryrun
 
+# Custom thread count
+PhotoCleaner --path /photos --threads 8
+
 # Short options
 PhotoCleaner -p /photos -d
+
+# All options combined
+PhotoCleaner -p /photos -p /backup -d -t 12
 
 # Help
 PhotoCleaner --help
@@ -156,8 +167,9 @@ Uses `SourceGenerationContext` for AOT-compatible JSON serialization of `ExifToo
 
 ### Command Line Testing Patterns
 - **CreateTestCommand() Helper**: Uses `CommandLine.CreateRootCommand()` directly for single source of truth
-- **Type-based Option Extraction**: Identifies options by type (`Option<List<DirectoryInfo>>`, `Option<bool>`) for reliability
+- **Type-based Option Extraction**: Identifies options by type (`Option<List<DirectoryInfo>>`, `Option<bool>`, `Option<int>`) using 4-tuple destructuring
 - **Real Directory Testing**: Uses `Directory.GetCurrentDirectory()` for path validation tests
-- **Parse Result Validation**: Tests both success/error states and extracted argument values, including list counts for multiple paths
-- **Comprehensive Scenarios**: Single path, multiple paths, option properties, argument parsing, validation errors, edge cases
+- **Parse Result Validation**: Tests both success/error states and extracted argument values, including list counts for multiple paths and thread values
+- **Comprehensive Scenarios**: Single path, multiple paths, thread configuration, option properties, argument parsing, validation errors, edge cases, default values
 - **Multiple Path Testing**: Validates 2-path and 3-path scenarios, mixed valid/invalid paths, and proper list indexing
+- **Thread Option Testing**: Validates thread count parsing, default value calculation, short option, and combined option scenarios
