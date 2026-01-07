@@ -7,12 +7,14 @@ using Serilog.Sinks.SystemConsole.Themes;
 
 namespace PhotoCleaner;
 
-internal class Program(int degreeOfParallelism, bool dryRun)
+internal class Program(CommandLine.Context commandLineContext)
 {
-    private readonly ConcurrentBag<string> _fileNames = [];
+    private ConcurrentBag<string> _fileNames = [];
     private readonly ConcurrentDictionary<string, byte> _unknownExtensions = new(
         StringComparer.OrdinalIgnoreCase
     );
+    private int _failedCount;
+    private int _modifiedCount;
 
     public static async Task<int> Main(string[] args)
     {
@@ -21,43 +23,21 @@ internal class Program(int degreeOfParallelism, bool dryRun)
         return await CommandLine.Invoke(args);
     }
 
-    public int Execute(List<DirectoryInfo> directoryPath)
+    public int Execute()
     {
-        int failedCount = 0;
-        int modifiedCount = 0;
         try
         {
             // Get list of files to process
-            GetFileList(directoryPath);
+            GetFileList(commandLineContext.Paths);
 
             // Log a warning for files with similar names but different cases
             FindCaseConflicts();
 
-            // Process files in parallel
-            Log.Information("Processing {FileCount} files ...", _fileNames.Count);
-            _fileNames
-                .AsParallel()
-                .WithDegreeOfParallelism(degreeOfParallelism)
-                .ForAll(fileName =>
-                {
-                    switch (
-                        ProcessTask.Execute(_fileNames, _unknownExtensions, new(fileName), dryRun)
-                    )
-                    {
-                        case ProcessTask.ProcessResult.Failure:
-                        case ProcessTask.ProcessResult.DoubleExtensions:
-                            _ = Interlocked.Increment(ref failedCount);
-                            break;
-                        case ProcessTask.ProcessResult.Modified:
-                        case ProcessTask.ProcessResult.Reprocess:
-                            _ = Interlocked.Increment(ref modifiedCount);
-                            break;
-                        case ProcessTask.ProcessResult.UnknownExtension:
-                        case ProcessTask.ProcessResult.Success:
-                        default:
-                            break;
-                    }
-                });
+            // Process files
+            while (!_fileNames.IsEmpty)
+            {
+                ExecuteProcess();
+            }
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
         {
@@ -75,17 +55,69 @@ internal class Program(int degreeOfParallelism, bool dryRun)
             }
         }
 
-        if (failedCount > 0)
+        if (_failedCount > 0)
         {
-            Log.Warning("Failed files: {FailedCount}", failedCount);
+            Log.Warning("Failed files: {FailedCount}", _failedCount);
         }
 
-        if (modifiedCount > 0)
+        if (_modifiedCount > 0)
         {
-            Log.Information("Modified files: {ModifiedCount}", modifiedCount);
+            Log.Information("Modified files: {ModifiedCount}", _modifiedCount);
         }
 
         return 0;
+    }
+
+    public void ExecuteProcess()
+    {
+        // Process files in parallel
+        ConcurrentBag<string> reProcessNames = [];
+        Log.Information("Processing {FileCount} files ...", _fileNames.Count);
+        _fileNames
+            .AsParallel()
+            .WithDegreeOfParallelism(commandLineContext.Threads)
+            .ForAll(fileName =>
+            {
+                switch (
+                    ProcessTask.Execute(
+                        new ProcessTask.Context
+                        {
+                            FileInfo = new FileInfo(fileName),
+                            DryRun = commandLineContext.DryRun,
+                            UnknownExtensions = _unknownExtensions,
+                            ReProcessNames = reProcessNames,
+                        }
+                    )
+                )
+                {
+                    case ProcessTask.ProcessResult.Failure:
+                    case ProcessTask.ProcessResult.DoubleExtensions:
+                        _ = Interlocked.Increment(ref _failedCount);
+                        break;
+                    case ProcessTask.ProcessResult.Modified:
+                    case ProcessTask.ProcessResult.Reprocess:
+                        _ = Interlocked.Increment(ref _modifiedCount);
+                        break;
+                    case ProcessTask.ProcessResult.UnknownExtension:
+                    case ProcessTask.ProcessResult.Success:
+                    default:
+                        break;
+                }
+            });
+
+        // Reprocess files
+        if (reProcessNames.IsEmpty)
+        {
+            _fileNames.Clear();
+        }
+        else
+        {
+            Log.Information(
+                "Adding {ReprocessCount} files for reprocessing.",
+                reProcessNames.Count
+            );
+            _fileNames = reProcessNames;
+        }
     }
 
     private static void CreateLogger()
@@ -114,7 +146,7 @@ internal class Program(int degreeOfParallelism, bool dryRun)
             directoryInfo
                 .EnumerateFiles("*", SearchOption.AllDirectories)
                 .AsParallel()
-                .WithDegreeOfParallelism(degreeOfParallelism)
+                .WithDegreeOfParallelism(commandLineContext.Threads)
                 .ForAll(file =>
                 {
                     _fileNames.Add(file.FullName);

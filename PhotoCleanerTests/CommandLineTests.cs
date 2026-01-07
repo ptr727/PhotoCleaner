@@ -1,6 +1,5 @@
 using System.CommandLine;
 using PhotoCleaner;
-using Xunit;
 
 namespace PhotoCleanerTests;
 
@@ -14,19 +13,15 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--dryrun"];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(parseResult.GetValue(pathOption)!);
-        Assert.Equal(existingPath, parseResult.GetValue(pathOption)![0].FullName);
-        Assert.True(parseResult.GetValue(dryRunOption));
+        Assert.Single(context.Paths);
+        Assert.Equal(existingPath, context.Paths[0].FullName);
+        Assert.True(context.DryRun);
     }
 
     [Fact]
@@ -37,19 +32,15 @@ public class CommandLineTests
         string[] args = ["-p", existingPath, "-d"];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(parseResult.GetValue(pathOption)!);
-        Assert.Equal(existingPath, parseResult.GetValue(pathOption)![0].FullName);
-        Assert.True(parseResult.GetValue(dryRunOption));
+        Assert.Single(context.Paths);
+        Assert.Equal(existingPath, context.Paths[0].FullName);
+        Assert.True(context.DryRun);
     }
 
     [Fact]
@@ -60,20 +51,16 @@ public class CommandLineTests
         string[] args = ["--path", existingPath];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(parseResult.GetValue(pathOption)!);
-        Assert.Equal(existingPath, parseResult.GetValue(pathOption)![0].FullName);
-        Assert.False(parseResult.GetValue(dryRunOption));
-        Assert.Equal(Math.Max(Environment.ProcessorCount, 4), parseResult.GetValue(threadsOption));
+        Assert.Single(context.Paths);
+        Assert.Equal(existingPath, context.Paths[0].FullName);
+        Assert.False(context.DryRun);
+        Assert.Equal(Math.Max(Environment.ProcessorCount, 4), context.Threads);
     }
 
     [Fact]
@@ -83,8 +70,7 @@ public class CommandLineTests
         string[] args = ["--dryrun"];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> _, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -99,8 +85,7 @@ public class CommandLineTests
         string[] args = [];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> _, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -116,8 +101,7 @@ public class CommandLineTests
         string[] args = ["--path", nonExistentPath];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> _, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -133,18 +117,14 @@ public class CommandLineTests
         string[] args = ["--path", existingPath];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> _,
-            Option<int> __,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(parseResult.GetValue(pathOption)!);
-        Assert.Equal(existingPath, parseResult.GetValue(pathOption)![0].FullName);
+        Assert.Single(context.Paths);
+        Assert.Equal(existingPath, context.Paths[0].FullName);
     }
 
     [Fact]
@@ -154,8 +134,7 @@ public class CommandLineTests
         string[] args = ["--path", "/test/path", "--invalid-option"];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -170,8 +149,7 @@ public class CommandLineTests
         string[] args = ["--path"];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -185,8 +163,7 @@ public class CommandLineTests
         string[] args = ["--help"];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -202,8 +179,7 @@ public class CommandLineTests
     public void ParseArgumentsVariousValidInputsParsesWithoutErrors(params string[] args)
     {
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert - Focus on parsing, not directory validation for this test
@@ -218,8 +194,7 @@ public class CommandLineTests
     public void RootCommandHasCorrectDescription()
     {
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
 
         // Assert
         Assert.Equal(
@@ -232,8 +207,10 @@ public class CommandLineTests
     public void PathOptionHasCorrectProperties()
     {
         // Act
-        (Option<List<DirectoryInfo>> pathOption, Option<bool> _, Option<int> __, RootCommand _) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
+        Option<List<DirectoryInfo>> pathOption =
+            (Option<List<DirectoryInfo>>)
+                rootCommand.Options.First(o => o is Option<List<DirectoryInfo>>);
 
         // Assert
         Assert.True(pathOption.Required);
@@ -245,8 +222,8 @@ public class CommandLineTests
     public void DryRunOptionHasCorrectProperties()
     {
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> dryRunOption, Option<int> __, RootCommand _) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
+        Option<bool> dryRunOption = (Option<bool>)rootCommand.Options.First(o => o is Option<bool>);
 
         // Assert
         Assert.False(dryRunOption.Required);
@@ -266,19 +243,15 @@ public class CommandLineTests
         string[] args = ["--path", path1, "--path", path2];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> _,
-            Option<int> __,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Equal(2, parseResult.GetValue(pathOption)!.Count);
-        Assert.Equal(path1, parseResult.GetValue(pathOption)![0].FullName);
-        Assert.Equal(path2, parseResult.GetValue(pathOption)![1].FullName);
+        Assert.Equal(2, context.Paths.Count);
+        Assert.Equal(path1, context.Paths[0].FullName);
+        Assert.Equal(path2, context.Paths[1].FullName);
     }
 
     [Fact]
@@ -290,20 +263,16 @@ public class CommandLineTests
         string[] args = ["-p", path1, "-p", path2, "-d"];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Equal(2, parseResult.GetValue(pathOption)!.Count);
-        Assert.Equal(path1, parseResult.GetValue(pathOption)![0].FullName);
-        Assert.Equal(path2, parseResult.GetValue(pathOption)![1].FullName);
-        Assert.True(parseResult.GetValue(dryRunOption));
+        Assert.Equal(2, context.Paths.Count);
+        Assert.Equal(path1, context.Paths[0].FullName);
+        Assert.Equal(path2, context.Paths[1].FullName);
+        Assert.True(context.DryRun);
     }
 
     [Fact]
@@ -315,8 +284,7 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--path", nonExistentPath];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -334,37 +302,29 @@ public class CommandLineTests
         string[] args = ["--path", path1, "--path", path2, "--path", path3];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> _,
-            Option<int> __,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Equal(3, parseResult.GetValue(pathOption)!.Count);
-        Assert.Equal(path1, parseResult.GetValue(pathOption)![0].FullName);
-        Assert.Equal(path2, parseResult.GetValue(pathOption)![1].FullName);
-        Assert.Equal(path3, parseResult.GetValue(pathOption)![2].FullName);
+        Assert.Equal(3, context.Paths.Count);
+        Assert.Equal(path1, context.Paths[0].FullName);
+        Assert.Equal(path2, context.Paths[1].FullName);
+        Assert.Equal(path3, context.Paths[2].FullName);
     }
 
     [Fact]
     public void ThreadsOptionHasCorrectProperties()
     {
         // Act
-        (
-            Option<List<DirectoryInfo>> _,
-            Option<bool> __,
-            Option<int> threadsOption,
-            RootCommand _
-        ) = CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
+        Option<int> threadsOption = (Option<int>)rootCommand.Options.First(o => o is Option<int>);
 
         // Assert
         Assert.False(threadsOption.Required);
         Assert.Equal(
-            "Number of parallel threads (default: max(4, core-count)).",
+            "Number of parallel threads (default: Max(ProcessorCount, 4)).",
             threadsOption.Description
         );
         Assert.Contains("-t", threadsOption.Aliases);
@@ -378,17 +338,13 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--threads", "8"];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Equal(8, parseResult.GetValue(threadsOption));
+        Assert.Equal(8, context.Threads);
     }
 
     [Fact]
@@ -399,17 +355,13 @@ public class CommandLineTests
         string[] args = ["-p", existingPath, "-t", "16"];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Equal(16, parseResult.GetValue(threadsOption));
+        Assert.Equal(16, context.Threads);
     }
 
     [Fact]
@@ -421,17 +373,13 @@ public class CommandLineTests
         int expectedDefault = Math.Max(Environment.ProcessorCount, 4);
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Equal(expectedDefault, parseResult.GetValue(threadsOption));
+        Assert.Equal(expectedDefault, context.Threads);
     }
 
     [Fact]
@@ -442,20 +390,16 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--dryrun", "--threads", "12"];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(parseResult.GetValue(pathOption)!);
-        Assert.Equal(existingPath, parseResult.GetValue(pathOption)![0].FullName);
-        Assert.True(parseResult.GetValue(dryRunOption));
-        Assert.Equal(12, parseResult.GetValue(threadsOption));
+        Assert.Single(context.Paths);
+        Assert.Equal(existingPath, context.Paths[0].FullName);
+        Assert.True(context.DryRun);
+        Assert.Equal(12, context.Threads);
     }
 
     [Fact]
@@ -466,8 +410,7 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--threads", "0"];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -483,8 +426,7 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--threads", "-5"];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -501,17 +443,13 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--threads", processorCount.ToString()];
 
         // Act
-        (
-            Option<List<DirectoryInfo>> pathOption,
-            Option<bool> dryRunOption,
-            Option<int> threadsOption,
-            RootCommand rootCommand
-        ) = CreateTestCommand();
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Equal(processorCount, parseResult.GetValue(threadsOption));
+        Assert.Equal(processorCount, context.Threads);
     }
 
     [Fact]
@@ -523,8 +461,7 @@ public class CommandLineTests
         string[] args = ["--path", existingPath, "--threads", exceedsCount.ToString()];
 
         // Act
-        (Option<List<DirectoryInfo>> _, Option<bool> _, Option<int> __, RootCommand rootCommand) =
-            CreateTestCommand();
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
         ParseResult parseResult = rootCommand.Parse(args);
 
         // Assert
@@ -535,25 +472,127 @@ public class CommandLineTests
         );
     }
 
-    /// <summary>
-    /// Helper method to create test command structure using the actual CommandLine.CreateRootCommand method
-    /// </summary>
-    private static (
-        Option<List<DirectoryInfo>> pathOption,
-        Option<bool> dryRunOption,
-        Option<int> threadsOption,
-        RootCommand rootCommand
-    ) CreateTestCommand()
+    [Fact]
+    public void ParseArgumentsThreadsWithValidValue8_ParsesCorrectly()
     {
-        RootCommand rootCommand = CommandLine.CreateRootCommand();
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string[] args = ["--path", existingPath, "--threads", "8"];
 
-        // Extract the options from the root command by type
-        Option<List<DirectoryInfo>> pathOption =
-            (Option<List<DirectoryInfo>>)
-                rootCommand.Options.First(o => o is Option<List<DirectoryInfo>>);
-        Option<bool> dryRunOption = (Option<bool>)rootCommand.Options.First(o => o is Option<bool>);
-        Option<int> threadsOption = (Option<int>)rootCommand.Options.First(o => o is Option<int>);
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
 
-        return (pathOption, dryRunOption, threadsOption, rootCommand);
+        // Only test if machine has at least 8 processors
+        if (Environment.ProcessorCount >= 8)
+        {
+            CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+            // Assert
+            Assert.False(parseResult.Errors.Any());
+            Assert.Equal(8, context.Threads);
+        }
+        else
+        {
+            // Should fail on machines with fewer processors
+            Assert.True(parseResult.Errors.Any());
+        }
+    }
+
+    [Fact]
+    public void ParseArgumentsMultiplePathsWithDifferentFormats_ParsesCorrectly()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string[] args =
+        [
+            "--path",
+            existingPath,
+            "-p",
+            existingPath,
+            "--path",
+            existingPath,
+            "--dryrun",
+        ];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        Assert.Equal(3, context.Paths.Count);
+        Assert.True(context.DryRun);
+    }
+
+    [Fact]
+    public void ParseArgumentsCombinedShortAndLongOptions_ParsesCorrectly()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string[] args = ["-p", existingPath, "--dryrun", "-t", "4"];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+
+        // Only test if machine has at least 4 processors
+        if (Environment.ProcessorCount >= 4)
+        {
+            CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+            // Assert
+            Assert.False(parseResult.Errors.Any());
+            Assert.Single(context.Paths);
+            Assert.True(context.DryRun);
+            Assert.Equal(4, context.Threads);
+        }
+    }
+
+    [Fact]
+    public void PathOption_HasCorrectDescription()
+    {
+        // Act
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
+        Option<List<DirectoryInfo>>? pathOption = rootCommand
+            .Options.OfType<Option<List<DirectoryInfo>>>()
+            .FirstOrDefault();
+
+        // Assert
+        Assert.NotNull(pathOption);
+        Assert.Contains("directory", pathOption.Description!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DryRunOption_HasCorrectDescription()
+    {
+        // Act
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
+        Option<bool>? dryRunOption = rootCommand.Options.OfType<Option<bool>>().FirstOrDefault();
+
+        // Assert
+        Assert.NotNull(dryRunOption);
+        Assert.Contains("dry", dryRunOption.Description!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ThreadsOption_HasCorrectDescription()
+    {
+        // Act
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
+        Option<int>? threadsOption = rootCommand.Options.OfType<Option<int>>().FirstOrDefault();
+
+        // Assert
+        Assert.NotNull(threadsOption);
+        Assert.Contains("parallel", threadsOption.Description!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Helper method to create test command structure using the actual CommandLine.CreateRootCommandWithCommandLine method
+    /// </summary>
+    private static (CommandLine commandLine, RootCommand rootCommand) CreateTestCommand()
+    {
+        return CommandLine.CreateRootCommandWithCommandLine();
     }
 }

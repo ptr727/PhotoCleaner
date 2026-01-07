@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
@@ -7,13 +8,16 @@ using Serilog;
 
 namespace PhotoCleaner;
 
-public class ProcessTask(
-    ConcurrentBag<string> fileNames,
-    ConcurrentDictionary<string, byte> unknownExtensions,
-    FileInfo fileInfo,
-    bool dryRun
-)
+public class ProcessTask(ProcessTask.Context processContext)
 {
+    public class Context
+    {
+        public required ConcurrentBag<string> ReProcessNames { get; init; }
+        public required ConcurrentDictionary<string, byte> UnknownExtensions { get; init; }
+        public required FileInfo FileInfo { get; init; }
+        public required bool DryRun { get; init; }
+    }
+
     public enum ProcessResult
     {
         Success,
@@ -106,95 +110,63 @@ public class ProcessTask(
         ".jpg",
         ".jpeg",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_pngExtensions = new[] { ".png" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
     private static readonly FrozenSet<string> s_heicExtensions = new[]
     {
         ".heic",
         ".heif",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_heifExtensions = s_heicExtensions;
     private static readonly FrozenSet<string> s_tiffExtensions = new[]
     {
         ".tif",
         ".tiff",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_dngExtensions = new[] { ".dng" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_mp4Extensions = new[] { ".mp4" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_mkvExtensions = new[] { ".mkv" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_cr2Extensions = new[] { ".cr2" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_nefExtensions = new[] { ".nef" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_orfExtensions = new[] { ".orf" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_wmvExtensions = new[] { ".wmv" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_3gpExtensions = new[] { ".3gp" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_aviExtensions = new[] { ".avi" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_gifExtensions = new[] { ".gif" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
-    private static readonly FrozenSet<string> s_psdExtensions = new[] { ".psd" }.ToFrozenSet(
-        StringComparer.OrdinalIgnoreCase
-    );
 
-    private static readonly Dictionary<string, FrozenSet<string>> s_mimeTypeExtensions = new()
-    {
-        { "application/vnd.adobe.photoshop", s_psdExtensions },
-        { "image/gif", s_gifExtensions },
-        { "image/heic", s_heicExtensions },
-        { "image/heif", s_heifExtensions },
-        { "image/jpeg", s_jpegExtensions },
-        { "image/png", s_pngExtensions },
-        { "image/tiff", s_tiffExtensions },
-        { "image/x-adobe-dng", s_dngExtensions },
-        { "image/x-canon-cr2", s_cr2Extensions },
-        { "image/x-nikon-nef", s_nefExtensions },
-        { "image/x-olympus-orf", s_orfExtensions },
-        { "video/3gpp", s_3gpExtensions },
-        { "video/mp4", s_mp4Extensions },
-        { "video/quicktime", s_quicktimeExtensions },
-        { "video/x-matroska", s_mkvExtensions },
-        { "video/x-ms-asf", s_wmvExtensions },
-        { "video/x-msvideo", s_aviExtensions },
-    };
+    private static readonly FrozenDictionary<string, FrozenSet<string>> s_mimeTypeExtensions =
+        new Dictionary<string, FrozenSet<string>>
+        {
+            {
+                "application/vnd.adobe.photoshop",
+                new[] { ".psd" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
+            { "image/gif", new[] { ".gif" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "image/heic", s_heicExtensions },
+            { "image/heif", s_heicExtensions },
+            { "image/jpeg", s_jpegExtensions },
+            { "image/png", new[] { ".png" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "image/tiff", s_tiffExtensions },
+            { "image/x-adobe-dng", new[] { ".dng" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "image/x-canon-cr2", new[] { ".cr2" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "image/x-nikon-nef", new[] { ".nef" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            {
+                "image/x-olympus-orf",
+                new[] { ".orf" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
+            { "video/3gpp", new[] { ".3gp" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "video/mp4", new[] { ".mp4" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "video/quicktime", s_quicktimeExtensions },
+            { "video/x-matroska", new[] { ".mkv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "video/x-ms-asf", new[] { ".wmv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "video/x-msvideo", new[] { ".avi" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    public static ProcessResult Execute(
-        ConcurrentBag<string> fileNames,
-        ConcurrentDictionary<string, byte> unknownExtensions,
-        FileInfo fileInfo,
-        bool dryRun
-    )
+    public static ProcessResult Execute(Context processContext)
     {
-        ProcessTask processTask = new(fileNames, unknownExtensions, fileInfo, dryRun);
+        ProcessTask processTask = new(processContext);
         return processTask.ExecuteAsync().GetAwaiter().GetResult();
     }
 
     private async Task<ProcessResult> ExecuteAsync()
     {
         // Skip non-media files
-        if (!s_processExtensions.Contains(fileInfo.Extension))
+        if (!s_processExtensions.Contains(processContext.FileInfo.Extension))
         {
-            if (!unknownExtensions.ContainsKey(fileInfo.Extension))
+            if (!processContext.UnknownExtensions.ContainsKey(processContext.FileInfo.Extension))
             {
-                Log.Warning("Skipping non-media file: '{FileName}'.", fileInfo.FullName);
-                _ = unknownExtensions.TryAdd(fileInfo.Extension, 0);
+                Log.Warning(
+                    "Skipping non-media file: '{FileName}'.",
+                    processContext.FileInfo.FullName
+                );
+                _ = processContext.UnknownExtensions.TryAdd(processContext.FileInfo.Extension, 0);
             }
             return ProcessResult.UnknownExtension;
         }
@@ -220,32 +192,15 @@ public class ProcessTask(
 
     private bool RenameMixedCaseExtensions()
     {
-        bool hasLower = false,
-            hasUpper = false;
-        foreach (char c in fileInfo.Extension)
-        {
-            if (char.IsLower(c))
-            {
-                hasLower = true;
-            }
-            else if (char.IsUpper(c))
-            {
-                hasUpper = true;
-            }
-            if (hasLower && hasUpper)
-            {
-                break;
-            }
-        }
-        if (!(hasLower && hasUpper))
+        if (!IsMixedCaseExtension(processContext.FileInfo.Extension.AsSpan()))
         {
             return true;
         }
 
         Log.Warning(
             "Mixed case extension detected '{Extension}': '{FileName}'.",
-            fileInfo.Extension,
-            fileInfo.FullName
+            processContext.FileInfo.Extension,
+            processContext.FileInfo.FullName
         );
         if (IsDryRun())
         {
@@ -254,8 +209,11 @@ public class ProcessTask(
 
         // Rename using lowercase extensions
         _modified = true;
-        string outputFile = Path.ChangeExtension(fileInfo.FullName, fileInfo.Extension.ToLower());
-        MoveFile(fileInfo.FullName, outputFile);
+        string outputFile = Path.ChangeExtension(
+            processContext.FileInfo.FullName,
+            processContext.FileInfo.Extension.ToLowerInvariant()
+        );
+        MoveFile(processContext.FileInfo.FullName, outputFile);
 
         // Queue renamed file for further processing
         return ReProcess(outputFile);
@@ -271,17 +229,18 @@ public class ProcessTask(
             )
         )
         {
-            // Add the missing type?
-            Log.Error(
-                "Unknown MIME type '{MimeType}' for file: '{FileName}'.",
-                _exifToolJson!.MIMEType,
-                fileInfo.FullName
+            // Add MIME type to list
+            throw new InvalidOperationException(
+                $"Unknown MIME type '{_exifToolJson!.MIMEType}' for file: '{processContext.FileInfo.FullName}'."
             );
-            return false;
         }
 
         // Get the normalized media extension for the file
-        GetFileMediaExtension(fileInfo.FullName, out string baseName, out string mediaExtensions);
+        GetFileMediaExtension(
+            processContext.FileInfo.FullName,
+            out string baseName,
+            out string mediaExtensions
+        );
 
         // Does the extension match the MIME type?
         bool rename = false;
@@ -293,15 +252,12 @@ public class ProcessTask(
                 mediaExtensions,
                 _exifToolJson!.MIMEType,
                 expectedExtensions,
-                fileInfo.FullName
+                processContext.FileInfo.FullName
             );
         }
         // Is it the preferred extension for this MIME type?
         else if (
-            !mediaExtensions.Equals(
-                expectedExtensions.First(),
-                StringComparison.CurrentCultureIgnoreCase
-            )
+            !mediaExtensions.Equals(expectedExtensions.First(), StringComparison.OrdinalIgnoreCase)
         )
         {
             rename = true;
@@ -310,7 +266,7 @@ public class ProcessTask(
                 mediaExtensions,
                 _exifToolJson!.MIMEType,
                 expectedExtensions,
-                fileInfo.FullName
+                processContext.FileInfo.FullName
             );
         }
         if (!rename)
@@ -325,7 +281,7 @@ public class ProcessTask(
         // Rename extension to match MIME type
         _modified = true;
         string outputFile = baseName + expectedExtensions.First();
-        MoveFile(fileInfo.FullName, outputFile);
+        MoveFile(processContext.FileInfo.FullName, outputFile);
 
         // Queue renamed file for further processing
         return ReProcess(outputFile);
@@ -343,12 +299,13 @@ public class ProcessTask(
                 "stream=codec_name",
                 "-of",
                 "default=nw=1:nk=1",
-                fileInfo.FullName,
+                processContext.FileInfo.FullName,
             ])
             .ExecuteBufferedAsync();
         return result
-            .StandardOutput.Trim()
-            .StartsWith("pcm", StringComparison.CurrentCultureIgnoreCase);
+            .StandardOutput.AsSpan()
+            .Trim()
+            .StartsWith("pcm", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<float> GetDurationAsync()
@@ -364,15 +321,15 @@ public class ProcessTask(
                 "format=duration",
                 "-of",
                 "default=nw=1:nk=1",
-                fileInfo.FullName,
+                processContext.FileInfo.FullName,
             ])
             .ExecuteBufferedAsync();
-        return float.Parse(result.StandardOutput.Trim());
+        return float.Parse(result.StandardOutput.AsSpan().Trim());
     }
 
     private async Task<bool> DeleteLivePhotosAsync()
     {
-        if (!s_liveVideoExtensions.Contains(fileInfo.Extension))
+        if (!s_liveVideoExtensions.Contains(processContext.FileInfo.Extension))
         {
             return true;
         }
@@ -390,7 +347,7 @@ public class ProcessTask(
             Log.Warning(
                 "Deleting {Duration}s short video clip: '{FileName}'.",
                 duration,
-                fileInfo.FullName
+                processContext.FileInfo.FullName
             );
             if (IsDryRun())
             {
@@ -398,15 +355,21 @@ public class ProcessTask(
             }
 
             _modified = true;
-            BackupFile(fileInfo.FullName, false);
+            BackupFile(processContext.FileInfo.FullName, false);
             return false;
         }
 
         // Live photos, <=3s short videos with matching HEIC or JPEG file
         if (
+            // Extension must be all lowercase or all uppercase
             !s_liveVideoImageExtensions.Any(extension =>
-                File.Exists(Path.ChangeExtension(fileInfo.FullName, extension.ToLower()))
-                || File.Exists(Path.ChangeExtension(fileInfo.FullName, extension.ToUpper()))
+                File.Exists(
+                    // Static extension list is already lowercase
+                    Path.ChangeExtension(processContext.FileInfo.FullName, extension)
+                )
+                || File.Exists(
+                    Path.ChangeExtension(processContext.FileInfo.FullName, extension.ToUpper())
+                )
             )
         )
         {
@@ -421,30 +384,30 @@ public class ProcessTask(
         Log.Warning(
             "Deleting {Duration}s video clip with matching image file: '{FileName}'.",
             duration,
-            fileInfo.FullName
+            processContext.FileInfo.FullName
         );
-        BackupFile(fileInfo.FullName, false);
+        BackupFile(processContext.FileInfo.FullName, false);
         return false;
     }
 
     private async Task<bool> ConvertVideoAsync()
     {
         // Output to temp file
-        string tempFile = Path.ChangeExtension(fileInfo.FullName, ".temp");
+        string tempFile = Path.ChangeExtension(processContext.FileInfo.FullName, ".temp");
         string[] ffmpegArguments;
-        if (s_remuxExtensions.Contains(fileInfo.Extension))
+        if (s_remuxExtensions.Contains(processContext.FileInfo.Extension))
         {
             // Remux audio and video
             Log.Information(
                 "Remuxing audio and video by file extension: '{FileName}'.",
-                fileInfo.FullName
+                processContext.FileInfo.FullName
             );
             ffmpegArguments =
             [
                 "-nostdin",
                 "-y",
                 "-i",
-                fileInfo.FullName,
+                processContext.FileInfo.FullName,
                 "-c",
                 "copy",
                 "-movflags",
@@ -454,19 +417,19 @@ public class ProcessTask(
                 tempFile,
             ];
         }
-        else if (s_reencodeExtensions.Contains(fileInfo.Extension))
+        else if (s_reencodeExtensions.Contains(processContext.FileInfo.Extension))
         {
             // Reencode audio and video
             Log.Information(
                 "Reencode audio and video by file extension: '{FileName}'.",
-                fileInfo.FullName
+                processContext.FileInfo.FullName
             );
             ffmpegArguments =
             [
                 "-nostdin",
                 "-y",
                 "-i",
-                fileInfo.FullName,
+                processContext.FileInfo.FullName,
                 "-c:v",
                 "libx264",
                 "-crf",
@@ -486,7 +449,7 @@ public class ProcessTask(
                 tempFile,
             ];
         }
-        else if (s_reencodeAudioExtensions.Contains(fileInfo.Extension))
+        else if (s_reencodeAudioExtensions.Contains(processContext.FileInfo.Extension))
         {
             // Only if audio is PCM
             if (!await IsPcmAudioAsync())
@@ -495,13 +458,16 @@ public class ProcessTask(
             }
 
             // Reencode audio and remux video
-            Log.Information("Reencode PCM audio and remux video: '{FileName}'.", fileInfo.FullName);
+            Log.Information(
+                "Reencode PCM audio and remux video: '{FileName}'.",
+                processContext.FileInfo.FullName
+            );
             ffmpegArguments =
             [
                 "-nostdin",
                 "-y",
                 "-i",
-                fileInfo.FullName,
+                processContext.FileInfo.FullName,
                 "-c:v",
                 "copy",
                 "-c:a",
@@ -536,10 +502,10 @@ public class ProcessTask(
 
         // Backup original file
         _modified = true;
-        BackupFile(fileInfo.FullName, false);
+        BackupFile(processContext.FileInfo.FullName, false);
 
         // Rename temp output to MP4
-        string outputFile = Path.ChangeExtension(fileInfo.FullName, ".mp4");
+        string outputFile = Path.ChangeExtension(processContext.FileInfo.FullName, ".mp4");
         MoveFile(tempFile, outputFile);
 
         // Set timestamps on remuxed file from original timestamps
@@ -558,24 +524,24 @@ public class ProcessTask(
         }
 
         // Only some file types are supported
-        if (!s_setdateExtensions.Contains(fileInfo.Extension))
+        if (!s_setdateExtensions.Contains(processContext.FileInfo.Extension))
         {
             // Not supported for this file type
             return true;
         }
 
         // Try to infer the date from the path
-        string createdDate = "";
-        if (!DateFromPath.InferCreatedDate(fileInfo.FullName, ref createdDate))
+        string createdDate = string.Empty;
+        if (!DateFromPath.InferCreatedDate(processContext.FileInfo.FullName, ref createdDate))
         {
             // No date inferred from path
-            Log.Warning("Missing created date: '{FileName}'.", fileInfo.FullName);
+            Log.Warning("Missing created date: '{FileName}'.", processContext.FileInfo.FullName);
             return true;
         }
         Log.Information(
             "Inferred created date from path '{CreatedDate}': '{FileName}'.",
             createdDate,
-            fileInfo.FullName
+            processContext.FileInfo.FullName
         );
         if (IsDryRun())
         {
@@ -584,18 +550,18 @@ public class ProcessTask(
 
         // Backup original file and keep original
         _modified = true;
-        BackupFile(fileInfo.FullName, true);
+        BackupFile(processContext.FileInfo.FullName, true);
 
         // Set the created date using exiftool
-        return await SetCreateDateAsync(fileInfo.FullName, createdDate)
-            && ReProcess(fileInfo.FullName);
+        return await SetCreateDateAsync(processContext.FileInfo.FullName, createdDate)
+            && ReProcess(processContext.FileInfo.FullName);
     }
 
     private static async Task<bool> SetCreateDateAsync(string outputFile, string createdDate)
     {
         // Set the created date using exiftool
         // Output file will be overwritten
-        string[] arguments = s_quicktimeExtensions.Contains(Path.GetExtension(outputFile).ToLower())
+        string[] arguments = s_quicktimeExtensions.Contains(Path.GetExtension(outputFile))
             ?
             [
                 // "-v2",
@@ -620,22 +586,24 @@ public class ProcessTask(
     {
         // Get exiftool info
         BufferedCommandResult result = await Cli.Wrap("exiftool")
-            .WithArguments(["-groupNames", "-json", fileInfo.FullName])
+            .WithArguments(["-groupNames", "-json", processContext.FileInfo.FullName])
             .ExecuteBufferedAsync();
-        string json = result.StandardOutput.Trim(' ', '\n', '\r', ' ', '[', ']');
-        return JsonSerializer.Deserialize(json, SourceGenerationContext.Default.ExifToolJson);
+        return JsonSerializer.Deserialize(
+            result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']']),
+            SourceGenerationContext.Default.ExifToolJson
+        );
     }
 
     private bool ReProcess(string fileName)
     {
         // Queue file for further processing
         Log.Information("Queuing '{FileName}' for further processing.", fileName);
-        fileNames.Add(fileName);
+        processContext.ReProcessNames.Add(fileName);
         _reprocess = true;
         return false;
     }
 
-    private static string GetBackupFileName(string originalFileName)
+    internal static string GetBackupFileName(string originalFileName)
     {
         string backupFileName = originalFileName + ".bak";
         int counter = 1;
@@ -686,6 +654,28 @@ public class ProcessTask(
         File.Move(sourceFileName, targetFileName, false);
     }
 
+    internal static bool IsMixedCaseExtension(ReadOnlySpan<char> extension)
+    {
+        bool hasLower = false,
+            hasUpper = false;
+        foreach (char c in extension)
+        {
+            if (char.IsLower(c))
+            {
+                hasLower = true;
+            }
+            else if (char.IsUpper(c))
+            {
+                hasUpper = true;
+            }
+            if (hasLower && hasUpper)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     internal static void GetFileMediaExtension(
         string filePath,
         out string baseName,
@@ -701,25 +691,27 @@ public class ProcessTask(
         // /path/file.jpeg.ext -> "/path/file.jpeg.ext", ""
 
         string fileName = Path.GetFileName(filePath);
-        string directory = Path.GetDirectoryName(filePath) ?? "";
+        string directory = Path.GetDirectoryName(filePath) ?? string.Empty;
 
         // Split filename by dots
-        string[] parts = fileName.Split('.');
+        ReadOnlySpan<char> fileNameSpan = fileName.AsSpan();
+        List<Range> parts = [.. fileNameSpan.Split('.')];
 
         // If no dots, return original path as base with empty extension
-        if (parts.Length <= 1)
+        if (parts.Count <= 1)
         {
             baseName = filePath;
-            mediaExtension = "";
+            mediaExtension = string.Empty;
             return;
         }
 
         // Work backwards from the end, collecting consecutive media extensions
         List<string> mediaExtensions = [];
-        for (int i = parts.Length - 1; i >= 1; i--)
+        for (int i = parts.Count - 1; i >= 1; i--)
         {
             // If this is a known media extension, add it to our collection
-            string candidateExtension = "." + parts[i].ToLower();
+            ReadOnlySpan<char> partSpan = fileNameSpan[parts[i]];
+            string candidateExtension = "." + new string(partSpan);
             if (s_processExtensions.Contains(candidateExtension))
             {
                 mediaExtensions.Insert(0, candidateExtension);
@@ -736,27 +728,25 @@ public class ProcessTask(
         {
             // No media extensions found
             baseName = filePath;
-            mediaExtension = "";
+            mediaExtension = string.Empty;
             return;
         }
 
         // Reconstruct base name by removing media extensions from the end
-        string[] baseParts = parts[..^mediaExtensions.Count];
-        string baseFileName = string.Join(".", baseParts);
+        int basePartsCount = parts.Count - mediaExtensions.Count;
+        string baseFileName = string.Join(".", parts.Take(basePartsCount).Select(r => fileName[r]));
         baseName = string.IsNullOrEmpty(directory)
             ? baseFileName
             : Path.Combine(directory, baseFileName);
         mediaExtension = string.Join("", mediaExtensions);
     }
 
-    private bool IsDryRun(
-        [System.Runtime.CompilerServices.CallerMemberName] string function = "unknown"
-    )
+    private bool IsDryRun([CallerMemberName] string function = "unknown")
     {
-        if (dryRun)
+        if (processContext.DryRun)
         {
             Log.Information("Dry run enabled, skipping action in {Function}.", function);
         }
-        return dryRun;
+        return processContext.DryRun;
     }
 }

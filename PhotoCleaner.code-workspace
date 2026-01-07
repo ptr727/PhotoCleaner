@@ -6,7 +6,23 @@
     ],
     "settings": {
         "cSpell.words": [
+            "dryrun",
             "Exif",
+            "exiftool",
+            "faststart",
+            "ffprobe",
+            "libx",
+            "matroska",
+            "movflags",
+            "msvideo",
+            "nostdin",
+            "quicktime",
+            "reencode",
+            "remux",
+            "remuxed",
+            "Remuxing",
+            "Serilog",
+            "setdate",
             "Xunit"
         ],
         "dotnet.defaultSolution": "PhotoCleaner.slnx",

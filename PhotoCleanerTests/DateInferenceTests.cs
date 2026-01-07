@@ -1,5 +1,3 @@
-using Xunit;
-
 namespace PhotoCleanerTests;
 
 public class DateInferenceTests
@@ -143,7 +141,7 @@ public class DateInferenceTests
         string tempFilePath = Path.Combine(directoryPath, filename);
 
         // Act
-        string createdDate = "";
+        string createdDate = string.Empty;
         bool result = PhotoCleaner.DateFromPath.InferCreatedDate(tempFilePath, ref createdDate);
 
         // Assert
@@ -156,5 +154,89 @@ public class DateInferenceTests
         {
             Assert.False(result);
         }
+    }
+
+    [Theory]
+    [InlineData("IMG_20240101_123456.jpg", "2024:01:01 12:34:56")]
+    [InlineData("VID-20231225-WA0001.mp4", "2023:12:25 00:00:00")]
+    [InlineData("Screenshot_2024-03-15-10-30-45.png", "2024:03:15 10:30:45")]
+    [InlineData("2024_01_15_photo.jpg", "2024:01:15 00:00:00")]
+    public void ExtractDateFromFilenameAdditionalFormats_ReturnsCorrectDate(
+        string filename,
+        string expectedDateString
+    )
+    {
+        // Act
+        DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromFilename(filename);
+
+        // Assert
+        _ = Assert.NotNull(result);
+        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
+        Assert.Equal(expectedDateString, actualDateString);
+    }
+
+    [Theory]
+    [InlineData("/Photos/2024/01/15/image.jpg", "2024:01:15 00:00:00")]
+    [InlineData("/backup/2023/01/photos/file.jpg", "2023:01:01 00:00:00")]
+    [InlineData("/media/2022/vacation.mp4", "2022:01:01 00:00:00")]
+    public void ExtractDateFromPathWithMultiplePathComponents_ReturnsCorrectDate(
+        string filePath,
+        string expectedDateString
+    )
+    {
+        // Act
+        DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(filePath);
+
+        // Assert
+        _ = Assert.NotNull(result);
+        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
+        Assert.Equal(expectedDateString, actualDateString);
+    }
+
+    [Theory]
+    [InlineData(1899, 12, 31, false)] // Before 1900
+    [InlineData(1900, 1, 1, true)] // Exactly 1900
+    [InlineData(2000, 6, 15, true)] // Valid mid-range
+    public void IsDateValid_WithVariousDates_ReturnsExpectedResult(
+        int year,
+        int month,
+        int day,
+        bool expected
+    )
+    {
+        // Arrange
+        DateTime date = new(year, month, day);
+
+        // Act
+        bool result = PhotoCleaner.DateFromPath.IsDateValid(date);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void IsDateValid_WithCurrentYear_ReturnsTrue()
+    {
+        // Arrange
+        DateTime currentDate = DateTime.Now;
+
+        // Act
+        bool result = PhotoCleaner.DateFromPath.IsDateValid(currentDate);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void IsDateValid_WithFutureYear_ReturnsFalse()
+    {
+        // Arrange
+        DateTime futureDate = new(DateTime.Now.Year + 2, 1, 1);
+
+        // Act
+        bool result = PhotoCleaner.DateFromPath.IsDateValid(futureDate);
+
+        // Assert
+        Assert.False(result);
     }
 }

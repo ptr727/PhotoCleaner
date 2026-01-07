@@ -1,5 +1,4 @@
 using PhotoCleaner;
-using Xunit;
 
 namespace PhotoCleanerTests;
 
@@ -101,9 +100,10 @@ public class ProcessTaskTests
     }
 
     [Theory]
-    [InlineData("/path/file.JPEG.HEIC", "/path/file", ".jpeg.heic")]
-    [InlineData("/path/file.JPG.PNG", "/path/file", ".jpg.png")]
-    [InlineData("/path/file.MP4.MOV", "/path/file", ".mp4.mov")]
+    [InlineData("/path/file.JPEG.HEIC", "/path/file", ".JPEG.HEIC")]
+    [InlineData("/path/file.Jpeg.Heic", "/path/file", ".Jpeg.Heic")]
+    [InlineData("/path/file.JPG", "/path/file", ".JPG")]
+    [InlineData("/path/file.Jpg", "/path/file", ".Jpg")]
     public void GetFileMediaExtensionCaseInsensitiveMediaExtensionsReturnsCorrectSplit(
         string filePath,
         string expectedBaseName,
@@ -138,5 +138,210 @@ public class ProcessTaskTests
         // Assert
         Assert.Equal(expectedBaseName, baseName);
         Assert.Equal(expectedExtension, extension);
+    }
+
+    [Theory]
+    [InlineData(".jpg")]
+    [InlineData(".JPG")]
+    [InlineData(".jpeg")]
+    [InlineData(".JPEG")]
+    [InlineData(".png")]
+    [InlineData(".PNG")]
+    [InlineData(".heic")]
+    [InlineData(".HEIC")]
+    [InlineData(".mp4")]
+    [InlineData(".MP4")]
+    public void IsMixedCaseExtensionAllLowercaseOrUppercaseReturnsFalse(string extension)
+    {
+        // Act
+        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData(".Jpg")]
+    [InlineData(".jPg")]
+    [InlineData(".jpG")]
+    [InlineData(".JPg")]
+    [InlineData(".jPG")]
+    [InlineData(".JpG")]
+    [InlineData(".Jpeg")]
+    [InlineData(".hEic")]
+    [InlineData(".Mp4")]
+    public void IsMixedCaseExtensionMixedCaseReturnsTrue(string extension)
+    {
+        // Act
+        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(".")]
+    public void IsMixedCaseExtensionEmptyOrDotOnlyReturnsFalse(string extension)
+    {
+        // Act
+        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData(".123")]
+    [InlineData(".456")]
+    [InlineData("...")]
+    public void IsMixedCaseExtensionNumericOnlyReturnsFalse(string extension)
+    {
+        // Act
+        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void GetBackupFileName_WithNewFile_ReturnsFileNameWithBakExtension()
+    {
+        // Arrange
+        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
+        File.WriteAllText(tempFile, "test");
+
+        try
+        {
+            // Act
+            string result = ProcessTask.GetBackupFileName(tempFile);
+
+            // Assert
+            Assert.Equal(tempFile + ".bak", result);
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void GetBackupFileName_WhenBakExists_ReturnsFileNameWithBak1()
+    {
+        // Arrange
+        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
+        string bakFile = tempFile + ".bak";
+        File.WriteAllText(tempFile, "test");
+        File.WriteAllText(bakFile, "backup");
+
+        try
+        {
+            // Act
+            string result = ProcessTask.GetBackupFileName(tempFile);
+
+            // Assert
+            Assert.Equal(tempFile + ".bak1", result);
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+            if (File.Exists(bakFile))
+                File.Delete(bakFile);
+        }
+    }
+
+    [Fact]
+    public void GetBackupFileName_WhenBakAndBak1Exist_ReturnsFileNameWithBak2()
+    {
+        // Arrange
+        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
+        string bakFile = tempFile + ".bak";
+        string bak1File = tempFile + ".bak1";
+        File.WriteAllText(tempFile, "test");
+        File.WriteAllText(bakFile, "backup");
+        File.WriteAllText(bak1File, "backup1");
+
+        try
+        {
+            // Act
+            string result = ProcessTask.GetBackupFileName(tempFile);
+
+            // Assert
+            Assert.Equal(tempFile + ".bak2", result);
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+            if (File.Exists(bakFile))
+                File.Delete(bakFile);
+            if (File.Exists(bak1File))
+                File.Delete(bak1File);
+        }
+    }
+
+    [Fact]
+    public void GetBackupFileName_IncrementsCounterUntilAvailable()
+    {
+        // Arrange
+        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
+        string bakFile = tempFile + ".bak";
+        string bak1File = tempFile + ".bak1";
+        string bak2File = tempFile + ".bak2";
+        string bak3File = tempFile + ".bak3";
+        File.WriteAllText(tempFile, "test");
+        File.WriteAllText(bakFile, "backup");
+        File.WriteAllText(bak1File, "backup1");
+        File.WriteAllText(bak2File, "backup2");
+        File.WriteAllText(bak3File, "backup3");
+
+        try
+        {
+            // Act
+            string result = ProcessTask.GetBackupFileName(tempFile);
+
+            // Assert
+            Assert.Equal(tempFile + ".bak4", result);
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+            if (File.Exists(bakFile))
+                File.Delete(bakFile);
+            if (File.Exists(bak1File))
+                File.Delete(bak1File);
+            if (File.Exists(bak2File))
+                File.Delete(bak2File);
+            if (File.Exists(bak3File))
+                File.Delete(bak3File);
+        }
+    }
+
+    [Fact]
+    public void GetBackupFileName_WithFileInSubdirectory_ReturnsCorrectPath()
+    {
+        // Arrange
+        string tempDir = Path.Combine(Path.GetTempPath(), $"testdir_{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+        string tempFile = Path.Combine(tempDir, "test.txt");
+        File.WriteAllText(tempFile, "test");
+
+        try
+        {
+            // Act
+            string result = ProcessTask.GetBackupFileName(tempFile);
+
+            // Assert
+            Assert.Equal(tempFile + ".bak", result);
+            Assert.Contains(tempDir, result);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, true);
+        }
     }
 }

@@ -1,5 +1,3 @@
-using Xunit;
-
 namespace PhotoCleanerTests;
 
 public class DateInferenceEdgeCasesTests
@@ -74,7 +72,7 @@ public class DateInferenceEdgeCasesTests
         string tempFilePath = Path.Combine(directoryPath, filename);
 
         // Act
-        string createdDate = "";
+        string createdDate = string.Empty;
         bool result = PhotoCleaner.DateFromPath.InferCreatedDate(tempFilePath, ref createdDate);
 
         // Assert - Should use filename date (2024) not path date (2023)
@@ -89,7 +87,7 @@ public class DateInferenceEdgeCasesTests
     public void InferCreatedDateNoDateAvailableReturnsFalse(string fullPath, bool expectedResult)
     {
         // Act
-        string createdDate = "";
+        string createdDate = string.Empty;
         bool result = PhotoCleaner.DateFromPath.InferCreatedDate(fullPath, ref createdDate);
 
         // Assert

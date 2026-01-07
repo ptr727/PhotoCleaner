@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Serilog;
 
 namespace PhotoCleaner;
@@ -8,7 +9,7 @@ public static class Extensions
     {
         public bool LogAndPropagate(
             Exception exception,
-            [System.Runtime.CompilerServices.CallerMemberName] string function = "unknown"
+            [CallerMemberName] string function = "unknown"
         )
         {
             logger.Error(exception, "{Function}", function);
@@ -17,7 +18,7 @@ public static class Extensions
 
         public bool LogAndHandle(
             Exception exception,
-            [System.Runtime.CompilerServices.CallerMemberName] string function = "unknown"
+            [CallerMemberName] string function = "unknown"
         )
         {
             logger.Error(exception, "{Function}", function);

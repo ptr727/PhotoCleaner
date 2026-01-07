@@ -7,7 +7,7 @@
             "request": "attach"
         },
         {
-            "name": "Test",
+            "name": "Process",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
@@ -20,7 +20,7 @@
                 "--path=/data/media/Pictures_Wedding",
                 "--path=/data/media/Videos",
                 "--threads=4",
-                "--dryrun=true"
+                "--dryrun=false"
             ],
             "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
             "console": "internalConsole",
