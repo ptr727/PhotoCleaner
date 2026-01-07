@@ -4,140 +4,208 @@ namespace PhotoCleanerTests;
 
 public class ProcessTaskTests
 {
-    [Theory]
-    [InlineData("/path/to/file.ext.heic.jpg", "/path/to/file.ext", ".heic.jpg")]
-    [InlineData("/path/to/file.heic.jpg.ext", "/path/to/file.heic.jpg.ext", "")]
-    [InlineData("/path/to/file.jpeg.heic", "/path/to/file", ".jpeg.heic")]
-    [InlineData("/path/to/file", "/path/to/file", "")]
-    [InlineData("/path/to/file.ext", "/path/to/file.ext", "")]
-    public void GetFileMediaExtensionMultipleMediaExtensionsReturnsCorrectSplit(
-        string filePath,
-        string expectedBaseName,
-        string expectedExtension
-    )
+    [Fact]
+    public void GetFileMediaExtensionMultipleMediaExtensionsReturnsCorrectSplit()
     {
-        // Act
-        ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        // Arrange - Use platform-independent paths
+        (string, string, string)[] testCases =
+        [
+            (
+                Path.Combine("path", "to", "file.ext.heic.jpg"),
+                Path.Combine("path", "to", "file.ext"),
+                ".heic.jpg"
+            ),
+            (
+                Path.Combine("path", "to", "file.heic.jpg.ext"),
+                Path.Combine("path", "to", "file.heic.jpg.ext"),
+                ""
+            ),
+            (
+                Path.Combine("path", "to", "file.jpeg.heic"),
+                Path.Combine("path", "to", "file"),
+                ".jpeg.heic"
+            ),
+            (Path.Combine("path", "to", "file"), Path.Combine("path", "to", "file"), ""),
+            (Path.Combine("path", "to", "file.ext"), Path.Combine("path", "to", "file.ext"), ""),
+        ];
 
-        // Assert
-        Assert.Equal(expectedBaseName, baseName);
-        Assert.Equal(expectedExtension, extension);
+        foreach (
+            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
+        )
+        {
+            // Act
+            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+
+            // Assert
+            Assert.Equal(expectedBaseName, baseName);
+            Assert.Equal(expectedExtension, extension);
+        }
     }
 
-    [Theory]
-    [InlineData("/file", "/file", "")]
-    [InlineData("/path/to/file", "/path/to/file", "")]
-    [InlineData("file", "file", "")]
-    public void GetFileMediaExtensionNoExtensionReturnsFullPathAsBase(
-        string filePath,
-        string expectedBaseName,
-        string expectedExtension
-    )
+    [Fact]
+    public void GetFileMediaExtensionNoExtensionReturnsFullPathAsBase()
     {
-        // Act
-        ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        // Arrange - Use platform-independent paths
+        (string, string, string)[] testCases =
+        [
+            ("file", "file", ""),
+            (Path.Combine("path", "to", "file"), Path.Combine("path", "to", "file"), ""),
+        ];
 
-        // Assert
-        Assert.Equal(expectedBaseName, baseName);
-        Assert.Equal(expectedExtension, extension);
+        foreach (
+            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
+        )
+        {
+            // Act
+            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+
+            // Assert
+            Assert.Equal(expectedBaseName, baseName);
+            Assert.Equal(expectedExtension, extension);
+        }
     }
 
-    [Theory]
-    [InlineData("/file.ext", "/file.ext", "")]
-    [InlineData("/path/to/file.ext", "/path/to/file.ext", "")]
-    [InlineData("/path/file.jpeg.ext", "/path/file.jpeg.ext", "")]
-    [InlineData("/path/file.txt.doc", "/path/file.txt.doc", "")]
-    public void GetFileMediaExtensionNonMediaExtensionReturnsFullPathAsBase(
-        string filePath,
-        string expectedBaseName,
-        string expectedExtension
-    )
+    [Fact]
+    public void GetFileMediaExtensionNonMediaExtensionReturnsFullPathAsBase()
     {
-        // Act
-        ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        // Arrange - Use platform-independent paths
+        (string, string, string)[] testCases =
+        [
+            (Path.Combine("path", "to", "file.ext"), Path.Combine("path", "to", "file.ext"), ""),
+            (Path.Combine("path", "file.jpeg.ext"), Path.Combine("path", "file.jpeg.ext"), ""),
+            (Path.Combine("path", "file.txt.doc"), Path.Combine("path", "file.txt.doc"), ""),
+        ];
 
-        // Assert
-        Assert.Equal(expectedBaseName, baseName);
-        Assert.Equal(expectedExtension, extension);
+        foreach (
+            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
+        )
+        {
+            // Act
+            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+
+            // Assert
+            Assert.Equal(expectedBaseName, baseName);
+            Assert.Equal(expectedExtension, extension);
+        }
     }
 
-    [Theory]
-    [InlineData("/path/to/file.jpg", "/path/to/file", ".jpg")]
-    [InlineData("/photos/image.heic", "/photos/image", ".heic")]
-    [InlineData("C:\\Pictures\\video.mp4", "C:\\Pictures\\video", ".mp4")]
-    [InlineData("/media/audio.mov", "/media/audio", ".mov")]
-    [InlineData("/path/document.tif", "/path/document", ".tif")]
-    public void GetFileMediaExtensionSingleMediaExtensionReturnsCorrectSplit(
-        string filePath,
-        string expectedBaseName,
-        string expectedExtension
-    )
+    [Fact]
+    public void GetFileMediaExtensionSingleMediaExtensionReturnsCorrectSplit()
     {
-        // Act
-        ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        // Arrange - Use platform-independent paths
+        (string, string, string)[] testCases =
+        [
+            (Path.Combine("path", "to", "file.jpg"), Path.Combine("path", "to", "file"), ".jpg"),
+            (Path.Combine("photos", "image.heic"), Path.Combine("photos", "image"), ".heic"),
+            (Path.Combine("Pictures", "video.mp4"), Path.Combine("Pictures", "video"), ".mp4"),
+            (Path.Combine("media", "audio.mov"), Path.Combine("media", "audio"), ".mov"),
+            (Path.Combine("path", "document.tif"), Path.Combine("path", "document"), ".tif"),
+        ];
 
-        // Assert
-        Assert.Equal(expectedBaseName, baseName);
-        Assert.Equal(expectedExtension, extension);
+        foreach (
+            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
+        )
+        {
+            // Act
+            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+
+            // Assert
+            Assert.Equal(expectedBaseName, baseName);
+            Assert.Equal(expectedExtension, extension);
+        }
     }
 
-    [Theory]
-    [InlineData("/path/file.jpeg.txt", "/path/file.jpeg.txt", "")]
-    [InlineData("/path/file.jpg.doc.pdf", "/path/file.jpg.doc.pdf", "")]
-    [InlineData("/path/file.heic.ext.unknown", "/path/file.heic.ext.unknown", "")]
-    public void GetFileMediaExtensionMediaExtensionFollowedByNonMediaReturnsFullPathAsBase(
-        string filePath,
-        string expectedBaseName,
-        string expectedExtension
-    )
+    [Fact]
+    public void GetFileMediaExtensionMediaExtensionFollowedByNonMediaReturnsFullPathAsBase()
     {
-        // Act
-        ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        // Arrange - Use platform-independent paths
+        (string, string, string)[] testCases =
+        [
+            (Path.Combine("path", "file.jpeg.txt"), Path.Combine("path", "file.jpeg.txt"), ""),
+            (
+                Path.Combine("path", "file.jpg.doc.pdf"),
+                Path.Combine("path", "file.jpg.doc.pdf"),
+                ""
+            ),
+            (
+                Path.Combine("path", "file.heic.ext.unknown"),
+                Path.Combine("path", "file.heic.ext.unknown"),
+                ""
+            ),
+        ];
 
-        // Assert
-        Assert.Equal(expectedBaseName, baseName);
-        Assert.Equal(expectedExtension, extension);
+        foreach (
+            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
+        )
+        {
+            // Act
+            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+
+            // Assert
+            Assert.Equal(expectedBaseName, baseName);
+            Assert.Equal(expectedExtension, extension);
+        }
     }
 
-    [Theory]
-    [InlineData("/path/file.JPEG.HEIC", "/path/file", ".JPEG.HEIC")]
-    [InlineData("/path/file.Jpeg.Heic", "/path/file", ".Jpeg.Heic")]
-    [InlineData("/path/file.JPG", "/path/file", ".JPG")]
-    [InlineData("/path/file.Jpg", "/path/file", ".Jpg")]
-    public void GetFileMediaExtensionCaseInsensitiveMediaExtensionsReturnsCorrectSplit(
-        string filePath,
-        string expectedBaseName,
-        string expectedExtension
-    )
+    [Fact]
+    public void GetFileMediaExtensionCaseInsensitiveMediaExtensionsReturnsCorrectSplit()
     {
-        // Act
-        ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        // Arrange - Use platform-independent paths
+        (string, string, string)[] testCases =
+        [
+            (Path.Combine("path", "file.JPEG.HEIC"), Path.Combine("path", "file"), ".JPEG.HEIC"),
+            (Path.Combine("path", "file.Jpeg.Heic"), Path.Combine("path", "file"), ".Jpeg.Heic"),
+            (Path.Combine("path", "file.JPG"), Path.Combine("path", "file"), ".JPG"),
+            (Path.Combine("path", "file.Jpg"), Path.Combine("path", "file"), ".Jpg"),
+        ];
 
-        // Assert
-        Assert.Equal(expectedBaseName, baseName);
-        Assert.Equal(expectedExtension, extension);
+        foreach (
+            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
+        )
+        {
+            // Act
+            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+
+            // Assert
+            Assert.Equal(expectedBaseName, baseName);
+            Assert.Equal(expectedExtension, extension);
+        }
     }
 
-    [Theory]
-    [InlineData(
-        "/complex/path.with.dots/file.backup.jpg",
-        "/complex/path.with.dots/file.backup",
-        ".jpg"
-    )]
-    [InlineData("/path/file.v1.jpeg.heic", "/path/file.v1", ".jpeg.heic")]
-    [InlineData("/path/file.2024.01.01.mp4", "/path/file.2024.01.01", ".mp4")]
-    public void GetFileMediaExtensionComplexPathsWithDotsReturnsCorrectSplit(
-        string filePath,
-        string expectedBaseName,
-        string expectedExtension
-    )
+    [Fact]
+    public void GetFileMediaExtensionComplexPathsWithDotsReturnsCorrectSplit()
     {
-        // Act
-        ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        // Arrange - Use platform-independent paths
+        (string, string, string)[] testCases =
+        [
+            (
+                Path.Combine("complex", "path.with.dots", "file.backup.jpg"),
+                Path.Combine("complex", "path.with.dots", "file.backup"),
+                ".jpg"
+            ),
+            (
+                Path.Combine("path", "file.v1.jpeg.heic"),
+                Path.Combine("path", "file.v1"),
+                ".jpeg.heic"
+            ),
+            (
+                Path.Combine("path", "file.2024.01.01.mp4"),
+                Path.Combine("path", "file.2024.01.01"),
+                ".mp4"
+            ),
+        ];
 
-        // Assert
-        Assert.Equal(expectedBaseName, baseName);
-        Assert.Equal(expectedExtension, extension);
+        foreach (
+            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
+        )
+        {
+            // Act
+            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+
+            // Assert
+            Assert.Equal(expectedBaseName, baseName);
+            Assert.Equal(expectedExtension, extension);
+        }
     }
 
     [Theory]
@@ -222,7 +290,9 @@ public class ProcessTaskTests
         finally
         {
             if (File.Exists(tempFile))
+            {
                 File.Delete(tempFile);
+            }
         }
     }
 
@@ -246,9 +316,14 @@ public class ProcessTaskTests
         finally
         {
             if (File.Exists(tempFile))
+            {
                 File.Delete(tempFile);
+            }
+
             if (File.Exists(bakFile))
+            {
                 File.Delete(bakFile);
+            }
         }
     }
 
@@ -274,11 +349,19 @@ public class ProcessTaskTests
         finally
         {
             if (File.Exists(tempFile))
+            {
                 File.Delete(tempFile);
+            }
+
             if (File.Exists(bakFile))
+            {
                 File.Delete(bakFile);
+            }
+
             if (File.Exists(bak1File))
+            {
                 File.Delete(bak1File);
+            }
         }
     }
 
@@ -308,15 +391,29 @@ public class ProcessTaskTests
         finally
         {
             if (File.Exists(tempFile))
+            {
                 File.Delete(tempFile);
+            }
+
             if (File.Exists(bakFile))
+            {
                 File.Delete(bakFile);
+            }
+
             if (File.Exists(bak1File))
+            {
                 File.Delete(bak1File);
+            }
+
             if (File.Exists(bak2File))
+            {
                 File.Delete(bak2File);
+            }
+
             if (File.Exists(bak3File))
+            {
                 File.Delete(bak3File);
+            }
         }
     }
 
@@ -325,7 +422,7 @@ public class ProcessTaskTests
     {
         // Arrange
         string tempDir = Path.Combine(Path.GetTempPath(), $"testdir_{Guid.NewGuid()}");
-        Directory.CreateDirectory(tempDir);
+        _ = Directory.CreateDirectory(tempDir);
         string tempFile = Path.Combine(tempDir, "test.txt");
         File.WriteAllText(tempFile, "test");
 
@@ -341,7 +438,9 @@ public class ProcessTaskTests
         finally
         {
             if (Directory.Exists(tempDir))
+            {
                 Directory.Delete(tempDir, true);
+            }
         }
     }
 }

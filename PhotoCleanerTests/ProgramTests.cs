@@ -10,7 +10,7 @@ public class ProgramTests
     {
         // Create a temporary test directory
         _testDirectory = Path.Combine(Path.GetTempPath(), $"PhotoCleanerTests_{Guid.NewGuid()}");
-        Directory.CreateDirectory(_testDirectory);
+        _ = Directory.CreateDirectory(_testDirectory);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class ProgramTests
         Program program = new(context);
 
         // Act
-        int result = program.Execute();
+        _ = program.Execute();
 
         // Assert - file should still exist with same modification time
         Assert.True(File.Exists(testFile));
@@ -81,7 +81,7 @@ public class ProgramTests
         Program program = new(context);
 
         // Act - should complete without error
-        program.Execute();
+        _ = program.Execute();
 
         // Cleanup
         Directory.Delete(_testDirectory, true);
@@ -99,7 +99,7 @@ public class ProgramTests
         };
 
         // Assert
-        Assert.Single(context.Paths);
+        _ = Assert.Single(context.Paths);
         Assert.True(context.DryRun);
         Assert.Equal(4, context.Threads);
 

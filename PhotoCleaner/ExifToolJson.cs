@@ -70,20 +70,18 @@ public class ExifToolJson
     [JsonPropertyName("Matroska:DateTimeOriginal")]
     public string? MatroskaDateTimeOriginal { get; set; }
 
-    public bool IsDateSet()
-    {
+    public bool IsDateSet() =>
         // EXIF:DateTimeOriginal
         // EXIF:CreateDate
         // XMP:CreateDate
         // QuickTime:CreateDate
-        return !string.IsNullOrEmpty(EXIFDateTimeOriginal)
-            || !string.IsNullOrEmpty(EXIFCreateDate)
-            || !string.IsNullOrEmpty(XMPCreateDate)
-            || (
-                !string.IsNullOrEmpty(QuickTimeCreateDate)
-                && QuickTimeCreateDate != "0000:00:00 00:00:00"
-            );
-    }
+        !string.IsNullOrEmpty(EXIFDateTimeOriginal)
+        || !string.IsNullOrEmpty(EXIFCreateDate)
+        || !string.IsNullOrEmpty(XMPCreateDate)
+        || (
+            !string.IsNullOrEmpty(QuickTimeCreateDate)
+            && QuickTimeCreateDate != "0000:00:00 00:00:00"
+        );
 
     public string? GetDateString()
     {

@@ -17,18 +17,43 @@ public class DateInferenceEdgeCasesTests
         Assert.True(result.HasValue);
     }
 
-    [Theory]
-    [InlineData("/Volumes/External/Photos/2023/Christmas/2023-12-25/family_dinner.jpg")]
-    [InlineData(@"C:\Users\Photos\Vacation\2022\2022-07-15\beach.png")]
-    [InlineData("/storage/emulated/0/DCIM/Camera/2021/2021-01-01/new_year.mp4")]
-    public void ExtractDateFromPathWindowsAndLinuxPathsExtractsCorrectly(string fullPath)
+    [Fact]
+    public void ExtractDateFromPathWindowsAndLinuxPathsExtractsCorrectly()
     {
-        // Act
-        DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(fullPath);
+        // Arrange - Use platform-independent paths
+        string[] testPaths =
+        [
+            Path.Combine(
+                "Volumes",
+                "External",
+                "Photos",
+                "2023",
+                "Christmas",
+                "2023-12-25",
+                "family_dinner.jpg"
+            ),
+            Path.Combine("Users", "Photos", "Vacation", "2022", "2022-07-15", "beach.png"),
+            Path.Combine(
+                "storage",
+                "emulated",
+                "0",
+                "DCIM",
+                "Camera",
+                "2021",
+                "2021-01-01",
+                "new_year.mp4"
+            ),
+        ];
 
-        // Assert
-        _ = Assert.NotNull(result);
-        Assert.True(result.HasValue);
+        foreach (string? fullPath in testPaths)
+        {
+            // Act
+            DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(fullPath);
+
+            // Assert
+            _ = Assert.NotNull(result);
+            Assert.True(result.HasValue);
+        }
     }
 
     [Theory]
@@ -68,7 +93,7 @@ public class DateInferenceEdgeCasesTests
     {
         // Arrange - filename has 2024 date, path has 2023 date
         const string filename = "IMG_20240315_143000.jpg";
-        const string directoryPath = "/photos/2023/2023-01-01/";
+        string directoryPath = Path.Combine("photos", "2023", "2023-01-01");
         string tempFilePath = Path.Combine(directoryPath, filename);
 
         // Act
@@ -80,17 +105,25 @@ public class DateInferenceEdgeCasesTests
         Assert.StartsWith("2024:03:15", createdDate);
     }
 
-    [Theory]
-    [InlineData("/photos/unknown/IMG_12345.jpg", false)] // No date in filename or path
-    [InlineData("/random/path/no_date_file.mov", false)] // No recognizable date patterns
-    [InlineData("/temp/processing/temp_file.jpg", false)] // Temporary file paths
-    public void InferCreatedDateNoDateAvailableReturnsFalse(string fullPath, bool expectedResult)
+    [Fact]
+    public void InferCreatedDateNoDateAvailableReturnsFalse()
     {
-        // Act
-        string createdDate = string.Empty;
-        bool result = PhotoCleaner.DateFromPath.InferCreatedDate(fullPath, ref createdDate);
+        // Arrange - Use platform-independent paths
+        (string, bool)[] testCases =
+        [
+            (Path.Combine("photos", "unknown", "IMG_12345.jpg"), false), // No date in filename or path
+            (Path.Combine("random", "path", "no_date_file.mov"), false), // No recognizable date patterns
+            (Path.Combine("temp", "processing", "temp_file.jpg"), false), // Temporary file paths
+        ];
 
-        // Assert
-        Assert.Equal(expectedResult, result);
+        foreach ((string? fullPath, bool expectedResult) in testCases)
+        {
+            // Act
+            string createdDate = string.Empty;
+            bool result = PhotoCleaner.DateFromPath.InferCreatedDate(fullPath, ref createdDate);
+
+            // Assert
+            Assert.Equal(expectedResult, result);
+        }
     }
 }

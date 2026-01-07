@@ -118,18 +118,15 @@ internal static partial class DateFromPath
                 )
             )
             {
-                if (
+                return
                     int.TryParse(match3b.Groups[4].Value, out int hours)
                     && int.TryParse(match3b.Groups[5].Value, out int minutes)
                     && int.TryParse(match3b.Groups[6].Value, out int seconds)
                     && hours <= 23
                     && minutes <= 59
                     && seconds <= 59
-                )
-                {
-                    return date3b.Date.Add(new TimeSpan(hours, minutes, seconds));
-                }
-                return date3b;
+                    ? date3b.Date.Add(new TimeSpan(hours, minutes, seconds))
+                    : date3b;
             }
         }
 
@@ -193,22 +190,13 @@ internal static partial class DateFromPath
         // Pattern 6: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
         Regex pattern6 = MyRegex5();
         Match match6 = pattern6.Match(fileName);
-        if (!match6.Success)
-        {
-            return null;
-        }
-
-        if (
-            DateTime.TryParse(
+        return !match6.Success ? null
+            : DateTime.TryParse(
                 $"{match6.Groups[1].Value}-{match6.Groups[2].Value}-{match6.Groups[3].Value}",
                 out DateTime date6
             )
-        )
-        {
-            return date6;
-        }
-
-        return null;
+                ? date6
+            : null;
     }
 
     internal static DateTime? ExtractDateFromPath(string fullPath)

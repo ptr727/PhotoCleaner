@@ -3,8 +3,13 @@
     "tasks": [
         {
             "label": ".Net Build",
-            "type": "dotnet",
-            "task": "build",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "build",
+                "${workspaceFolder}",
+                "--verbosity=diagnostic"
+            ],
             "group": "build",
             "problemMatcher": [
                 "$msCompile"
@@ -20,7 +25,9 @@
             "command": "dotnet",
             "args": [
                 "format",
+                "style",
                 "--verify-no-changes",
+                "--severity=info",
                 "--verbosity=detailed"
             ],
             "problemMatcher": [

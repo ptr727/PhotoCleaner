@@ -19,7 +19,7 @@ public class CommandLineTests
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(context.Paths);
+        _ = Assert.Single(context.Paths);
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.True(context.DryRun);
     }
@@ -38,7 +38,7 @@ public class CommandLineTests
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(context.Paths);
+        _ = Assert.Single(context.Paths);
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.True(context.DryRun);
     }
@@ -57,7 +57,7 @@ public class CommandLineTests
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(context.Paths);
+        _ = Assert.Single(context.Paths);
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.False(context.DryRun);
         Assert.Equal(Math.Max(Environment.ProcessorCount, 4), context.Threads);
@@ -123,7 +123,7 @@ public class CommandLineTests
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(context.Paths);
+        _ = Assert.Single(context.Paths);
         Assert.Equal(existingPath, context.Paths[0].FullName);
     }
 
@@ -396,7 +396,7 @@ public class CommandLineTests
 
         // Assert
         Assert.False(parseResult.Errors.Any());
-        Assert.Single(context.Paths);
+        _ = Assert.Single(context.Paths);
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.True(context.DryRun);
         Assert.Equal(12, context.Threads);
@@ -544,7 +544,7 @@ public class CommandLineTests
 
             // Assert
             Assert.False(parseResult.Errors.Any());
-            Assert.Single(context.Paths);
+            _ = Assert.Single(context.Paths);
             Assert.True(context.DryRun);
             Assert.Equal(4, context.Threads);
         }
@@ -591,8 +591,6 @@ public class CommandLineTests
     /// <summary>
     /// Helper method to create test command structure using the actual CommandLine.CreateRootCommandWithCommandLine method
     /// </summary>
-    private static (CommandLine commandLine, RootCommand rootCommand) CreateTestCommand()
-    {
-        return CommandLine.CreateRootCommandWithCommandLine();
-    }
+    private static (CommandLine commandLine, RootCommand rootCommand) CreateTestCommand() =>
+        CommandLine.CreateRootCommandWithCommandLine();
 }

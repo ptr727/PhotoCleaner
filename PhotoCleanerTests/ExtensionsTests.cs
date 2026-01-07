@@ -11,10 +11,7 @@ public class ExtensionsTests
     {
         public List<LogEvent> Events { get; } = [];
 
-        public void Emit(LogEvent logEvent)
-        {
-            Events.Add(logEvent);
-        }
+        public void Emit(LogEvent logEvent) => Events.Add(logEvent);
     }
 
     [Fact]
@@ -30,7 +27,7 @@ public class ExtensionsTests
 
         // Assert
         Assert.False(result);
-        Assert.Single(sink.Events);
+        _ = Assert.Single(sink.Events);
         Assert.Equal(LogEventLevel.Error, sink.Events[0].Level);
         Assert.Equal(exception, sink.Events[0].Exception);
     }
@@ -48,7 +45,7 @@ public class ExtensionsTests
 
         // Assert
         Assert.False(result);
-        Assert.Single(sink.Events);
+        _ = Assert.Single(sink.Events);
         LogEventPropertyValue? functionValue = sink.Events[0]
             .Properties.GetValueOrDefault("Function");
         Assert.NotNull(functionValue);
@@ -68,7 +65,7 @@ public class ExtensionsTests
 
         // Assert
         Assert.False(result);
-        Assert.Single(sink.Events);
+        _ = Assert.Single(sink.Events);
         LogEventPropertyValue? functionValue = sink.Events[0]
             .Properties.GetValueOrDefault("Function");
         Assert.NotNull(functionValue);
@@ -92,7 +89,7 @@ public class ExtensionsTests
 
         // Assert
         Assert.True(result);
-        Assert.Single(sink.Events);
+        _ = Assert.Single(sink.Events);
         Assert.Equal(LogEventLevel.Error, sink.Events[0].Level);
         Assert.Equal(exception, sink.Events[0].Exception);
     }
@@ -110,7 +107,7 @@ public class ExtensionsTests
 
         // Assert
         Assert.True(result);
-        Assert.Single(sink.Events);
+        _ = Assert.Single(sink.Events);
         LogEventPropertyValue? functionValue = sink.Events[0]
             .Properties.GetValueOrDefault("Function");
         Assert.NotNull(functionValue);
@@ -130,7 +127,7 @@ public class ExtensionsTests
 
         // Assert
         Assert.True(result);
-        Assert.Single(sink.Events);
+        _ = Assert.Single(sink.Events);
         LogEventPropertyValue? functionValue = sink.Events[0]
             .Properties.GetValueOrDefault("Function");
         Assert.NotNull(functionValue);
@@ -154,8 +151,8 @@ public class ExtensionsTests
 
         // Assert
         Assert.False(result);
-        Assert.Single(sink.Events);
-        Assert.IsType<ArgumentNullException>(sink.Events[0].Exception);
+        _ = Assert.Single(sink.Events);
+        _ = Assert.IsType<ArgumentNullException>(sink.Events[0].Exception);
     }
 
     [Fact]
@@ -171,8 +168,8 @@ public class ExtensionsTests
 
         // Assert
         Assert.True(result);
-        Assert.Single(sink.Events);
-        Assert.IsType<FileNotFoundException>(sink.Events[0].Exception);
+        _ = Assert.Single(sink.Events);
+        _ = Assert.IsType<FileNotFoundException>(sink.Events[0].Exception);
     }
 
     [Fact]
