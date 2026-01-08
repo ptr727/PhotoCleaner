@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Serilog.Events;
 
 namespace PhotoCleaner;
 
@@ -9,19 +10,8 @@ internal class CommandLine
         public required List<DirectoryInfo> Paths { get; init; }
         public required int Threads { get; init; }
         public required bool DryRun { get; init; }
-    }
-
-    public static async Task<int> Invoke(string[] args)
-    {
-        RootCommand rootCommand = CreateRootCommand();
-        ParseResult parseResult = rootCommand.Parse(args);
-        return await parseResult.InvokeAsync();
-    }
-
-    private static RootCommand CreateRootCommand()
-    {
-        (CommandLine _, RootCommand rootCommand) = CreateRootCommandWithCommandLine();
-        return rootCommand;
+        public required LogEventLevel LogLevel { get; init; }
+        public string? LogFile { get; init; }
     }
 
     internal static (
@@ -37,6 +27,8 @@ internal class CommandLine
             commandLine._pathOption,
             commandLine._dryRunOption,
             commandLine._threadsOption,
+            commandLine._logLevelOption,
+            commandLine._logFileOption,
         };
         rootCommand.SetAction(parseResult =>
         {
@@ -53,11 +45,15 @@ internal class CommandLine
             Paths = parseResult.GetValue(_pathOption) ?? [],
             Threads = parseResult.GetValue(_threadsOption),
             DryRun = parseResult.GetValue(_dryRunOption),
+            LogLevel = parseResult.GetValue(_logLevelOption),
+            LogFile = parseResult.GetValue(_logFileOption),
         };
 
     private readonly Option<List<DirectoryInfo>> _pathOption = CreatePathOption();
     private readonly Option<bool> _dryRunOption = CreateDryRunOption();
     private readonly Option<int> _threadsOption = CreateThreadsOption();
+    private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
+    private readonly Option<string?> _logFileOption = CreateLogFileOption();
 
     private static Option<List<DirectoryInfo>> CreatePathOption() =>
         new Option<List<DirectoryInfo>>("--path", "-p")
@@ -97,4 +93,14 @@ internal class CommandLine
 
         return option;
     }
+
+    private static Option<LogEventLevel> CreateLogLevelOption() =>
+        new("--loglevel", "-l")
+        {
+            Description = "Set the log level (default: Information).",
+            DefaultValueFactory = _ => LogEventLevel.Information,
+        };
+
+    private static Option<string?> CreateLogFileOption() =>
+        new("--logfile", "-f") { Description = "Write logs to the specified file (optional)." };
 }

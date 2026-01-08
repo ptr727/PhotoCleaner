@@ -1,5 +1,6 @@
 using System.CommandLine;
 using PhotoCleaner;
+using Serilog.Events;
 
 namespace PhotoCleanerTests;
 
@@ -22,6 +23,7 @@ public class CommandLineTests
         _ = Assert.Single(context.Paths);
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.True(context.DryRun);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -41,6 +43,7 @@ public class CommandLineTests
         _ = Assert.Single(context.Paths);
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.True(context.DryRun);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -61,6 +64,7 @@ public class CommandLineTests
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.False(context.DryRun);
         Assert.Equal(Math.Max(Environment.ProcessorCount, 4), context.Threads);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -223,7 +227,7 @@ public class CommandLineTests
     {
         // Act
         (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
-        Option<bool> dryRunOption = (Option<bool>)rootCommand.Options.First(o => o is Option<bool>);
+        Option<bool> dryRunOption = rootCommand.Options.OfType<Option<bool>>().First();
 
         // Assert
         Assert.False(dryRunOption.Required);
@@ -252,6 +256,8 @@ public class CommandLineTests
         Assert.Equal(2, context.Paths.Count);
         Assert.Equal(path1, context.Paths[0].FullName);
         Assert.Equal(path2, context.Paths[1].FullName);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -273,6 +279,7 @@ public class CommandLineTests
         Assert.Equal(path1, context.Paths[0].FullName);
         Assert.Equal(path2, context.Paths[1].FullName);
         Assert.True(context.DryRun);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -312,6 +319,7 @@ public class CommandLineTests
         Assert.Equal(path1, context.Paths[0].FullName);
         Assert.Equal(path2, context.Paths[1].FullName);
         Assert.Equal(path3, context.Paths[2].FullName);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -345,6 +353,7 @@ public class CommandLineTests
         // Assert
         Assert.False(parseResult.Errors.Any());
         Assert.Equal(8, context.Threads);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -362,6 +371,7 @@ public class CommandLineTests
         // Assert
         Assert.False(parseResult.Errors.Any());
         Assert.Equal(16, context.Threads);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -380,6 +390,7 @@ public class CommandLineTests
         // Assert
         Assert.False(parseResult.Errors.Any());
         Assert.Equal(expectedDefault, context.Threads);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -400,6 +411,8 @@ public class CommandLineTests
         Assert.Equal(existingPath, context.Paths[0].FullName);
         Assert.True(context.DryRun);
         Assert.Equal(12, context.Threads);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -450,6 +463,7 @@ public class CommandLineTests
         // Assert
         Assert.False(parseResult.Errors.Any());
         Assert.Equal(processorCount, context.Threads);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -491,6 +505,7 @@ public class CommandLineTests
             // Assert
             Assert.False(parseResult.Errors.Any());
             Assert.Equal(8, context.Threads);
+            Assert.Equal(LogEventLevel.Information, context.LogLevel);
         }
         else
         {
@@ -524,6 +539,7 @@ public class CommandLineTests
         Assert.False(parseResult.Errors.Any());
         Assert.Equal(3, context.Paths.Count);
         Assert.True(context.DryRun);
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
     }
 
     [Fact]
@@ -547,6 +563,7 @@ public class CommandLineTests
             _ = Assert.Single(context.Paths);
             Assert.True(context.DryRun);
             Assert.Equal(4, context.Threads);
+            Assert.Equal(LogEventLevel.Information, context.LogLevel);
         }
     }
 
@@ -586,6 +603,160 @@ public class CommandLineTests
         // Assert
         Assert.NotNull(threadsOption);
         Assert.Contains("parallel", threadsOption.Description!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LogLevelOption_HasCorrectProperties()
+    {
+        // Act
+        (CommandLine _, RootCommand rootCommand) = CreateTestCommand();
+        Option<LogEventLevel>? logLevelOption = rootCommand
+            .Options.OfType<Option<LogEventLevel>>()
+            .FirstOrDefault();
+
+        // Assert
+        Assert.NotNull(logLevelOption);
+        Assert.False(logLevelOption.Required);
+        Assert.Equal("Set the log level (default: Information).", logLevelOption.Description);
+        Assert.Contains("-l", logLevelOption.Aliases);
+    }
+
+    [Fact]
+    public void ParseArgumentsLogLevelWithValueParsesCorrectly()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string[] args = ["--path", existingPath, "--loglevel", "Debug"];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        Assert.Equal(LogEventLevel.Debug, context.LogLevel);
+    }
+
+    [Fact]
+    public void ParseArgumentsLogLevelWithShortOptionParsesCorrectly()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string[] args = ["-p", existingPath, "-l", "Warning"];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        Assert.Equal(LogEventLevel.Warning, context.LogLevel);
+    }
+
+    [Fact]
+    public void ParseArgumentsLogLevelDefaultValueIsCorrect()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string[] args = ["--path", existingPath];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        Assert.Equal(LogEventLevel.Information, context.LogLevel);
+    }
+
+    [Fact]
+    public void ParseArgumentsLogFileOptionParsesCorrectly()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string logFilePath = "/tmp/photocleaner.log";
+        string[] args = ["--path", existingPath, "--logfile", logFilePath];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        Assert.Equal(logFilePath, context.LogFile);
+    }
+
+    [Fact]
+    public void ParseArgumentsLogFileOptionWithShortOptionParsesCorrectly()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string logFilePath = "/var/log/app.log";
+        string[] args = ["-p", existingPath, "-f", logFilePath];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        Assert.Equal(logFilePath, context.LogFile);
+    }
+
+    [Fact]
+    public void ParseArgumentsLogFileOptionNotSpecifiedIsNull()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string[] args = ["--path", existingPath];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        Assert.Null(context.LogFile);
+    }
+
+    [Fact]
+    public void ParseArgumentsAllOptionsIncludingLogFileParsesCorrectly()
+    {
+        // Arrange
+        string existingPath = Directory.GetCurrentDirectory();
+        string logFilePath = "./test.log";
+        string[] args =
+        [
+            "--path",
+            existingPath,
+            "--dryrun",
+            "--threads",
+            "8",
+            "--loglevel",
+            "Debug",
+            "--logfile",
+            logFilePath,
+        ];
+
+        // Act
+        (CommandLine commandLine, RootCommand rootCommand) = CreateTestCommand();
+        ParseResult parseResult = rootCommand.Parse(args);
+        CommandLine.Context context = commandLine.CreateContext(parseResult);
+
+        // Assert
+        Assert.False(parseResult.Errors.Any());
+        _ = Assert.Single(context.Paths);
+        Assert.Equal(existingPath, context.Paths[0].FullName);
+        Assert.True(context.DryRun);
+        Assert.Equal(8, context.Threads);
+        Assert.Equal(LogEventLevel.Debug, context.LogLevel);
+        Assert.Equal(logFilePath, context.LogFile);
     }
 
     /// <summary>

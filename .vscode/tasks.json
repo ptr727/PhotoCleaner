@@ -38,6 +38,7 @@
                 "clear": false
             },
             "dependsOn": [
+                "CSharpier Format",
                 ".Net Build"
             ]
         },
@@ -107,7 +108,9 @@
                 "showReuseMessage": false,
                 "clear": false
             },
-            "dependsOn": [".Net Build"]
+            "dependsOn": [
+                ".Net Build"
+            ]
         },
         {
             "label": "Test with Coverage",
@@ -126,7 +129,9 @@
                 "showReuseMessage": false,
                 "clear": false
             },
-            "dependsOn": [".Net Build"]
+            "dependsOn": [
+                ".Net Build"
+            ]
         }
     ]
 }

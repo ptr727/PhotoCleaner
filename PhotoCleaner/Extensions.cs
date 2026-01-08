@@ -24,5 +24,9 @@ public static class Extensions
             logger.Error(exception, "{Function}", function);
             return true;
         }
+
+        public ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
     }
+
+    public class LogOverride;
 }

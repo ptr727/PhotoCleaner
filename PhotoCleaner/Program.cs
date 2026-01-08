@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.CommandLine;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Serilog;
 using Serilog.Debugging;
 using Serilog.Events;
@@ -18,22 +20,44 @@ internal class Program(CommandLine.Context commandLineContext)
 
     public static async Task<int> Main(string[] args)
     {
-        CreateLogger();
+        // Parse commandline
+        (CommandLine commandLine, RootCommand rootCommand) =
+            CommandLine.CreateRootCommandWithCommandLine();
+        ParseResult parseResult = rootCommand.Parse(args);
 
-        return await CommandLine.Invoke(args);
+        // Create logger only if we have a valid command context (not help/version)
+        if (parseResult.Errors.Count == 0 && parseResult.CommandResult.Command == rootCommand)
+        {
+            try
+            {
+                CreateLogger(commandLine.CreateContext(parseResult));
+                Log.Logger.LogOverrideContext().Information("Starting PhotoCleaner: {Args}", args);
+            }
+            catch (InvalidOperationException)
+            {
+                // Help was requested, skip logger creation
+            }
+        }
+
+        // Execute program (handles help and errors)
+        return await parseResult.InvokeAsync();
     }
 
     public int Execute()
     {
         try
         {
-            // Get list of files to process
-            GetFileList(commandLineContext.Paths);
+            bool foundConflicts = true;
+            while (foundConflicts)
+            {
+                // Get list of files to process
+                GetFileList(commandLineContext.Paths);
 
-            // Log a warning for files with similar names but different cases
-            FindCaseConflicts();
+                // Rename mixed case files
+                foundConflicts = FindCaseConflicts();
+            }
 
-            // Process files
+            // Process files as long as there are files to process
             while (!_fileNames.IsEmpty)
             {
                 ExecuteProcess();
@@ -78,6 +102,7 @@ internal class Program(CommandLine.Context commandLineContext)
             .WithDegreeOfParallelism(commandLineContext.Threads)
             .ForAll(fileName =>
             {
+                Log.Debug("Processing file: '{FileName}'", fileName);
                 switch (
                     ProcessTask.Execute(
                         new ProcessTask.Context
@@ -120,12 +145,13 @@ internal class Program(CommandLine.Context commandLineContext)
         }
     }
 
-    private static void CreateLogger()
+    private static void CreateLogger(CommandLine.Context context)
     {
         // Enable Serilog debug output to the console
         SelfLog.Enable(Console.Error);
         LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
-            .MinimumLevel.Is(LogEventLevel.Information)
+            .MinimumLevel.Is(context.LogLevel)
+            .MinimumLevel.Override(typeof(Extensions.LogOverride).FullName!, LogEventLevel.Verbose)
             .Enrich.WithThreadId()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
@@ -133,11 +159,24 @@ internal class Program(CommandLine.Context commandLineContext)
                 outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] <{ThreadId}> {Message}{NewLine}{Exception}",
                 formatProvider: CultureInfo.InvariantCulture
             );
+
+        // Add file sink if logFile is specified
+        if (!string.IsNullOrEmpty(context.LogFile))
+        {
+            _ = loggerConfiguration.WriteTo.File(
+                context.LogFile,
+                // Remove lj from default to quote strings
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] <{ThreadId}> {Message}{NewLine}{Exception}",
+                formatProvider: CultureInfo.InvariantCulture
+            );
+        }
+
         Log.Logger = loggerConfiguration.CreateLogger();
     }
 
     private void GetFileList(List<DirectoryInfo> directoryList)
     {
+        _fileNames = [];
         foreach (DirectoryInfo directoryInfo in directoryList)
         {
             Log.Information("Enumerating files in '{DirectoryPath}' ...", directoryInfo.FullName);
@@ -161,8 +200,9 @@ internal class Program(CommandLine.Context commandLineContext)
         }
     }
 
-    private void FindCaseConflicts()
+    private bool FindCaseConflicts()
     {
+        // Create case insensitive map of file names to list of case sensitive file names
         Dictionary<string, List<string>> fileNameMap = new(
             _fileNames.Count,
             StringComparer.OrdinalIgnoreCase
@@ -179,17 +219,64 @@ internal class Program(CommandLine.Context commandLineContext)
             }
         }
 
+        // Find all files with multiple cased versions of the same file name
+        bool foundConflicts = false;
         foreach (List<string> files in fileNameMap.Values.Where(values => values.Count > 1))
         {
-            foreach (string file in files)
+            // Rename the files to make them unique
+            foundConflicts = true;
+            RenamedMixedCaseFiles(files);
+        }
+
+        // The renamed files could create new variants of mixed case names
+        return foundConflicts;
+    }
+
+    private void RenamedMixedCaseFiles(List<string> files)
+    {
+        Log.Warning("Found {FileCount} case variants of file: '{FileName}'", files.Count, files[0]);
+        int counter = 1;
+        foreach (string file in files)
+        {
+            string uniqueFileName = GetUniqueFileName(file, ref counter);
+            Log.Warning("Renaming '{OldFileName}' to '{NewFileName}'", file, uniqueFileName);
+            if (!IsDryRun())
             {
-                FileInfo fileInfo = new(file);
-                Log.Warning(
-                    "File name case conflict: '{FileName}' ({Size})",
-                    file,
-                    fileInfo.Length
-                );
+                File.Move(file, uniqueFileName, false);
             }
         }
+    }
+
+    internal static string GetUniqueFileName(string fileName, ref int counter)
+    {
+        string directory = Path.GetDirectoryName(fileName) ?? string.Empty;
+        string name = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+
+        // Generate a unique file name by appending a counter
+        string uniqueFileName = CreateFileName(directory, name, counter, extension);
+        counter++;
+        while (File.Exists(uniqueFileName))
+        {
+            counter++;
+            uniqueFileName = CreateFileName(directory, name, counter, extension);
+        }
+        return uniqueFileName;
+    }
+
+    private static string CreateFileName(
+        string directory,
+        string name,
+        int counter,
+        string extension
+    ) => Path.Combine(directory, $"{name}_{counter}{extension}");
+
+    private bool IsDryRun([CallerMemberName] string function = "unknown")
+    {
+        if (commandLineContext.DryRun)
+        {
+            Log.Verbose("Dry run enabled, skipping action in {Function}.", function);
+        }
+        return commandLineContext.DryRun;
     }
 }

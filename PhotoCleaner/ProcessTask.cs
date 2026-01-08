@@ -160,12 +160,9 @@ public class ProcessTask(ProcessTask.Context processContext)
         // Skip non-media files
         if (!s_processExtensions.Contains(processContext.FileInfo.Extension))
         {
+            Log.Debug("Skipping non-media file: '{FileName}'.", processContext.FileInfo.FullName);
             if (!processContext.UnknownExtensions.ContainsKey(processContext.FileInfo.Extension))
             {
-                Log.Warning(
-                    "Skipping non-media file: '{FileName}'.",
-                    processContext.FileInfo.FullName
-                );
                 _ = processContext.UnknownExtensions.TryAdd(processContext.FileInfo.Extension, 0);
             }
             return ProcessResult.UnknownExtension;
@@ -329,20 +326,19 @@ public class ProcessTask(ProcessTask.Context processContext)
 
     private async Task<bool> DeleteLivePhotosAsync()
     {
+        // Live photos are MOV or MP4 about ~3s long with a matching HEIC or JPEG file
+        const double liveVideoDuration = 4.0;
+        const double shortVideoDuration = 1.0;
         if (!s_liveVideoExtensions.Contains(processContext.FileInfo.Extension))
         {
             return true;
         }
 
-        // Long videos
+        // Get duration
         float duration = await GetDurationAsync();
-        if (duration > 3.0)
-        {
-            return true;
-        }
 
-        // Very short videos, always delete
-        if (duration <= 0.5)
+        // Short videos, always delete
+        if (duration <= shortVideoDuration)
         {
             Log.Warning(
                 "Deleting {Duration}s short video clip: '{FileName}'.",
@@ -359,22 +355,25 @@ public class ProcessTask(ProcessTask.Context processContext)
             return false;
         }
 
-        // Live photos, <=3s short videos with matching HEIC or JPEG file
-        if (
-            // Extension must be all lowercase or all uppercase
-            !s_liveVideoImageExtensions.Any(extension =>
-                File.Exists(
-                    // Static extension list is already lowercase
-                    Path.ChangeExtension(processContext.FileInfo.FullName, extension)
-                )
-                || File.Exists(
-                    Path.ChangeExtension(processContext.FileInfo.FullName, extension.ToUpper())
-                )
-            )
-        )
+        // No matching image then skip
+        if (!IsVideoMatchingImageExtension())
         {
             return true;
         }
+
+        // Long videos
+        if (duration >= liveVideoDuration)
+        {
+            // Warn in case the video length threshold needs adjustment
+            Log.Warning(
+                "Long {Duration}s video clip has matching image file: '{FileName}'.",
+                duration,
+                processContext.FileInfo.FullName
+            );
+            return true;
+        }
+
+        // Delete live video with matching image
         if (IsDryRun())
         {
             return false;
@@ -603,13 +602,14 @@ public class ProcessTask(ProcessTask.Context processContext)
         return false;
     }
 
-    internal static string GetBackupFileName(string originalFileName)
+    internal static string GetBackupFileName(string fileName)
     {
-        string backupFileName = originalFileName + ".bak";
+        // Append .bak or .bakN to make unique backup file name
+        string backupFileName = fileName + ".bak";
         int counter = 1;
         while (File.Exists(backupFileName))
         {
-            backupFileName = originalFileName + $".bak{counter}";
+            backupFileName = fileName + $".bak{counter}";
             counter++;
         }
         return backupFileName;
@@ -653,6 +653,17 @@ public class ProcessTask(ProcessTask.Context processContext)
         );
         File.Move(sourceFileName, targetFileName, false);
     }
+
+    private bool IsVideoMatchingImageExtension() =>
+        // Find matching HEIC or JPEG file
+        // Extension on disk must be all lowercase or all uppercase
+        // Static extension list is already lowercase
+        s_liveVideoImageExtensions.Any(extension =>
+            File.Exists(Path.ChangeExtension(processContext.FileInfo.FullName, extension))
+            || File.Exists(
+                Path.ChangeExtension(processContext.FileInfo.FullName, extension.ToUpper())
+            )
+        );
 
     internal static bool IsMixedCaseExtension(ReadOnlySpan<char> extension)
     {
@@ -745,7 +756,7 @@ public class ProcessTask(ProcessTask.Context processContext)
     {
         if (processContext.DryRun)
         {
-            Log.Information("Dry run enabled, skipping action in {Function}.", function);
+            Log.Verbose("Dry run enabled, skipping action in {Function}.", function);
         }
         return processContext.DryRun;
     }
