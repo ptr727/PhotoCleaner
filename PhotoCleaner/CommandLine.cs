@@ -1,4 +1,6 @@
+using System.Collections.Frozen;
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using Serilog.Events;
 
 namespace PhotoCleaner;
@@ -12,6 +14,7 @@ internal class CommandLine
         public required bool DryRun { get; init; }
         public required LogEventLevel LogLevel { get; init; }
         public string? LogFile { get; init; }
+        public required CancellationToken CancellationToken { get; init; }
     }
 
     internal static (
@@ -30,16 +33,21 @@ internal class CommandLine
             commandLine._logLevelOption,
             commandLine._logFileOption,
         };
-        rootCommand.SetAction(parseResult =>
-        {
-            Program program = new(commandLine.CreateContext(parseResult));
-            return program.Execute();
-        });
+        rootCommand.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(commandLine.CreateContext(parseResult, cancellationToken));
+                return program.ExecuteAsync();
+            }
+        );
 
         return (commandLine, rootCommand);
     }
 
-    internal Context CreateContext(ParseResult parseResult) =>
+    public Context CreateContext(
+        ParseResult parseResult,
+        CancellationToken cancellationToken = default
+    ) =>
         new()
         {
             Paths = parseResult.GetValue(_pathOption) ?? [],
@@ -47,6 +55,7 @@ internal class CommandLine
             DryRun = parseResult.GetValue(_dryRunOption),
             LogLevel = parseResult.GetValue(_logLevelOption),
             LogFile = parseResult.GetValue(_logFileOption),
+            CancellationToken = cancellationToken,
         };
 
     private readonly Option<List<DirectoryInfo>> _pathOption = CreatePathOption();
@@ -103,4 +112,16 @@ internal class CommandLine
 
     private static Option<string?> CreateLogFileOption() =>
         new("--logfile", "-f") { Description = "Write logs to the specified file (optional)." };
+
+    public static bool BypassStartup(ParseResult parseResult) =>
+        parseResult.Errors.Count > 0
+        || parseResult.CommandResult.Children.Any(symbolResult =>
+            symbolResult is OptionResult optionResult
+            && s_cliBypassList.Contains(optionResult.Option.Name)
+        );
+
+    private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        ["--help", "--version"]
+    );
 }

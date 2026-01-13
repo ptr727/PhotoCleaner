@@ -25,25 +25,21 @@ internal class Program(CommandLine.Context commandLineContext)
             CommandLine.CreateRootCommandWithCommandLine();
         ParseResult parseResult = rootCommand.Parse(args);
 
-        // Create logger only if we have a valid command context (not help/version)
-        if (parseResult.Errors.Count == 0 && parseResult.CommandResult.Command == rootCommand)
+        // Bypass startup for help and version commands
+        if (CommandLine.BypassStartup(parseResult))
         {
-            try
-            {
-                CreateLogger(commandLine.CreateContext(parseResult));
-                Log.Logger.LogOverrideContext().Information("Starting PhotoCleaner: {Args}", args);
-            }
-            catch (InvalidOperationException)
-            {
-                // Help was requested, skip logger creation
-            }
+            return await parseResult.InvokeAsync();
         }
 
-        // Execute program (handles help and errors)
+        // Create logger
+        CreateLogger(commandLine.CreateContext(parseResult));
+        Log.Logger.LogOverrideContext().Information("Starting PhotoCleaner: {Args}", args);
+
+        // Invoke command
         return await parseResult.InvokeAsync();
     }
 
-    public int Execute()
+    public async Task<int> ExecuteAsync()
     {
         try
         {
@@ -54,13 +50,13 @@ internal class Program(CommandLine.Context commandLineContext)
                 GetFileList(commandLineContext.Paths);
 
                 // Rename mixed case files
-                foundConflicts = FindCaseConflicts();
+                foundConflicts = FindAndFixCaseConflicts();
             }
 
             // Process files as long as there are files to process
             while (!_fileNames.IsEmpty)
             {
-                ExecuteProcess();
+                await ExecuteProcess();
             }
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
@@ -92,28 +88,31 @@ internal class Program(CommandLine.Context commandLineContext)
         return 0;
     }
 
-    public void ExecuteProcess()
+    public async Task ExecuteProcess()
     {
         // Process files in parallel
         ConcurrentBag<string> reProcessNames = [];
         Log.Information("Processing {FileCount} files ...", _fileNames.Count);
-        _fileNames
-            .AsParallel()
-            .WithDegreeOfParallelism(commandLineContext.Threads)
-            .ForAll(fileName =>
+        await Parallel.ForEachAsync(
+            _fileNames,
+            new ParallelOptions()
+            {
+                MaxDegreeOfParallelism = commandLineContext.Threads,
+                CancellationToken = commandLineContext.CancellationToken,
+            },
+            async (fileName, cancellationToken) =>
             {
                 Log.Debug("Processing file: '{FileName}'", fileName);
-                switch (
-                    ProcessTask.Execute(
-                        new ProcessTask.Context
-                        {
-                            FileInfo = new FileInfo(fileName),
-                            DryRun = commandLineContext.DryRun,
-                            UnknownExtensions = _unknownExtensions,
-                            ReProcessNames = reProcessNames,
-                        }
-                    )
-                )
+                ProcessTask processTask = new(
+                    new ProcessTask.Context
+                    {
+                        FileInfo = new FileInfo(fileName),
+                        DryRun = commandLineContext.DryRun,
+                        UnknownExtensions = _unknownExtensions,
+                        ReProcessNames = reProcessNames,
+                    }
+                );
+                switch (await processTask.ExecuteAsync())
                 {
                     case ProcessTask.ProcessResult.Failure:
                     case ProcessTask.ProcessResult.DoubleExtensions:
@@ -128,7 +127,8 @@ internal class Program(CommandLine.Context commandLineContext)
                     default:
                         break;
                 }
-            });
+            }
+        );
 
         // Reprocess files
         if (reProcessNames.IsEmpty)
@@ -200,7 +200,7 @@ internal class Program(CommandLine.Context commandLineContext)
         }
     }
 
-    private bool FindCaseConflicts()
+    private bool FindAndFixCaseConflicts()
     {
         // Create case insensitive map of file names to list of case sensitive file names
         Dictionary<string, List<string>> fileNameMap = new(

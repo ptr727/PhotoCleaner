@@ -15,7 +15,7 @@ public class ProgramTests
     }
 
     [Fact]
-    public void Execute_WithEmptyDirectory_ReturnsZero()
+    public async Task Execute_WithEmptyDirectory_ReturnsZero()
     {
         // Arrange
         CommandLine.Context context = new()
@@ -24,11 +24,12 @@ public class ProgramTests
             DryRun = true,
             Threads = 1,
             LogLevel = LogEventLevel.Information,
+            CancellationToken = CancellationToken.None,
         };
         Program program = new(context);
 
         // Act
-        int result = program.Execute();
+        int result = await program.ExecuteAsync();
 
         // Assert
         Assert.Equal(0, result);
@@ -38,7 +39,7 @@ public class ProgramTests
     }
 
     [Fact]
-    public void Execute_WithDryRunTrue_DoesNotModifyFiles()
+    public async Task Execute_WithDryRunTrue_DoesNotModifyFiles()
     {
         // Arrange
         string testFile = Path.Combine(_testDirectory, "test.txt");
@@ -51,11 +52,12 @@ public class ProgramTests
             DryRun = true,
             Threads = 1,
             LogLevel = LogEventLevel.Information,
+            CancellationToken = CancellationToken.None,
         };
         Program program = new(context);
 
         // Act
-        _ = program.Execute();
+        _ = await program.ExecuteAsync();
 
         // Assert - file should still exist with same modification time
         Assert.True(File.Exists(testFile));
@@ -66,7 +68,7 @@ public class ProgramTests
     }
 
     [Fact]
-    public void Execute_WithThreadsGreaterThanOne_ProcessesFiles()
+    public async Task Execute_WithThreadsGreaterThanOne_ProcessesFiles()
     {
         // Arrange
         for (int i = 0; i < 5; i++)
@@ -81,11 +83,12 @@ public class ProgramTests
             DryRun = true,
             Threads = 4,
             LogLevel = LogEventLevel.Information,
+            CancellationToken = CancellationToken.None,
         };
         Program program = new(context);
 
         // Act - should complete without error
-        _ = program.Execute();
+        _ = await program.ExecuteAsync();
 
         // Cleanup
         Directory.Delete(_testDirectory, true);
@@ -101,6 +104,7 @@ public class ProgramTests
             DryRun = true,
             Threads = 4,
             LogLevel = LogEventLevel.Debug,
+            CancellationToken = CancellationToken.None,
         };
 
         // Assert
@@ -108,6 +112,7 @@ public class ProgramTests
         Assert.True(context.DryRun);
         Assert.Equal(4, context.Threads);
         Assert.Equal(LogEventLevel.Debug, context.LogLevel);
+        Assert.Equal(CancellationToken.None, context.CancellationToken);
 
         // Cleanup
         Directory.Delete(_testDirectory, true);

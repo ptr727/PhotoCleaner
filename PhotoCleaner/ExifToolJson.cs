@@ -129,6 +129,5 @@ public class ExifToolJson
     }
 }
 
-[JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(ExifToolJson))]
-internal partial class SourceGenerationContext : JsonSerializerContext;
+internal partial class ExifToolJsonContext : JsonSerializerContext;

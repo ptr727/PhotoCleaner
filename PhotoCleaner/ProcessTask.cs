@@ -32,130 +32,101 @@ public class ProcessTask(ProcessTask.Context processContext)
     private bool _modified;
     private bool _reprocess;
 
-    private static readonly FrozenSet<string> s_processExtensions = new[]
-    {
-        ".3gp",
-        ".arw",
-        ".avi",
-        ".cr2",
-        ".dng",
-        ".gif",
-        ".heic",
-        ".heif",
-        ".jpeg",
-        ".jpg",
-        ".m2ts",
-        ".mkv",
-        ".mov",
-        ".mp4",
-        ".mts",
-        ".nef",
-        ".orf",
-        ".png",
-        ".psd",
-        ".rw2",
-        ".tif",
-        ".tiff",
-        ".wmv",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_remuxExtensions = new[]
-    {
-        ".mts",
-        ".m2ts",
-        ".mkv",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_reencodeExtensions = new[]
-    {
-        ".wmv",
-        ".avi",
-        ".3gp",
-        ".gif",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_reencodeAudioExtensions = new[]
-    {
-        ".mov",
-        ".mp4",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_setdateExtensions = new[]
-    {
-        ".heic",
-        ".heif",
-        ".jpeg",
-        ".jpg",
-        ".mov",
-        ".mp4",
-        ".png",
-        ".psd",
-        ".tif",
-        ".tiff",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_liveVideoExtensions = new[]
-    {
-        ".mp4",
-        ".mov",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_liveVideoImageExtensions = new[]
-    {
-        ".heic",
-        ".jpg",
-        ".jpeg",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_quicktimeExtensions = new[]
-    {
-        ".mp4",
-        ".mov",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_jpegExtensions = new[]
-    {
-        ".jpg",
-        ".jpeg",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_heicExtensions = new[]
-    {
-        ".heic",
-        ".heif",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_tiffExtensions = new[]
-    {
-        ".tif",
-        ".tiff",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> s_processExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [
+            ".3gp",
+            ".arw",
+            ".avi",
+            ".cr2",
+            ".dng",
+            ".gif",
+            ".heic",
+            ".heif",
+            ".jpeg",
+            ".jpg",
+            ".m2ts",
+            ".mkv",
+            ".mov",
+            ".mp4",
+            ".mts",
+            ".nef",
+            ".orf",
+            ".png",
+            ".psd",
+            ".rw2",
+            ".tif",
+            ".tiff",
+            ".wmv",
+        ]
+    );
+    private static readonly FrozenSet<string> s_remuxExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".mts", ".m2ts", ".mkv"]
+    );
+    private static readonly FrozenSet<string> s_reencodeExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".wmv", ".avi", ".3gp", ".gif"]
+    );
+    private static readonly FrozenSet<string> s_reencodeAudioExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".mov", ".mp4"]
+    );
+    private static readonly FrozenSet<string> s_setdateExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".heic", ".heif", ".jpeg", ".jpg", ".mov", ".mp4", ".png", ".psd", ".tif", ".tiff"]
+    );
+    private static readonly FrozenSet<string> s_liveVideoExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".mp4", ".mov"]
+    );
+    private static readonly FrozenSet<string> s_liveVideoImageExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".heic", ".jpg", ".jpeg"]
+    );
+    private static readonly FrozenSet<string> s_quicktimeExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".mp4", ".mov"]
+    );
+    private static readonly FrozenSet<string> s_jpegExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".jpg", ".jpeg"]
+    );
+    private static readonly FrozenSet<string> s_heicExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".heic", ".heif"]
+    );
+    private static readonly FrozenSet<string> s_tiffExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        [".tif", ".tiff"]
+    );
 
     private static readonly FrozenDictionary<string, FrozenSet<string>> s_mimeTypeExtensions =
         new Dictionary<string, FrozenSet<string>>
         {
             {
                 "application/vnd.adobe.photoshop",
-                new[] { ".psd" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+                FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".psd"])
             },
-            { "image/gif", new[] { ".gif" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "image/gif", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".gif"]) },
             { "image/heic", s_heicExtensions },
             { "image/heif", s_heicExtensions },
             { "image/jpeg", s_jpegExtensions },
-            { "image/png", new[] { ".png" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "image/png", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".png"]) },
             { "image/tiff", s_tiffExtensions },
-            { "image/x-adobe-dng", new[] { ".dng" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "image/x-canon-cr2", new[] { ".cr2" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "image/x-nikon-nef", new[] { ".nef" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            {
-                "image/x-olympus-orf",
-                new[] { ".orf" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
-            },
-            { "video/3gpp", new[] { ".3gp" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "video/mp4", new[] { ".mp4" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "image/x-adobe-dng", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".dng"]) },
+            { "image/x-canon-cr2", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".cr2"]) },
+            { "image/x-nikon-nef", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".nef"]) },
+            { "image/x-olympus-orf", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".orf"]) },
+            { "video/3gpp", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".3gp"]) },
+            { "video/mp4", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".mp4"]) },
             { "video/quicktime", s_quicktimeExtensions },
-            { "video/x-matroska", new[] { ".mkv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "video/x-ms-asf", new[] { ".wmv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "video/x-msvideo", new[] { ".avi" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "video/x-matroska", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".mkv"]) },
+            { "video/x-ms-asf", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".wmv"]) },
+            { "video/x-msvideo", FrozenSet.Create(StringComparer.OrdinalIgnoreCase, [".avi"]) },
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    public static ProcessResult Execute(Context processContext)
-    {
-        ProcessTask processTask = new(processContext);
-        return processTask.ExecuteAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task<ProcessResult> ExecuteAsync()
+    public async Task<ProcessResult> ExecuteAsync()
     {
         // Skip non-media files
         if (!s_processExtensions.Contains(processContext.FileInfo.Extension))
@@ -589,7 +560,7 @@ public class ProcessTask(ProcessTask.Context processContext)
             .ExecuteBufferedAsync();
         return JsonSerializer.Deserialize(
             result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']']),
-            SourceGenerationContext.Default.ExifToolJson
+            ExifToolJsonContext.Default.ExifToolJson
         );
     }
 
