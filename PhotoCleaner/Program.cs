@@ -126,6 +126,7 @@ internal sealed class Program(
                                 {
                                     FileInfo = new FileInfo(fileName),
                                     DryRun = commandLineOptions.DryRun,
+                                    DateFromPath = commandLineOptions.DateFromPath,
                                     UnknownExtensions = _unknownExtensions,
                                     ReProcessNames = reProcessNames,
                                 }

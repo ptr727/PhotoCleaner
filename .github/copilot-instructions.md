@@ -22,15 +22,17 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `ProcessTaskTests.cs`: Process task tests (34 tests)
 
 ### Core Processing Pipeline
-The application uses a sequential validation pipeline where each method returns `bool` - `false` stops processing the current file:
+
+The application uses a sequential validation pipeline where each method returns `bool` —
+`false` stops processing the current file:
+
 ```csharp
-if (!await DetectDoubleExtensions()
-    || !await DetectMixedCaseExtensions()
-    || !await DetectMismatchedMimeExtension()
-    || !await DeleteLivePhotos()
-    || !await ConvertVideo()
-    || !await DetectPcmAudio()
-    || !await DetectMissingCreateDate())
+if (!RenameMismatchedMimeExtensions()
+    || !RenameMixedCaseExtensions()
+    || !await DeleteLivePhotosAsync()
+    || !await ConvertVideoAsync()
+    || !await SetMissingCreateDateAsync()   // skipped unless --datefrompath is set
+    || !WarnDngVersion())
 ```
 
 ### State Management Pattern
@@ -79,8 +81,9 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Required `--path/-p` Parameter**: Accepts multiple directory paths using `Option<List<DirectoryInfo>>`. Each path is validated with `AcceptExistingOnly()`
 - **Multiple Path Support**: Can be specified multiple times (e.g., `--path /dir1 --path /dir2`) to process multiple directories in a single run
 - **Optional `--dryrun/-d` Flag**: Non-destructive preview mode
-- **Optional `--threads/-t` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Max(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()`
-- **Program Construction**: Creates `Program` instance with primary constructor: `new Program(threadsOption, dryRunOption)`
+- **Optional `--threads/-t` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()`
+- **Optional `--datefrompath/-a` Flag**: Opt-in; when absent, `SetMissingCreateDateAsync` is skipped entirely — date inference from paths is a destructive write that cannot be undone
+- **Program Construction**: Creates `Program` instance with primary constructor parameters passed via `CommandLine.Options`
 - **Built-in Help System**: Automatic help generation and validation
 
 ## Development Workflow

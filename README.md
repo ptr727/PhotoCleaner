@@ -17,8 +17,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
 - **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4; re-encodes WMV, AVI, 3GP, and
   GIF to MP4 (H.264/AAC); re-encodes PCM audio to AAC in MOV and MP4 files while preserving
   the video stream.
-- **Sets missing creation dates**: Infers and writes EXIF/QuickTime creation dates from filenames
-  or directory path structures when metadata is absent.
+- **Sets missing creation dates** (opt-in via `--datefrompath`): Infers and writes
+  EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
+  absent.
 - **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
   render correctly in older applications.
 
@@ -41,7 +42,8 @@ Usage:
 Options:
   -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
   -d, --dryrun                                                    Perform a dry run without making changes
-  -t, --threads <threads>                                         Number of parallel threads [default: min(CPU count, 4)]
+  -t, --threads <threads>                                         Number of parallel threads [default: 4]
+  -a, --datefrompath                                              Set missing EXIF creation date from file path
   -l, --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
   -f, --logfile <logfile>                                         Write logs to the specified file
   -c, --logclear                                                  Clear the log file before writing
@@ -54,6 +56,8 @@ Options:
 - `--path` / `-p` — can be specified multiple times to process several directories in one run;
   must point to an existing directory.
 - `--threads` / `-t` — defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
+- `--datefrompath` / `-a` — opt-in; when absent, EXIF date inference from the file path is
+  skipped entirely.
 
 ### Examples
 
@@ -64,8 +68,8 @@ PhotoCleaner --path /home/user/Photos --path /mnt/backup/Photos
 # Preview what changes would be made without modifying files
 PhotoCleaner --path /home/user/Photos --dryrun
 
-# Process with 8 parallel threads and write a log file
-PhotoCleaner --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log
+# Process with 8 parallel threads, log to file, infer missing created date from the path
+PhotoCleaner --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log --datefrompath
 ```
 
 ## Processing Flow
@@ -81,7 +85,8 @@ PhotoCleaner --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.lo
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k)
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
-   5. Set missing EXIF/QuickTime creation date inferred from filename or directory path.
+   5. Set missing EXIF/QuickTime creation date inferred from filename or directory path
+      (only when `--datefrompath` is specified).
    6. Warn on DNG version > v1.4.
 4. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
 5. **Results summary**: Reports counts of failed, modified, and successfully processed files;

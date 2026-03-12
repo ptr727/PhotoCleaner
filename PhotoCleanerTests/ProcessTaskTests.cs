@@ -650,7 +650,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
 
             // Act
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
+                CreateContext(filePath, dateFromPath: true)
             );
 
             // Assert — date was inferred from path, file was modified and queued for reprocess
@@ -688,13 +688,45 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_JpegMissingDateInPath_DateFromPathDisabled_ReturnsSuccess()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string datedDir = Path.Combine(workDir, "2024", "01", "15");
+            Directory.CreateDirectory(datedDir);
+            string filePath = Path.Combine(datedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            // Act — dateFromPath defaults to false
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateContext(filePath)
+            );
+
+            // Assert — date inference skipped, file unmodified
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(filePath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static ProcessTask.Context CreateContext(string filePath, bool dryRun = false) =>
+    private static ProcessTask.Context CreateContext(
+        string filePath,
+        bool dryRun = false,
+        bool dateFromPath = false
+    ) =>
         new()
         {
             FileInfo = new FileInfo(filePath),
             DryRun = dryRun,
+            DateFromPath = dateFromPath,
             ReProcessNames = [],
             UnknownExtensions = new ConcurrentDictionary<string, byte>(),
         };

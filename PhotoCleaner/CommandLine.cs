@@ -11,6 +11,7 @@ internal sealed class CommandLine
     private readonly Option<List<DirectoryInfo>> _pathOption = CreatePathOption();
     private readonly Option<bool> _dryRunOption = CreateDryRunOption();
     private readonly Option<int> _threadsOption = CreateThreadsOption();
+    private readonly Option<bool> _dateFromPathOption = CreateDateFromPathOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -37,6 +38,7 @@ internal sealed class CommandLine
             _pathOption,
             _dryRunOption,
             _threadsOption,
+            _dateFromPathOption,
             _logLevelOption,
             _logFileOption,
             _logFileClearOption,
@@ -58,6 +60,7 @@ internal sealed class CommandLine
             Paths = parseResult.GetValue(_pathOption) ?? [],
             Threads = parseResult.GetValue(_threadsOption),
             DryRun = parseResult.GetValue(_dryRunOption),
+            DateFromPath = parseResult.GetValue(_dateFromPathOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -75,6 +78,12 @@ internal sealed class CommandLine
 
     private static Option<bool> CreateDryRunOption() =>
         new("--dryrun", "-d") { Description = "Perform a dry run without making changes" };
+
+    private static Option<bool> CreateDateFromPathOption() =>
+        new("--datefrompath", "-a")
+        {
+            Description = "Set missing EXIF creation date from file path",
+        };
 
     private static Option<int> CreateThreadsOption()
     {
@@ -139,6 +148,7 @@ internal sealed class CommandLine
         public required List<DirectoryInfo> Paths { get; init; }
         public required int Threads { get; init; }
         public required bool DryRun { get; init; }
+        public required bool DateFromPath { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

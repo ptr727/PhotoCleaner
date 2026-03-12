@@ -14,6 +14,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         public required ConcurrentDictionary<string, byte> UnknownExtensions { get; init; }
         public required FileInfo FileInfo { get; init; }
         public required bool DryRun { get; init; }
+        public required bool DateFromPath { get; init; }
     }
 
     public enum ProcessResult
@@ -535,7 +536,13 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         // Only some file types are supported
         if (!s_setdateExtensions.Contains(processContext.FileInfo.Extension))
         {
-            // Not supported for this file type
+            return true;
+        }
+
+        // Date inference from path is opt-in
+        if (!processContext.DateFromPath)
+        {
+            Log.Warning("Created date is missing: '{FileName}'.", processContext.FileInfo.FullName);
             return true;
         }
 
@@ -543,10 +550,13 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         string createdDate = string.Empty;
         if (!DateFromPath.InferCreatedDate(processContext.FileInfo.FullName, ref createdDate))
         {
-            // No date inferred from path
-            Log.Warning("Missing created date: '{FileName}'.", processContext.FileInfo.FullName);
+            Log.Warning(
+                "Failed to infer date from path: '{FileName}'.",
+                processContext.FileInfo.FullName
+            );
             return true;
         }
+
         Log.Information(
             "Inferred created date from path '{CreatedDate}': '{FileName}'.",
             createdDate,
