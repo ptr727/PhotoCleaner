@@ -1,59 +1,70 @@
 using System.CommandLine;
-using Serilog.Events;
+using System.CommandLine.Parsing;
 
 namespace PhotoCleaner;
 
-internal class CommandLine
+internal sealed class CommandLine
 {
-    public class Context
+    private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
+    private readonly Option<string> _logFileOption = CreateLogFileOption();
+    private readonly Option<bool> _logFileClearOption = CreateLogFileClearOption();
+    private readonly Option<List<DirectoryInfo>> _pathOption = CreatePathOption();
+    private readonly Option<bool> _dryRunOption = CreateDryRunOption();
+    private readonly Option<int> _threadsOption = CreateThreadsOption();
+
+    private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        "--help",
+        "--version"
+    );
+
+    internal CommandLine(string[] args)
     {
-        public required List<DirectoryInfo> Paths { get; init; }
-        public required int Threads { get; init; }
-        public required bool DryRun { get; init; }
-        public required LogEventLevel LogLevel { get; init; }
-        public string? LogFile { get; init; }
+        Root = CreateRootCommand();
+        Result = Root.Parse(args);
     }
 
-    internal static (
-        CommandLine commandLine,
-        RootCommand rootCommand
-    ) CreateRootCommandWithCommandLine()
+    internal RootCommand Root { get; }
+    internal ParseResult Result { get; }
+
+    internal RootCommand CreateRootCommand()
     {
-        CommandLine commandLine = new();
+        // Default root command
         RootCommand rootCommand = new(
             "PhotoCleaner - Pre-process media files for photo management systems."
         )
         {
-            commandLine._pathOption,
-            commandLine._dryRunOption,
-            commandLine._threadsOption,
-            commandLine._logLevelOption,
-            commandLine._logFileOption,
+            _logLevelOption,
+            _logFileOption,
+            _logFileClearOption,
+            _pathOption,
+            _dryRunOption,
+            _threadsOption,
         };
-        rootCommand.SetAction(parseResult =>
-        {
-            Program program = new(commandLine.CreateContext(parseResult));
-            return program.Execute();
-        });
+        rootCommand.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(CreateOptions(parseResult), cancellationToken);
+                return program.ExecuteAsync();
+            }
+        );
 
-        return (commandLine, rootCommand);
+        return rootCommand;
     }
 
-    internal Context CreateContext(ParseResult parseResult) =>
+    internal Options CreateOptions(ParseResult parseResult) =>
         new()
         {
             Paths = parseResult.GetValue(_pathOption) ?? [],
             Threads = parseResult.GetValue(_threadsOption),
             DryRun = parseResult.GetValue(_dryRunOption),
-            LogLevel = parseResult.GetValue(_logLevelOption),
-            LogFile = parseResult.GetValue(_logFileOption),
+            LogOptions = new LoggerFactory.Options
+            {
+                Level = parseResult.GetValue(_logLevelOption),
+                File = parseResult.GetValue(_logFileOption) ?? string.Empty,
+                FileClear = parseResult.GetValue(_logFileClearOption),
+            },
         };
-
-    private readonly Option<List<DirectoryInfo>> _pathOption = CreatePathOption();
-    private readonly Option<bool> _dryRunOption = CreateDryRunOption();
-    private readonly Option<int> _threadsOption = CreateThreadsOption();
-    private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
-    private readonly Option<string?> _logFileOption = CreateLogFileOption();
 
     private static Option<List<DirectoryInfo>> CreatePathOption() =>
         new Option<List<DirectoryInfo>>("--path", "-p")
@@ -94,13 +105,43 @@ internal class CommandLine
         return option;
     }
 
+    private static Option<bool> CreateLogFileClearOption() =>
+        new("--logfile-clear", "-c")
+        {
+            Description = "Clear the log file before writing (default: false).",
+            Recursive = true,
+        };
+
     private static Option<LogEventLevel> CreateLogLevelOption() =>
         new("--loglevel", "-l")
         {
             Description = "Set the log level (default: Information).",
             DefaultValueFactory = _ => LogEventLevel.Information,
+            Recursive = true,
         };
 
-    private static Option<string?> CreateLogFileOption() =>
-        new("--logfile", "-f") { Description = "Write logs to the specified file (optional)." };
+    private static Option<string> CreateLogFileOption()
+    {
+        Option<string> option = new("--logfile", "-f")
+        {
+            Description = "Write logs to the specified file (optional).",
+            Recursive = true,
+        };
+        return option.AcceptLegalFileNamesOnly();
+    }
+
+    internal static bool BypassStartup(ParseResult parseResult) =>
+        parseResult.Errors.Count > 0
+        || parseResult.CommandResult.Children.Any(symbolResult =>
+            symbolResult is OptionResult optionResult
+            && s_cliBypassList.Contains(optionResult.Option.Name)
+        );
+
+    internal sealed class Options
+    {
+        public required List<DirectoryInfo> Paths { get; init; }
+        public required int Threads { get; init; }
+        public required bool DryRun { get; init; }
+        internal required LoggerFactory.Options LogOptions { get; init; }
+    }
 }

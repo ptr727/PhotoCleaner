@@ -11,7 +11,10 @@ internal static partial class DateFromPath
         DateTime? dateFromPath = ExtractDateFromFilename(fileName);
         if (IsDateValid(dateFromPath))
         {
-            createdDate = dateFromPath!.Value.ToString("yyyy:MM:dd HH:mm:ss");
+            createdDate = dateFromPath!.Value.ToString(
+                "yyyy:MM:dd HH:mm:ss",
+                CultureInfo.InvariantCulture
+            );
             return true;
         }
 
@@ -22,7 +25,10 @@ internal static partial class DateFromPath
             return false;
         }
 
-        createdDate = dateFromPath!.Value.ToString("yyyy:MM:dd HH:mm:ss");
+        createdDate = dateFromPath!.Value.ToString(
+            "yyyy:MM:dd HH:mm:ss",
+            CultureInfo.InvariantCulture
+        );
         return true;
     }
 
@@ -34,295 +40,224 @@ internal static partial class DateFromPath
 
     internal static DateTime? ExtractDateFromFilename(string fileName)
     {
-        // Pattern 1: YYYYMMDD_HHMMSS format (e.g., 20210502_200152957_iOS-1747.jpg)
-        Regex pattern1 = MyRegex12();
-        Match match1 = pattern1.Match(fileName);
-        if (match1.Success)
+        // Pattern 1: YYYYMMDD format with optional _HHMMSS time
+        // Handles: 20210502_200152957_iOS-1747.jpg, EX_20030219_3378.jpg, 20090709.mov
+        Match compactMatch = FilenameCompactDateTimeRegex().Match(fileName);
+        if (compactMatch.Success)
         {
             if (
                 DateTime.TryParseExact(
-                    match1.Groups[1].Value,
+                    compactMatch.Groups[1].Value,
                     "yyyyMMdd",
                     null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime date1
+                    DateTimeStyles.None,
+                    out DateTime compactDate
                 )
             )
             {
-                string timeStr = match1.Groups[2].Value.PadRight(6, '0')[..6]; // Take first 6 digits for HHMMSS
-                return DateTime.TryParseExact(
-                    timeStr,
-                    "HHmmss",
-                    null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime time1
-                )
-                    ? date1.Date.Add(time1.TimeOfDay)
-                    : date1;
+                if (compactMatch.Groups[2].Success)
+                {
+                    string timeStr = compactMatch.Groups[2].Value.PadRight(6, '0')[..6];
+                    return DateTime.TryParseExact(
+                        timeStr,
+                        "HHmmss",
+                        null,
+                        DateTimeStyles.None,
+                        out DateTime compactTime
+                    )
+                        ? compactDate.Date.Add(compactTime.TimeOfDay)
+                        : compactDate;
+                }
+
+                return compactDate;
             }
         }
 
-        // Pattern 2: YYYYMMDD format without time (e.g., EX_20030219_3378.jpg, PV_20090709_0081.mp4)
-        Regex pattern2 = MyRegex11();
-        Match match2 = pattern2.Match(fileName);
-        if (match2.Success)
-        {
-            if (
-                DateTime.TryParseExact(
-                    match2.Groups[1].Value,
-                    "yyyyMMdd",
-                    null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime date2
-                )
-            )
-            {
-                return date2;
-            }
-        }
-
-        // Pattern 3: YYYY-MM-DD with underscore time separator (e.g., Foo_2021-05-02_200152957_iOS.jpg)
-        Regex pattern3 = MyRegex10();
-        Match match3 = pattern3.Match(fileName);
-        if (match3.Success)
+        // Pattern 2: YYYY-MM-DD format with optional _HHMMSS or -HH-MM-SS time
+        // Handles: PHOTO-2024-06-22-07-56-41.jpg, Foo_2021-05-02_200152957_iOS.jpg, WhatsApp Image 2024-06-30.jpg
+        Match hyphenMatch = FilenameHyphenDateRegex().Match(fileName);
+        if (hyphenMatch.Success)
         {
             if (
                 DateTime.TryParse(
-                    $"{match3.Groups[1].Value}-{match3.Groups[2].Value}-{match3.Groups[3].Value}",
-                    out DateTime date3
+                    $"{hyphenMatch.Groups[1].Value}-{hyphenMatch.Groups[2].Value}-{hyphenMatch.Groups[3].Value}",
+                    out DateTime hyphenDate
                 )
             )
             {
-                string timeStr = match3.Groups[4].Value.PadRight(6, '0')[..6]; // Take first 6 digits for HHMMSS
-                return DateTime.TryParseExact(
-                    timeStr,
-                    "HHmmss",
-                    null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime time3
-                )
-                    ? date3.Date.Add(time3.TimeOfDay)
-                    : date3;
+                if (hyphenMatch.Groups[4].Success)
+                {
+                    // Compact time: _HHMMSS
+                    string timeStr = hyphenMatch.Groups[4].Value.PadRight(6, '0')[..6];
+                    return DateTime.TryParseExact(
+                        timeStr,
+                        "HHmmss",
+                        null,
+                        DateTimeStyles.None,
+                        out DateTime hyphenCompactTime
+                    )
+                        ? hyphenDate.Date.Add(hyphenCompactTime.TimeOfDay)
+                        : hyphenDate;
+                }
+
+                if (hyphenMatch.Groups[5].Success)
+                {
+                    // Hyphen-separated time: -HH-MM-SS
+                    return
+                        int.TryParse(hyphenMatch.Groups[5].Value, out int hours)
+                        && int.TryParse(hyphenMatch.Groups[6].Value, out int minutes)
+                        && int.TryParse(hyphenMatch.Groups[7].Value, out int seconds)
+                        && hours <= 23
+                        && minutes <= 59
+                        && seconds <= 59
+                        ? hyphenDate.Date.Add(new TimeSpan(hours, minutes, seconds))
+                        : hyphenDate;
+                }
+
+                return hyphenDate;
             }
         }
 
-        // Pattern 3b: YYYY-MM-DD format with HH-MM-SS time (e.g., PHOTO-2024-06-22-07-56-41)
-        Regex pattern3b = MyRegex9();
-        Match match3b = pattern3b.Match(fileName);
-        if (match3b.Success)
+        // Pattern 3: YYYY_MM_DD format with optional _HHMMSS time
+        // Handles: Foo_2021_05_02_200152957_iOS-1747.jpg, Photo_2021_05_02.jpg
+        Match underscoreMatch = FilenameUnderscoreDateRegex().Match(fileName);
+        if (underscoreMatch.Success)
         {
             if (
                 DateTime.TryParse(
-                    $"{match3b.Groups[1].Value}-{match3b.Groups[2].Value}-{match3b.Groups[3].Value}",
-                    out DateTime date3b
+                    $"{underscoreMatch.Groups[1].Value}-{underscoreMatch.Groups[2].Value}-{underscoreMatch.Groups[3].Value}",
+                    out DateTime underscoreDate
                 )
             )
             {
-                return
-                    int.TryParse(match3b.Groups[4].Value, out int hours)
-                    && int.TryParse(match3b.Groups[5].Value, out int minutes)
-                    && int.TryParse(match3b.Groups[6].Value, out int seconds)
-                    && hours <= 23
-                    && minutes <= 59
-                    && seconds <= 59
-                    ? date3b.Date.Add(new TimeSpan(hours, minutes, seconds))
-                    : date3b;
+                if (underscoreMatch.Groups[4].Success)
+                {
+                    string timeStr = underscoreMatch.Groups[4].Value.PadRight(6, '0')[..6];
+                    return DateTime.TryParseExact(
+                        timeStr,
+                        "HHmmss",
+                        null,
+                        DateTimeStyles.None,
+                        out DateTime underscoreTime
+                    )
+                        ? underscoreDate.Date.Add(underscoreTime.TimeOfDay)
+                        : underscoreDate;
+                }
+
+                return underscoreDate;
             }
         }
 
-        // Pattern 3c: YYYY-MM-DD format without time (e.g., WhatsApp Image 2024-06-30)
-        Regex pattern3c = MyRegex8();
-        Match match3c = pattern3c.Match(fileName);
-        if (match3c.Success)
-        {
-            if (
-                DateTime.TryParse(
-                    $"{match3c.Groups[1].Value}-{match3c.Groups[2].Value}-{match3c.Groups[3].Value}",
-                    out DateTime date3c
-                )
-            )
-            {
-                return date3c;
-            }
-        }
-
-        // Pattern 4: YYYY_MM_DD format with optional time (e.g., Foo_2021_05_02_200152957_iOS-1747.jpg)
-        Regex pattern4 = MyRegex7();
-        Match match4 = pattern4.Match(fileName);
-        if (match4.Success)
-        {
-            if (
-                DateTime.TryParse(
-                    $"{match4.Groups[1].Value}-{match4.Groups[2].Value}-{match4.Groups[3].Value}",
-                    out DateTime date4
-                )
-            )
-            {
-                string timeStr = match4.Groups[4].Value.PadRight(6, '0')[..6]; // Take first 6 digits for HHMMSS
-                return DateTime.TryParseExact(
-                    timeStr,
-                    "HHmmss",
-                    null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime time4
-                )
-                    ? date4.Date.Add(time4.TimeOfDay)
-                    : date4;
-            }
-        }
-
-        // Pattern 5: YYYY_MM_DD format without time (e.g., Photo_2021_05_02.jpg)
-        Regex pattern5 = MyRegex6();
-        Match match5 = pattern5.Match(fileName);
-        if (match5.Success)
-        {
-            if (
-                DateTime.TryParse(
-                    $"{match5.Groups[1].Value}-{match5.Groups[2].Value}-{match5.Groups[3].Value}",
-                    out DateTime date5
-                )
-            )
-            {
-                return date5;
-            }
-        }
-
-        // Pattern 6: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
-        Regex pattern6 = MyRegex5();
-        Match match6 = pattern6.Match(fileName);
-        return !match6.Success ? null
+        // Pattern 4: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
+        Match spaceMatch = FilenameSpaceDateRegex().Match(fileName);
+        return !spaceMatch.Success ? null
             : DateTime.TryParse(
-                $"{match6.Groups[1].Value}-{match6.Groups[2].Value}-{match6.Groups[3].Value}",
-                out DateTime date6
+                $"{spaceMatch.Groups[1].Value}-{spaceMatch.Groups[2].Value}-{spaceMatch.Groups[3].Value}",
+                out DateTime spaceDate
             )
-                ? date6
+                ? spaceDate
             : null;
     }
 
     internal static DateTime? ExtractDateFromPath(string fullPath)
     {
-        // Extract date from directory structure (e.g., /2021/2021-05-02/)
-        Regex pathPattern = MyRegex();
-        Match pathMatch = pathPattern.Match(fullPath);
-        if (pathMatch.Success)
-        {
-            string fullDate =
-                $"{pathMatch.Groups[2].Value}-{pathMatch.Groups[3].Value}-{pathMatch.Groups[4].Value}";
-
-            if (DateTime.TryParse(fullDate, out DateTime pathDate))
-            {
-                return pathDate;
-            }
-        }
-
-        // Extract YYYY-MM-DD format anywhere in the path (e.g., /Lumia/2015-11-18/)
-        Regex dateAnywherePattern = MyRegex4();
-        Match dateAnywhereMatch = dateAnywherePattern.Match(fullPath);
-        if (dateAnywhereMatch.Success)
+        // Extract YYYY-MM-DD format anywhere in the path (e.g., /Lumia/2015-11-18/, /2021/2021-05-02/)
+        Match pathHyphenMatch = PathHyphenDateRegex().Match(fullPath);
+        if (pathHyphenMatch.Success)
         {
             string dateString =
-                $"{dateAnywhereMatch.Groups[1].Value}-{dateAnywhereMatch.Groups[2].Value}-{dateAnywhereMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime dateAnywhere))
+                $"{pathHyphenMatch.Groups[1].Value}-{pathHyphenMatch.Groups[2].Value}-{pathHyphenMatch.Groups[3].Value}";
+            if (DateTime.TryParse(dateString, out DateTime pathHyphenDate))
             {
-                return dateAnywhere;
+                return pathHyphenDate;
             }
         }
 
         // Extract YYYY_MM_DD format anywhere in the path (e.g., /MP Navigator EX/2010_01_21/)
-        Regex dateUnderscorePattern = MyRegex3();
-        Match dateUnderscoreMatch = dateUnderscorePattern.Match(fullPath);
-        if (dateUnderscoreMatch.Success)
+        Match pathUnderscoreMatch = PathUnderscoreDateRegex().Match(fullPath);
+        if (pathUnderscoreMatch.Success)
         {
             string dateString =
-                $"{dateUnderscoreMatch.Groups[1].Value}-{dateUnderscoreMatch.Groups[2].Value}-{dateUnderscoreMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime dateUnderscore))
+                $"{pathUnderscoreMatch.Groups[1].Value}-{pathUnderscoreMatch.Groups[2].Value}-{pathUnderscoreMatch.Groups[3].Value}";
+            if (DateTime.TryParse(dateString, out DateTime pathUnderscoreDate))
             {
-                return dateUnderscore;
+                return pathUnderscoreDate;
             }
         }
 
         // Extract YYYYMMDD format anywhere in the path (e.g., /photos/20210502/)
-        Regex dateCompactPattern = MyRegex2();
-        Match dateCompactMatch = dateCompactPattern.Match(fullPath);
-        if (dateCompactMatch.Success)
+        Match pathCompactMatch = PathCompactDateRegex().Match(fullPath);
+        if (pathCompactMatch.Success)
         {
             if (
                 DateTime.TryParseExact(
-                    dateCompactMatch.Groups[1].Value,
+                    pathCompactMatch.Groups[1].Value,
                     "yyyyMMdd",
                     null,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime dateCompact
+                    DateTimeStyles.None,
+                    out DateTime pathCompactDate
                 )
             )
             {
-                return dateCompact;
+                return pathCompactDate;
             }
         }
 
         // Extract YYYY/MM/DD format anywhere in the path (e.g., /photos/2021/05/02/file.heic)
-        Regex dateSlashPattern = MyRegex13();
-        Match dateSlashMatch = dateSlashPattern.Match(fullPath);
-        if (dateSlashMatch.Success)
+        Match pathYearMonthDayMatch = PathYearMonthDayRegex().Match(fullPath);
+        if (pathYearMonthDayMatch.Success)
         {
             string dateString =
-                $"{dateSlashMatch.Groups[1].Value}-{dateSlashMatch.Groups[2].Value}-{dateSlashMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime dateSlash))
+                $"{pathYearMonthDayMatch.Groups[1].Value}-{pathYearMonthDayMatch.Groups[2].Value}-{pathYearMonthDayMatch.Groups[3].Value}";
+            if (DateTime.TryParse(dateString, out DateTime pathYearMonthDayDate))
             {
-                return dateSlash;
+                return pathYearMonthDayDate;
             }
         }
 
         // Fallback: Try to extract just year from path
-        Regex yearPattern = MyRegex1();
-        Match yearMatch = yearPattern.Match(fullPath);
-        return !yearMatch.Success ? null
-            : int.TryParse(yearMatch.Groups[1].Value, out int year)
+        Match pathYearMatch = PathYearOnlyRegex().Match(fullPath);
+        return !pathYearMatch.Success ? null
+            : int.TryParse(pathYearMatch.Groups[1].Value, out int year)
             && year >= 1900
             && year <= DateTime.Now.Year
                 ? new DateTime(year, 1, 1)
             : null;
     }
 
-    [GeneratedRegex(@"[/\\](\d{4})[/\\](\d{4})-(\d{2})-(\d{2})[/\\]")]
-    private static partial Regex MyRegex();
+    // Filename: YYYYMMDD with optional _HHMMSS (6-9 digits)
+    [GeneratedRegex(@"(\d{8})(?:_(\d{6,9}))?")]
+    private static partial Regex FilenameCompactDateTimeRegex();
 
-    [GeneratedRegex(@"[/\\](\d{4})[/\\]")]
-    private static partial Regex MyRegex1();
+    // Filename: YYYY-MM-DD with optional _HHMMSS or -HH-MM-SS
+    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})(?:_(\d{6,9})|-(\d{2})-(\d{2})-(\d{2}))?")]
+    private static partial Regex FilenameHyphenDateRegex();
 
-    [GeneratedRegex(@"[/\\](\d{8})[/\\]")]
-    private static partial Regex MyRegex2();
+    // Filename: YYYY_MM_DD with optional _HHMMSS (6-9 digits)
+    [GeneratedRegex(@"(\d{4})_(\d{2})_(\d{2})(?:_(\d{6,9}))?")]
+    private static partial Regex FilenameUnderscoreDateRegex();
 
-    [GeneratedRegex(@"[/\\](\d{4})_(\d{2})_(\d{2})[/\\]")]
-    private static partial Regex MyRegex3();
-
-    [GeneratedRegex(@"[/\\](\d{4})-(\d{2})-(\d{2})[/\\]")]
-    private static partial Regex MyRegex4();
-
+    // Filename: YYYY MM DD with whitespace separators
     [GeneratedRegex(@"(\d{4})\s+(\d{2})\s+(\d{2})")]
-    private static partial Regex MyRegex5();
+    private static partial Regex FilenameSpaceDateRegex();
 
-    [GeneratedRegex(@"(\d{4})_(\d{2})_(\d{2})")]
-    private static partial Regex MyRegex6();
+    // Path: /YYYY-MM-DD/ segment
+    [GeneratedRegex(@"[/\\](\d{4})-(\d{2})-(\d{2})[/\\]")]
+    private static partial Regex PathHyphenDateRegex();
 
-    [GeneratedRegex(@"(\d{4})_(\d{2})_(\d{2})_(\d{6,9})")]
-    private static partial Regex MyRegex7();
+    // Path: /YYYY_MM_DD/ segment
+    [GeneratedRegex(@"[/\\](\d{4})_(\d{2})_(\d{2})[/\\]")]
+    private static partial Regex PathUnderscoreDateRegex();
 
-    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})")]
-    private static partial Regex MyRegex8();
+    // Path: /YYYYMMDD/ segment
+    [GeneratedRegex(@"[/\\](\d{8})[/\\]")]
+    private static partial Regex PathCompactDateRegex();
 
-    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})")]
-    private static partial Regex MyRegex9();
-
-    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})_(\d{6,9})")]
-    private static partial Regex MyRegex10();
-
-    [GeneratedRegex(@"(\d{8})")]
-    private static partial Regex MyRegex11();
-
-    [GeneratedRegex(@"(\d{8})_(\d{6,9})")]
-    private static partial Regex MyRegex12();
-
+    // Path: /YYYY/MM/DD/ segments
     [GeneratedRegex(@"[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\]")]
-    private static partial Regex MyRegex13();
+    private static partial Regex PathYearMonthDayRegex();
+
+    // Path: /YYYY/ segment (year-only fallback)
+    [GeneratedRegex(@"[/\\](\d{4})[/\\]")]
+    private static partial Regex PathYearOnlyRegex();
 }

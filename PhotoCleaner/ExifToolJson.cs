@@ -40,6 +40,9 @@ public class ExifToolJson
     [JsonPropertyName("EXIF:CreateDate")]
     public string? EXIFCreateDate { get; set; }
 
+    [JsonPropertyName("EXIF:DNGVersion")]
+    public string? EXIFDNGVersion { get; set; }
+
     [JsonPropertyName("XMP:ModifyDate")]
     public string? XMPModifyDate { get; set; }
 
@@ -119,13 +122,49 @@ public class ExifToolJson
         }
 
         // ASF:CreationDate
-        if (!string.IsNullOrEmpty(ASFCreationDate))
+        if (
+            !string.IsNullOrEmpty(ASFCreationDate)
+            && !ASFCreationDate.StartsWith("0000:", StringComparison.Ordinal)
+        )
         {
             return ASFCreationDate;
         }
 
         // Matroska:DateTimeOriginal
         return !string.IsNullOrEmpty(RIFFDateTimeOriginal) ? RIFFDateTimeOriginal : null;
+    }
+
+    internal static bool IsDngVersionNewer(string? versionString)
+    {
+        if (string.IsNullOrEmpty(versionString))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> span = versionString.AsSpan();
+        int dotIndex = span.IndexOf('.');
+        if (dotIndex < 0)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> afterMajor = span[(dotIndex + 1)..];
+        int secondDot = afterMajor.IndexOf('.');
+        ReadOnlySpan<char> minorSpan = secondDot >= 0 ? afterMajor[..secondDot] : afterMajor;
+
+        return int.TryParse(
+                span[..dotIndex],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int major
+            )
+            && int.TryParse(
+                minorSpan,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int minor
+            )
+            && (major > 1 || (major == 1 && minor > 4));
     }
 }
 

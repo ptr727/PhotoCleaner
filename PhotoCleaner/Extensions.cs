@@ -1,13 +1,12 @@
 using System.Runtime.CompilerServices;
-using Serilog;
 
 namespace PhotoCleaner;
 
-public static class Extensions
+internal static partial class LogExtensions
 {
-    extension(ILogger logger)
+    extension(Serilog.ILogger logger)
     {
-        public bool LogAndPropagate(
+        internal bool LogAndPropagate(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )
@@ -16,7 +15,7 @@ public static class Extensions
             return false;
         }
 
-        public bool LogAndHandle(
+        internal bool LogAndHandle(
             Exception exception,
             [CallerMemberName] string function = "unknown"
         )
@@ -25,8 +24,41 @@ public static class Extensions
             return true;
         }
 
-        public ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
+        internal Serilog.ILogger LogOverrideContext() => logger.ForContext<LogOverride>();
     }
 
-    public class LogOverride;
+    extension(Microsoft.Extensions.Logging.ILogger logger)
+    {
+        internal bool LogAndPropagate(
+            Exception exception,
+            [CallerMemberName] string function = "unknown"
+        )
+        {
+            logger.LogCatchException(function, exception);
+            return false;
+        }
+
+        internal bool LogAndHandle(
+            Exception exception,
+            [CallerMemberName] string function = "unknown"
+        )
+        {
+            logger.LogCatchException(function, exception);
+            return true;
+        }
+    }
+
+    [LoggerMessage(Message = "Exception in {Function}", Level = LogLevel.Error)]
+    internal static partial void LogCatchException(
+        this Microsoft.Extensions.Logging.ILogger logger,
+        string function,
+        Exception exception
+    );
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1812:Avoid uninstantiated internal classes",
+        Justification = "Used as a type marker for Serilog context filtering"
+    )]
+    internal sealed class LogOverride;
 }

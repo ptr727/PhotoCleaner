@@ -1,16 +1,14 @@
 using System.Collections.Concurrent;
-using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
-using Serilog;
 
 namespace PhotoCleaner;
 
-public class ProcessTask(ProcessTask.Context processContext)
+internal sealed class ProcessTask(ProcessTask.Context processContext)
 {
-    public class Context
+    internal sealed class Context
     {
         public required ConcurrentBag<string> ReProcessNames { get; init; }
         public required ConcurrentDictionary<string, byte> UnknownExtensions { get; init; }
@@ -27,6 +25,9 @@ public class ProcessTask(ProcessTask.Context processContext)
         UnknownExtension,
         DoubleExtensions,
     }
+
+    internal const double LiveVideoDuration = 4.0;
+    internal const double ShortVideoDuration = 1.0;
 
     private ExifToolJson? _exifToolJson;
     private bool _modified;
@@ -144,8 +145,17 @@ public class ProcessTask(ProcessTask.Context processContext)
             { "video/3gpp", new[] { ".3gp" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
             { "video/mp4", new[] { ".mp4" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
             { "video/quicktime", s_quicktimeExtensions },
+            {
+                "video/mp2t",
+                new[] { ".mts", ".m2ts" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
+            {
+                "video/mpeg",
+                new[] { ".mts", ".m2ts" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
             { "video/x-matroska", new[] { ".mkv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
             { "video/x-ms-asf", new[] { ".wmv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            { "video/x-ms-wmv", new[] { ".wmv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
             { "video/x-msvideo", new[] { ".avi" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
@@ -169,16 +179,17 @@ public class ProcessTask(ProcessTask.Context processContext)
         }
 
         // Get exiftool info
-        _exifToolJson = await GetExifToolJsonAsync();
+        _exifToolJson = await GetExifToolJsonAsync().ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(_exifToolJson);
 
         // Process files
         return
             !RenameMismatchedMimeExtensions()
             || !RenameMixedCaseExtensions()
-            || !await DeleteLivePhotosAsync()
-            || !await ConvertVideoAsync()
-            || !await SetMissingCreateDateAsync()
+            || !await DeleteLivePhotosAsync().ConfigureAwait(false)
+            || !await ConvertVideoAsync().ConfigureAwait(false)
+            || !await SetMissingCreateDateAsync().ConfigureAwait(false)
+            || !WarnDngVersion()
             ? _reprocess
                 ? ProcessResult.Reprocess
                 : ProcessResult.Failure
@@ -321,24 +332,22 @@ public class ProcessTask(ProcessTask.Context processContext)
                 processContext.FileInfo.FullName,
             ])
             .ExecuteBufferedAsync();
-        return float.Parse(result.StandardOutput.AsSpan().Trim());
+        return float.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
     }
 
     private async Task<bool> DeleteLivePhotosAsync()
     {
         // Live photos are MOV or MP4 about ~3s long with a matching HEIC or JPEG file
-        const double liveVideoDuration = 4.0;
-        const double shortVideoDuration = 1.0;
         if (!s_liveVideoExtensions.Contains(processContext.FileInfo.Extension))
         {
             return true;
         }
 
         // Get duration
-        float duration = await GetDurationAsync();
+        float duration = await GetDurationAsync().ConfigureAwait(false);
 
         // Short videos, always delete
-        if (duration <= shortVideoDuration)
+        if (duration <= ShortVideoDuration)
         {
             Log.Warning(
                 "Deleting {Duration}s short video clip: '{FileName}'.",
@@ -362,7 +371,7 @@ public class ProcessTask(ProcessTask.Context processContext)
         }
 
         // Long videos
-        if (duration >= liveVideoDuration)
+        if (duration >= LiveVideoDuration)
         {
             // Warn in case the video length threshold needs adjustment
             Log.Warning(
@@ -451,7 +460,7 @@ public class ProcessTask(ProcessTask.Context processContext)
         else if (s_reencodeAudioExtensions.Contains(processContext.FileInfo.Extension))
         {
             // Only if audio is PCM
-            if (!await IsPcmAudioAsync())
+            if (!await IsPcmAudioAsync().ConfigureAwait(false))
             {
                 return true;
             }
@@ -510,7 +519,8 @@ public class ProcessTask(ProcessTask.Context processContext)
         // Set timestamps on remuxed file from original timestamps
         string? createdDate = _exifToolJson!.GetDateString();
         return !string.IsNullOrEmpty(createdDate)
-            ? await SetCreateDateAsync(outputFile, createdDate) && ReProcess(outputFile)
+            ? await SetCreateDateAsync(outputFile, createdDate).ConfigureAwait(false)
+                && ReProcess(outputFile)
             : ReProcess(outputFile);
     }
 
@@ -553,7 +563,26 @@ public class ProcessTask(ProcessTask.Context processContext)
 
         // Set the created date using exiftool
         return await SetCreateDateAsync(processContext.FileInfo.FullName, createdDate)
-            && ReProcess(processContext.FileInfo.FullName);
+                .ConfigureAwait(false) && ReProcess(processContext.FileInfo.FullName);
+    }
+
+    private bool WarnDngVersion()
+    {
+        if (!processContext.FileInfo.Extension.Equals(".dng", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (ExifToolJson.IsDngVersionNewer(_exifToolJson!.EXIFDNGVersion))
+        {
+            Log.Warning(
+                "DNG version {DngVersion} is newer than v1.4, file may not render correctly: '{FileName}'.",
+                _exifToolJson!.EXIFDNGVersion,
+                processContext.FileInfo.FullName
+            );
+        }
+
+        return true;
     }
 
     private static async Task<bool> SetCreateDateAsync(string outputFile, string createdDate)
@@ -661,7 +690,7 @@ public class ProcessTask(ProcessTask.Context processContext)
         s_liveVideoImageExtensions.Any(extension =>
             File.Exists(Path.ChangeExtension(processContext.FileInfo.FullName, extension))
             || File.Exists(
-                Path.ChangeExtension(processContext.FileInfo.FullName, extension.ToUpper())
+                Path.ChangeExtension(processContext.FileInfo.FullName, extension.ToUpperInvariant())
             )
         );
 

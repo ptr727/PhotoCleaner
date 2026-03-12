@@ -4,14 +4,14 @@ A .NET console application that processes and prepares media files for import in
 
 ## Overview
 
-PhotoCleaner analyzes and transforms media files through a comprehensive validation pipeline that:
+PhotoCleaner analyzes and transforms media files through a validation pipeline that:
 
-- **Detects and reports file issues**: Double extensions, mixed case extensions, mismatched MIME types
-- **Handles Live Photos**: Identifies and manages Apple Live Photo video components
-- **Converts video formats**: Transforms legacy video formats (MTS, M2TS, WMV, AVI) to MP4
-- **Processes audio**: Detects PCM audio in video files that may need conversion
-- **Manages metadata**: Infers creation dates from filenames and directory structures when EXIF data is missing
-- **Validates media integrity**: Ensures files are properly formatted for photo management systems
+- **Detects and reports file issues**: Double extensions, mixed case extensions, mismatched MIME types.
+- **Handles Live Photos**: Identifies and manages Apple Live Photo video components.
+- **Converts video formats**: Transforms legacy video formats (MTS, M2TS, WMV, AVI) to MP4.
+- **Processes audio**: Detects PCM audio in video files that may need conversion.
+- **Manages metadata**: Infers creation dates from filenames and directory structures when EXIF capture date is missing.
+- **Validates media integrity**: Ensures files are properly formatted for photo management systems.
 
 The application processes files in parallel and provides detailed logging of all operations, making it easy to track what changes were made during processing.
 
@@ -33,26 +33,14 @@ PhotoCleaner --path <directory> [--path <directory> ...] [--dryrun] [--threads <
 ### Examples
 
 ```bash
-# Process all media files in a single directory
-PhotoCleaner --path /home/user/Photos
-
 # Process multiple directories in one run
 PhotoCleaner --path /home/user/Photos --path /mnt/backup/Photos
-
-# Process multiple directories using short options
-PhotoCleaner -p /home/user/Photos -p /mnt/backup/Photos -p /media/Archive
 
 # Preview what changes would be made without actually modifying files
 PhotoCleaner --path /home/user/Photos --dryrun
 
-# Using short options with dry run
-PhotoCleaner -p /home/user/Photos -d
-
 # Process with custom thread count
 PhotoCleaner --path /home/user/Photos --threads 8
-
-# All options combined
-PhotoCleaner -p /home/user/Photos -p /mnt/backup -d -t 12
 ```
 
 ## Processing Flow
@@ -85,7 +73,6 @@ PhotoCleaner -p /home/user/Photos -p /mnt/backup -d -t 12
 ```shell
 winget install Microsoft.DotNet.SDK.10
 winget install Microsoft.VisualStudioCode
-winget install nektos.act
 winget install Gyan.FFmpeg
 winget install OliverBetz.ExifTool
 ```

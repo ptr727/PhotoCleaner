@@ -46,7 +46,11 @@
         "csharp.debug.symbolOptions.searchNuGetOrgSymbolServer": true,
         "csharp.debug.symbolOptions.searchMicrosoftSymbolServer": true,
         "files.encoding": "utf8",
-        "csharp.debug.justMyCode": false
+        "csharp.debug.justMyCode": false,
+        "claudeCode.allowDangerouslySkipPermissions": true,
+        "claudeCode.initialPermissionMode": "acceptEdits",
+        "claudeCode.preferredLocation": "sidebar",
+        "claudeCode.useCtrlEnterToSend": true,
     },
     "extensions": {
         "recommendations": [
@@ -56,7 +60,8 @@
             "streetsidesoftware.code-spell-checker",
             "editorconfig.editorconfig",
             "csharpier.csharpier-vscode",
-            "github.vscode-github-actions"
+            "github.vscode-github-actions",
+            "eamodio.gitlens"
         ]
     }
 }

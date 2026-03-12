@@ -9,15 +9,27 @@ public class DateInferenceTests
     [InlineData("Foo_2021-05-02_iOS-1747.jpg", "2021:05:02 00:00:00")]
     [InlineData("20210502_200152957_iOS-1747.jpg", "2021:05:02 20:01:52")]
     [InlineData("20030219_123456.jpg", "2003:02:19 12:34:56")]
-    [InlineData("20090709_081500.mov", "2009:07:09 08:15:00")] // 6 digits needed for time
+    [InlineData("20090709_081500.mov", "2009:07:09 08:15:00")]
     [InlineData("20090709.mov", "2009:07:09 00:00:00")]
-    [InlineData("20090709_0815.mov", "2009:07:09 00:00:00")] // 4 digits - no time parsing
+    [InlineData("20090709_0815.mov", "2009:07:09 00:00:00")] // 4 digits — no time parsing
     [InlineData("EX_20030219_3378.jpg", "2003:02:19 00:00:00")]
     [InlineData("PV_20090709_0081.mp4", "2009:07:09 00:00:00")]
     [InlineData("PHOTO-2024-06-22-07-56-41.jpg", "2024:06:22 07:56:41")]
     [InlineData("WhatsApp Image 2024-06-30.jpg", "2024:06:30 00:00:00")]
     [InlineData("EV 2014 07 03_0003.tif", "2014:07:03 00:00:00")]
-    public void ExtractDateFromFilenameValidDateFormatsReturnsCorrectDate(
+    [InlineData("IMG_20240101_123456.jpg", "2024:01:01 12:34:56")]
+    [InlineData("VID-20231225-WA0001.mp4", "2023:12:25 00:00:00")]
+    [InlineData("Screenshot_2024-03-15-10-30-45.png", "2024:03:15 10:30:45")]
+    [InlineData("2024_01_15_photo.jpg", "2024:01:15 00:00:00")]
+    [InlineData("Screenshot 2023-12-25 at 10.30.15 AM.png", "2023:12:25 00:00:00")]
+    [InlineData("IMG_2023-01-01_New_Year.jpg", "2023:01:01 00:00:00")]
+    [InlineData("Video_2022-06-15_12-30-45_HD.mp4", "2022:06:15 00:00:00")] // _12 is only 2 digits
+    [InlineData("Backup_2021-03-20_evening.jpg", "2021:03:20 00:00:00")]
+    [InlineData("20240229_120000.jpg", "2024:02:29 12:00:00")] // leap year
+    [InlineData("20230228_120000.jpg", "2023:02:28 12:00:00")]
+    [InlineData("20201231_235959.jpg", "2020:12:31 23:59:59")]
+    [InlineData("20220101_000000.jpg", "2022:01:01 00:00:00")]
+    public void ExtractDateFromFilename_ValidDateFormats_ReturnsCorrectDate(
         string filename,
         string expectedDateString
     )
@@ -26,84 +38,37 @@ public class DateInferenceTests
         DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromFilename(filename);
 
         // Assert
-        _ = Assert.NotNull(result);
-        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
-        Assert.Equal(expectedDateString, actualDateString);
+        result.Should().NotBeNull();
+        string actualDateString = result!.Value.ToString(
+            "yyyy:MM:dd HH:mm:ss",
+            CultureInfo.InvariantCulture
+        );
+        actualDateString.Should().Be(expectedDateString);
     }
 
     [Theory]
     [InlineData("random_file.jpg")]
     [InlineData("no_date_here.mov")]
     [InlineData("image_file.png")]
-    [InlineData("invalid_20301301_120000.jpg")] // Invalid date (month 13)
+    [InlineData("invalid_20301301_120000.jpg")] // Invalid month 13
     [InlineData("bad_format_2023-13-01.jpg")] // Invalid month
-    public void ExtractDateFromFilenameInvalidOrNoDateReturnsNull(string filename)
+    [InlineData("PHOTO-2024-02-30.jpg")] // February 30th
+    [InlineData("IMG-2023-13-01.jpg")] // Month 13
+    [InlineData("VID-2022-06-32.jpg")] // Day 32
+    [InlineData("20240230_120000.jpg")] // February 30th compact
+    public void ExtractDateFromFilename_InvalidOrNoDate_ReturnsNull(string filename)
     {
         // Act
         DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromFilename(filename);
 
         // Assert
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ExtractDateFromPathValidPathFormatsReturnsCorrectDate()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string)[] testCases =
-        [
-            (Path.Combine("photos", "2021", "05", "02", "vacation.jpg"), "2021:05:02 00:00:00"),
-            (Path.Combine("photos", "2021", "2021-05-02", "vacation.jpg"), "2021:05:02 00:00:00"),
-            (Path.Combine("photos", "2021", "20210502", "vacation.jpg"), "2021:05:02 00:00:00"),
-            (Path.Combine("photos", "2021", "2021_05_02", "vacation.jpg"), "2021:05:02 00:00:00"),
-            (
-                Path.Combine("data", "media", "Pictures", "Lumia", "2015-11-18", "image.jpg"),
-                "2015:11:18 00:00:00"
-            ),
-            (
-                Path.Combine("archive", "MP Navigator EX", "2014_07_14", "scan.tif"),
-                "2014:07:14 00:00:00"
-            ),
-            (Path.Combine("backup", "photos", "2020", "file.jpg"), "2020:01:01 00:00:00"), // Year only fallback
-        ];
-
-        foreach ((string? fullPath, string? expectedDateString) in testCases)
-        {
-            // Act
-            DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(fullPath);
-
-            // Assert
-            _ = Assert.NotNull(result);
-            string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
-            Assert.Equal(expectedDateString, actualDateString);
-        }
-    }
-
-    [Fact]
-    public void ExtractDateFromPathInvalidOrNoDateReturnsNull()
-    {
-        // Arrange - Use platform-independent paths
-        string[] testPaths =
-        [
-            Path.Combine("random", "path", "file.jpg"),
-            Path.Combine("no", "date", "in", "path.mov"),
-            Path.Combine("photos", "not_a_date", "image.png"),
-        ];
-
-        foreach (string? fullPath in testPaths)
-        {
-            // Act
-            DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(fullPath);
-
-            // Assert
-            Assert.Null(result);
-        }
+        result.Should().BeNull();
     }
 
     [Theory]
-    [InlineData("20991231_120000.jpg", "2099:12:31 12:00:00")] // Future date - extracted but will fail validation
-    [InlineData("18991231_120000.jpg", "1899:12:31 12:00:00")] // Too old date - extracted but will fail validation
-    public void ExtractDateFromFilenameExtractsDateEvenIfInvalidReturnsDate(
+    [InlineData("20991231_120000.jpg", "2099:12:31 12:00:00")] // Future date — extracted but fails validation
+    [InlineData("18991231_120000.jpg", "1899:12:31 12:00:00")] // Too old — extracted but fails validation
+    public void ExtractDateFromFilename_OutOfRangeDate_StillReturnsDate(
         string filename,
         string expectedDateString
     )
@@ -112,9 +77,62 @@ public class DateInferenceTests
         DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromFilename(filename);
 
         // Assert
-        _ = Assert.NotNull(result);
-        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
-        Assert.Equal(expectedDateString, actualDateString);
+        result.Should().NotBeNull();
+        string actualDateString = result!.Value.ToString(
+            "yyyy:MM:dd HH:mm:ss",
+            CultureInfo.InvariantCulture
+        );
+        actualDateString.Should().Be(expectedDateString);
+    }
+
+    [Theory]
+    [InlineData("photos/2021/05/02/vacation.jpg", "2021:05:02 00:00:00")]
+    [InlineData("photos/2021/2021-05-02/vacation.jpg", "2021:05:02 00:00:00")]
+    [InlineData("photos/2021/20210502/vacation.jpg", "2021:05:02 00:00:00")]
+    [InlineData("photos/2021/2021_05_02/vacation.jpg", "2021:05:02 00:00:00")]
+    [InlineData("data/media/Pictures/Lumia/2015-11-18/image.jpg", "2015:11:18 00:00:00")]
+    [InlineData("archive/MP Navigator EX/2014_07_14/scan.tif", "2014:07:14 00:00:00")]
+    [InlineData("backup/photos/2020/file.jpg", "2020:01:01 00:00:00")] // Year-only fallback
+    [InlineData("Photos/2024/01/15/image.jpg", "2024:01:15 00:00:00")]
+    [InlineData("backup/2023/01/photos/file.jpg", "2023:01:01 00:00:00")] // Year-only fallback
+    [InlineData("media/2022/vacation.mp4", "2022:01:01 00:00:00")] // Year-only fallback
+    [InlineData(
+        "Volumes/External/Photos/2023/Christmas/2023-12-25/dinner.jpg",
+        "2023:12:25 00:00:00"
+    )]
+    [InlineData("Users/Photos/Vacation/2022/2022-07-15/beach.png", "2022:07:15 00:00:00")]
+    [InlineData(
+        "storage/emulated/0/DCIM/Camera/2021/2021-01-01/new_year.mp4",
+        "2021:01:01 00:00:00"
+    )]
+    public void ExtractDateFromPath_ValidPathFormats_ReturnsCorrectDate(
+        string fullPath,
+        string expectedDateString
+    )
+    {
+        // Act
+        DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(fullPath);
+
+        // Assert
+        result.Should().NotBeNull();
+        string actualDateString = result!.Value.ToString(
+            "yyyy:MM:dd HH:mm:ss",
+            CultureInfo.InvariantCulture
+        );
+        actualDateString.Should().Be(expectedDateString);
+    }
+
+    [Theory]
+    [InlineData("random/path/file.jpg")]
+    [InlineData("no/date/in/path.mov")]
+    [InlineData("photos/not_a_date/image.png")]
+    public void ExtractDateFromPath_InvalidOrNoDate_ReturnsNull(string fullPath)
+    {
+        // Act
+        DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(fullPath);
+
+        // Assert
+        result.Should().BeNull();
     }
 
     [Theory]
@@ -124,7 +142,7 @@ public class DateInferenceTests
     [InlineData(1900, true)]
     [InlineData(1899, false)] // Too old
     [InlineData(2099, false)] // Future date
-    public void IsDateValidVariousDatesReturnsExpectedValidation(int year, bool expectedValid)
+    public void IsDateValid_WithVariousDates_ReturnsExpectedResult(int year, bool expectedValid)
     {
         // Arrange
         DateTime testDate = new(year, 6, 15, 12, 30, 45);
@@ -133,121 +151,21 @@ public class DateInferenceTests
         bool result = PhotoCleaner.DateFromPath.IsDateValid(testDate);
 
         // Assert
-        Assert.Equal(expectedValid, result);
+        result.Should().Be(expectedValid);
     }
 
     [Fact]
-    public void IsDateValidNullDateReturnsFalse()
+    public void IsDateValid_NullDate_ReturnsFalse()
     {
         // Act
         bool result = PhotoCleaner.DateFromPath.IsDateValid(null);
 
         // Assert
-        Assert.False(result);
+        result.Should().BeFalse();
     }
 
     [Fact]
-    public void InferCreatedDateIntegrationReturnsExpectedResult()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string, string?)[] testCases =
-        [
-            ("IMG_20210502_200152.jpg", Path.Combine("photos", "vacation"), "2021:05:02 20:01:52"), // Filename takes priority
-            (
-                "random_file.jpg",
-                Path.Combine("photos", "2020", "2020-12-25"),
-                "2020:12:25 00:00:00"
-            ), // Path fallback
-            ("no_date.jpg", Path.Combine("random", "path"), null), // No date available
-        ];
-
-        foreach ((string? filename, string? directoryPath, string? expectedDateString) in testCases)
-        {
-            // Arrange - Create a temporary file path
-            string tempFilePath = Path.Combine(directoryPath, filename);
-
-            // Act
-            string createdDate = string.Empty;
-            bool result = PhotoCleaner.DateFromPath.InferCreatedDate(tempFilePath, ref createdDate);
-
-            // Assert
-            if (expectedDateString != null)
-            {
-                Assert.True(result);
-                Assert.Equal(expectedDateString, createdDate);
-            }
-            else
-            {
-                Assert.False(result);
-            }
-        }
-    }
-
-    [Theory]
-    [InlineData("IMG_20240101_123456.jpg", "2024:01:01 12:34:56")]
-    [InlineData("VID-20231225-WA0001.mp4", "2023:12:25 00:00:00")]
-    [InlineData("Screenshot_2024-03-15-10-30-45.png", "2024:03:15 10:30:45")]
-    [InlineData("2024_01_15_photo.jpg", "2024:01:15 00:00:00")]
-    public void ExtractDateFromFilenameAdditionalFormats_ReturnsCorrectDate(
-        string filename,
-        string expectedDateString
-    )
-    {
-        // Act
-        DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromFilename(filename);
-
-        // Assert
-        _ = Assert.NotNull(result);
-        string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
-        Assert.Equal(expectedDateString, actualDateString);
-    }
-
-    [Fact]
-    public void ExtractDateFromPathWithMultiplePathComponents_ReturnsCorrectDate()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string)[] testCases =
-        [
-            (Path.Combine("Photos", "2024", "01", "15", "image.jpg"), "2024:01:15 00:00:00"),
-            (Path.Combine("backup", "2023", "01", "photos", "file.jpg"), "2023:01:01 00:00:00"),
-            (Path.Combine("media", "2022", "vacation.mp4"), "2022:01:01 00:00:00"),
-        ];
-
-        foreach ((string? filePath, string? expectedDateString) in testCases)
-        {
-            // Act
-            DateTime? result = PhotoCleaner.DateFromPath.ExtractDateFromPath(filePath);
-
-            // Assert
-            _ = Assert.NotNull(result);
-            string actualDateString = result.Value.ToString("yyyy:MM:dd HH:mm:ss");
-            Assert.Equal(expectedDateString, actualDateString);
-        }
-    }
-
-    [Theory]
-    [InlineData(1899, 12, 31, false)] // Before 1900
-    [InlineData(1900, 1, 1, true)] // Exactly 1900
-    [InlineData(2000, 6, 15, true)] // Valid mid-range
-    public void IsDateValid_WithVariousDates_ReturnsExpectedResult(
-        int year,
-        int month,
-        int day,
-        bool expected
-    )
-    {
-        // Arrange
-        DateTime date = new(year, month, day);
-
-        // Act
-        bool result = PhotoCleaner.DateFromPath.IsDateValid(date);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Fact]
-    public void IsDateValid_WithCurrentYear_ReturnsTrue()
+    public void IsDateValid_CurrentYear_ReturnsTrue()
     {
         // Arrange
         DateTime currentDate = DateTime.Now;
@@ -256,11 +174,11 @@ public class DateInferenceTests
         bool result = PhotoCleaner.DateFromPath.IsDateValid(currentDate);
 
         // Assert
-        Assert.True(result);
+        result.Should().BeTrue();
     }
 
     [Fact]
-    public void IsDateValid_WithFutureYear_ReturnsFalse()
+    public void IsDateValid_FutureYear_ReturnsFalse()
     {
         // Arrange
         DateTime futureDate = new(DateTime.Now.Year + 2, 1, 1);
@@ -269,6 +187,37 @@ public class DateInferenceTests
         bool result = PhotoCleaner.DateFromPath.IsDateValid(futureDate);
 
         // Assert
-        Assert.False(result);
+        result.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("photos/vacation/IMG_20210502_200152.jpg", "2021:05:02 20:01:52")] // Filename wins
+    [InlineData("photos/2020/2020-12-25/random_file.jpg", "2020:12:25 00:00:00")] // Path fallback
+    [InlineData("photos/2023/2023-01-01/IMG_20240315_143000.jpg", "2024:03:15 14:30:00")] // Filename overrides path
+    public void InferCreatedDate_DateFound_ReturnsExpectedDate(string fullPath, string expectedDate)
+    {
+        // Act
+        string createdDate = string.Empty;
+        bool result = PhotoCleaner.DateFromPath.InferCreatedDate(fullPath, ref createdDate);
+
+        // Assert
+        result.Should().BeTrue();
+        createdDate.Should().Be(expectedDate);
+    }
+
+    [Theory]
+    [InlineData("random/path/no_date.jpg")]
+    [InlineData("photos/unknown/IMG_12345.jpg")]
+    [InlineData("random/path/no_date_file.mov")]
+    [InlineData("temp/processing/temp_file.jpg")]
+    public void InferCreatedDate_NoDateAvailable_ReturnsFalse(string fullPath)
+    {
+        // Act
+        string createdDate = string.Empty;
+        bool result = PhotoCleaner.DateFromPath.InferCreatedDate(fullPath, ref createdDate);
+
+        // Assert
+        result.Should().BeFalse();
+        createdDate.Should().BeEmpty();
     }
 }

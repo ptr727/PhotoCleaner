@@ -1,15 +1,12 @@
 using System.Collections.Concurrent;
-using System.CommandLine;
-using System.Globalization;
 using System.Runtime.CompilerServices;
-using Serilog;
-using Serilog.Debugging;
-using Serilog.Events;
-using Serilog.Sinks.SystemConsole.Themes;
 
 namespace PhotoCleaner;
 
-internal class Program(CommandLine.Context commandLineContext)
+internal sealed class Program(
+    CommandLine.Options commandLineOptions,
+    CancellationToken cancellationToken
+)
 {
     private ConcurrentBag<string> _fileNames = [];
     private readonly ConcurrentDictionary<string, byte> _unknownExtensions = new(
@@ -18,40 +15,54 @@ internal class Program(CommandLine.Context commandLineContext)
     private int _failedCount;
     private int _modifiedCount;
 
-    public static async Task<int> Main(string[] args)
+    internal CommandLine.Options GetCommandLineOptions() => commandLineOptions;
+
+    internal CancellationToken GetCancellationToken() => cancellationToken;
+
+    internal static async Task<int> Main(string[] args)
     {
-        // Parse commandline
-        (CommandLine commandLine, RootCommand rootCommand) =
-            CommandLine.CreateRootCommandWithCommandLine();
-        ParseResult parseResult = rootCommand.Parse(args);
-
-        // Create logger only if we have a valid command context (not help/version)
-        if (parseResult.Errors.Count == 0 && parseResult.CommandResult.Command == rootCommand)
+        try
         {
-            try
-            {
-                CreateLogger(commandLine.CreateContext(parseResult));
-                Log.Logger.LogOverrideContext().Information("Starting PhotoCleaner: {Args}", args);
-            }
-            catch (InvalidOperationException)
-            {
-                // Help was requested, skip logger creation
-            }
-        }
+            // Parse commandline
+            CommandLine commandLine = new(args);
+            commandLine.Result.InvocationConfiguration.EnableDefaultExceptionHandler = false;
+            commandLine.Result.InvocationConfiguration.ProcessTerminationTimeout = null;
 
-        // Execute program (handles help and errors)
-        return await parseResult.InvokeAsync();
+            // Bypass startup for errors or help and version commands
+            if (CommandLine.BypassStartup(commandLine.Result))
+            {
+                return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
+            }
+
+            // Create logger
+            Log.Logger = LoggerFactory.Create(
+                commandLine.CreateOptions(commandLine.Result).LogOptions
+            );
+
+            // Invoke command
+            Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);
+            return await commandLine.Result.InvokeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+        finally
+        {
+            await Log.CloseAndFlushAsync().ConfigureAwait(false);
+        }
     }
 
-    public int Execute()
+    internal async Task<int> ExecuteAsync()
     {
+        Log.Information("Processing started...");
         try
         {
             bool foundConflicts = true;
             while (foundConflicts)
             {
                 // Get list of files to process
-                GetFileList(commandLineContext.Paths);
+                GetFileList(commandLineOptions.Paths);
 
                 // Rename mixed case files
                 foundConflicts = FindCaseConflicts();
@@ -99,7 +110,7 @@ internal class Program(CommandLine.Context commandLineContext)
         Log.Information("Processing {FileCount} files ...", _fileNames.Count);
         _fileNames
             .AsParallel()
-            .WithDegreeOfParallelism(commandLineContext.Threads)
+            .WithDegreeOfParallelism(commandLineOptions.Threads)
             .ForAll(fileName =>
             {
                 Log.Debug("Processing file: '{FileName}'", fileName);
@@ -108,7 +119,7 @@ internal class Program(CommandLine.Context commandLineContext)
                         new ProcessTask.Context
                         {
                             FileInfo = new FileInfo(fileName),
-                            DryRun = commandLineContext.DryRun,
+                            DryRun = commandLineOptions.DryRun,
                             UnknownExtensions = _unknownExtensions,
                             ReProcessNames = reProcessNames,
                         }
@@ -145,35 +156,6 @@ internal class Program(CommandLine.Context commandLineContext)
         }
     }
 
-    private static void CreateLogger(CommandLine.Context context)
-    {
-        // Enable Serilog debug output to the console
-        SelfLog.Enable(Console.Error);
-        LoggerConfiguration loggerConfiguration = new LoggerConfiguration()
-            .MinimumLevel.Is(context.LogLevel)
-            .MinimumLevel.Override(typeof(Extensions.LogOverride).FullName!, LogEventLevel.Verbose)
-            .Enrich.WithThreadId()
-            .WriteTo.Console(
-                theme: AnsiConsoleTheme.Code,
-                // Remove lj from default to quote strings
-                outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] <{ThreadId}> {Message}{NewLine}{Exception}",
-                formatProvider: CultureInfo.InvariantCulture
-            );
-
-        // Add file sink if logFile is specified
-        if (!string.IsNullOrEmpty(context.LogFile))
-        {
-            _ = loggerConfiguration.WriteTo.File(
-                context.LogFile,
-                // Remove lj from default to quote strings
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] <{ThreadId}> {Message}{NewLine}{Exception}",
-                formatProvider: CultureInfo.InvariantCulture
-            );
-        }
-
-        Log.Logger = loggerConfiguration.CreateLogger();
-    }
-
     private void GetFileList(List<DirectoryInfo> directoryList)
     {
         _fileNames = [];
@@ -185,7 +167,7 @@ internal class Program(CommandLine.Context commandLineContext)
             directoryInfo
                 .EnumerateFiles("*", SearchOption.AllDirectories)
                 .AsParallel()
-                .WithDegreeOfParallelism(commandLineContext.Threads)
+                .WithDegreeOfParallelism(commandLineOptions.Threads)
                 .ForAll(file =>
                 {
                     _fileNames.Add(file.FullName);
@@ -273,10 +255,10 @@ internal class Program(CommandLine.Context commandLineContext)
 
     private bool IsDryRun([CallerMemberName] string function = "unknown")
     {
-        if (commandLineContext.DryRun)
+        if (commandLineOptions.DryRun)
         {
             Log.Verbose("Dry run enabled, skipping action in {Function}.", function);
         }
-        return commandLineContext.DryRun;
+        return commandLineOptions.DryRun;
     }
 }

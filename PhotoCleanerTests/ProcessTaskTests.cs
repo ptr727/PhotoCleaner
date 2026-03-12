@@ -1,446 +1,653 @@
+using System.Collections.Concurrent;
 using PhotoCleaner;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 
 namespace PhotoCleanerTests;
 
-public class ProcessTaskTests
+public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
+    : IClassFixture<TempDirectoryFixture>
 {
-    [Fact]
-    public void GetFileMediaExtensionMultipleMediaExtensionsReturnsCorrectSplit()
+    private sealed class InMemorySink : ILogEventSink
     {
-        // Arrange - Use platform-independent paths
-        (string, string, string)[] testCases =
-        [
-            (
-                Path.Combine("path", "to", "file.ext.heic.jpg"),
-                Path.Combine("path", "to", "file.ext"),
-                ".heic.jpg"
-            ),
-            (
-                Path.Combine("path", "to", "file.heic.jpg.ext"),
-                Path.Combine("path", "to", "file.heic.jpg.ext"),
-                ""
-            ),
-            (
-                Path.Combine("path", "to", "file.jpeg.heic"),
-                Path.Combine("path", "to", "file"),
-                ".jpeg.heic"
-            ),
-            (Path.Combine("path", "to", "file"), Path.Combine("path", "to", "file"), ""),
-            (Path.Combine("path", "to", "file.ext"), Path.Combine("path", "to", "file.ext"), ""),
-        ];
+        private readonly List<LogEvent> _events = [];
 
-        foreach (
-            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
-        )
-        {
-            // Act
-            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
+        public IReadOnlyList<LogEvent> Events => _events;
 
-            // Assert
-            Assert.Equal(expectedBaseName, baseName);
-            Assert.Equal(expectedExtension, extension);
-        }
+        public void Emit(LogEvent logEvent) => _events.Add(logEvent);
     }
+
+    // ── Extension / MIME handling ────────────────────────────────────────────
 
     [Fact]
-    public void GetFileMediaExtensionNoExtensionReturnsFullPathAsBase()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string, string)[] testCases =
-        [
-            ("file", "file", ""),
-            (Path.Combine("path", "to", "file"), Path.Combine("path", "to", "file"), ""),
-        ];
-
-        foreach (
-            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
-        )
-        {
-            // Act
-            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
-
-            // Assert
-            Assert.Equal(expectedBaseName, baseName);
-            Assert.Equal(expectedExtension, extension);
-        }
-    }
-
-    [Fact]
-    public void GetFileMediaExtensionNonMediaExtensionReturnsFullPathAsBase()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string, string)[] testCases =
-        [
-            (Path.Combine("path", "to", "file.ext"), Path.Combine("path", "to", "file.ext"), ""),
-            (Path.Combine("path", "file.jpeg.ext"), Path.Combine("path", "file.jpeg.ext"), ""),
-            (Path.Combine("path", "file.txt.doc"), Path.Combine("path", "file.txt.doc"), ""),
-        ];
-
-        foreach (
-            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
-        )
-        {
-            // Act
-            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
-
-            // Assert
-            Assert.Equal(expectedBaseName, baseName);
-            Assert.Equal(expectedExtension, extension);
-        }
-    }
-
-    [Fact]
-    public void GetFileMediaExtensionSingleMediaExtensionReturnsCorrectSplit()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string, string)[] testCases =
-        [
-            (Path.Combine("path", "to", "file.jpg"), Path.Combine("path", "to", "file"), ".jpg"),
-            (Path.Combine("photos", "image.heic"), Path.Combine("photos", "image"), ".heic"),
-            (Path.Combine("Pictures", "video.mp4"), Path.Combine("Pictures", "video"), ".mp4"),
-            (Path.Combine("media", "audio.mov"), Path.Combine("media", "audio"), ".mov"),
-            (Path.Combine("path", "document.tif"), Path.Combine("path", "document"), ".tif"),
-        ];
-
-        foreach (
-            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
-        )
-        {
-            // Act
-            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
-
-            // Assert
-            Assert.Equal(expectedBaseName, baseName);
-            Assert.Equal(expectedExtension, extension);
-        }
-    }
-
-    [Fact]
-    public void GetFileMediaExtensionMediaExtensionFollowedByNonMediaReturnsFullPathAsBase()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string, string)[] testCases =
-        [
-            (Path.Combine("path", "file.jpeg.txt"), Path.Combine("path", "file.jpeg.txt"), ""),
-            (
-                Path.Combine("path", "file.jpg.doc.pdf"),
-                Path.Combine("path", "file.jpg.doc.pdf"),
-                ""
-            ),
-            (
-                Path.Combine("path", "file.heic.ext.unknown"),
-                Path.Combine("path", "file.heic.ext.unknown"),
-                ""
-            ),
-        ];
-
-        foreach (
-            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
-        )
-        {
-            // Act
-            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
-
-            // Assert
-            Assert.Equal(expectedBaseName, baseName);
-            Assert.Equal(expectedExtension, extension);
-        }
-    }
-
-    [Fact]
-    public void GetFileMediaExtensionCaseInsensitiveMediaExtensionsReturnsCorrectSplit()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string, string)[] testCases =
-        [
-            (Path.Combine("path", "file.JPEG.HEIC"), Path.Combine("path", "file"), ".JPEG.HEIC"),
-            (Path.Combine("path", "file.Jpeg.Heic"), Path.Combine("path", "file"), ".Jpeg.Heic"),
-            (Path.Combine("path", "file.JPG"), Path.Combine("path", "file"), ".JPG"),
-            (Path.Combine("path", "file.Jpg"), Path.Combine("path", "file"), ".Jpg"),
-        ];
-
-        foreach (
-            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
-        )
-        {
-            // Act
-            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
-
-            // Assert
-            Assert.Equal(expectedBaseName, baseName);
-            Assert.Equal(expectedExtension, extension);
-        }
-    }
-
-    [Fact]
-    public void GetFileMediaExtensionComplexPathsWithDotsReturnsCorrectSplit()
-    {
-        // Arrange - Use platform-independent paths
-        (string, string, string)[] testCases =
-        [
-            (
-                Path.Combine("complex", "path.with.dots", "file.backup.jpg"),
-                Path.Combine("complex", "path.with.dots", "file.backup"),
-                ".jpg"
-            ),
-            (
-                Path.Combine("path", "file.v1.jpeg.heic"),
-                Path.Combine("path", "file.v1"),
-                ".jpeg.heic"
-            ),
-            (
-                Path.Combine("path", "file.2024.01.01.mp4"),
-                Path.Combine("path", "file.2024.01.01"),
-                ".mp4"
-            ),
-        ];
-
-        foreach (
-            (string? filePath, string? expectedBaseName, string? expectedExtension) in testCases
-        )
-        {
-            // Act
-            ProcessTask.GetFileMediaExtension(filePath, out string baseName, out string extension);
-
-            // Assert
-            Assert.Equal(expectedBaseName, baseName);
-            Assert.Equal(expectedExtension, extension);
-        }
-    }
-
-    [Theory]
-    [InlineData(".jpg")]
-    [InlineData(".JPG")]
-    [InlineData(".jpeg")]
-    [InlineData(".JPEG")]
-    [InlineData(".png")]
-    [InlineData(".PNG")]
-    [InlineData(".heic")]
-    [InlineData(".HEIC")]
-    [InlineData(".mp4")]
-    [InlineData(".MP4")]
-    public void IsMixedCaseExtensionAllLowercaseOrUppercaseReturnsFalse(string extension)
-    {
-        // Act
-        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
-
-        // Assert
-        Assert.False(result);
-    }
-
-    [Theory]
-    [InlineData(".Jpg")]
-    [InlineData(".jPg")]
-    [InlineData(".jpG")]
-    [InlineData(".JPg")]
-    [InlineData(".jPG")]
-    [InlineData(".JpG")]
-    [InlineData(".Jpeg")]
-    [InlineData(".hEic")]
-    [InlineData(".Mp4")]
-    public void IsMixedCaseExtensionMixedCaseReturnsTrue(string extension)
-    {
-        // Act
-        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
-
-        // Assert
-        Assert.True(result);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(".")]
-    public void IsMixedCaseExtensionEmptyOrDotOnlyReturnsFalse(string extension)
-    {
-        // Act
-        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
-
-        // Assert
-        Assert.False(result);
-    }
-
-    [Theory]
-    [InlineData(".123")]
-    [InlineData(".456")]
-    [InlineData("...")]
-    public void IsMixedCaseExtensionNumericOnlyReturnsFalse(string extension)
-    {
-        // Act
-        bool result = ProcessTask.IsMixedCaseExtension(extension.AsSpan());
-
-        // Assert
-        Assert.False(result);
-    }
-
-    [Fact]
-    public void GetBackupFileName_WithNewFile_ReturnsFileNameWithBakExtension()
+    public void Execute_UnknownExtension_ReturnsUnknownExtension()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
-        File.WriteAllText(tempFile, "test");
-
+        string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
+            string filePath = Path.Combine(workDir, "file.xyz");
+            File.WriteAllBytes(filePath, []);
+
             // Act
-            string result = ProcessTask.GetBackupFileName(tempFile);
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
 
             // Assert
-            Assert.Equal(tempFile + ".bak", result);
+            result.Should().Be(ProcessTask.ProcessResult.UnknownExtension);
         }
         finally
         {
-            if (File.Exists(tempFile))
-            {
-                File.Delete(tempFile);
-            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
 
     [Fact]
-    public void GetBackupFileName_WhenBakExists_ReturnsFileNameWithBak1()
+    public void Execute_MixedCaseExtension_RenamesFile()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
-        string bakFile = tempFile + ".bak";
-        File.WriteAllText(tempFile, "test");
-        File.WriteAllText(bakFile, "backup");
-
+        string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
+            string filePath = Path.Combine(workDir, "photo.Jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
             // Act
-            string result = ProcessTask.GetBackupFileName(tempFile);
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
 
             // Assert
-            Assert.Equal(tempFile + ".bak1", result);
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.Combine(workDir, "photo.jpg")).Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
         }
         finally
         {
-            if (File.Exists(tempFile))
-            {
-                File.Delete(tempFile);
-            }
-
-            if (File.Exists(bakFile))
-            {
-                File.Delete(bakFile);
-            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
 
     [Fact]
-    public void GetBackupFileName_WhenBakAndBak1Exist_ReturnsFileNameWithBak2()
+    public void Execute_MismatchedMimeExtension_RenamesFile()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
-        string bakFile = tempFile + ".bak";
-        string bak1File = tempFile + ".bak1";
-        File.WriteAllText(tempFile, "test");
-        File.WriteAllText(bakFile, "backup");
-        File.WriteAllText(bak1File, "backup1");
-
+        string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
+            // JPEG bytes saved with .png extension — MIME mismatch
+            string filePath = Path.Combine(workDir, "photo.png");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
             // Act
-            string result = ProcessTask.GetBackupFileName(tempFile);
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
 
             // Assert
-            Assert.Equal(tempFile + ".bak2", result);
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.Combine(workDir, "photo.jpg")).Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
         }
         finally
         {
-            if (File.Exists(tempFile))
-            {
-                File.Delete(tempFile);
-            }
-
-            if (File.Exists(bakFile))
-            {
-                File.Delete(bakFile);
-            }
-
-            if (File.Exists(bak1File))
-            {
-                File.Delete(bak1File);
-            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
 
     [Fact]
-    public void GetBackupFileName_IncrementsCounterUntilAvailable()
+    public void Execute_MultipleExtensions_RenamesFile()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.txt");
-        string bakFile = tempFile + ".bak";
-        string bak1File = tempFile + ".bak1";
-        string bak2File = tempFile + ".bak2";
-        string bak3File = tempFile + ".bak3";
-        File.WriteAllText(tempFile, "test");
-        File.WriteAllText(bakFile, "backup");
-        File.WriteAllText(bak1File, "backup1");
-        File.WriteAllText(bak2File, "backup2");
-        File.WriteAllText(bak3File, "backup3");
-
+        string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
+            // JPEG bytes with compound extension .heic.jpg — GetFileMediaExtension strips it
+            string filePath = Path.Combine(workDir, "photo.heic.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
             // Act
-            string result = ProcessTask.GetBackupFileName(tempFile);
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
 
             // Assert
-            Assert.Equal(tempFile + ".bak4", result);
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.Combine(workDir, "photo.jpg")).Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
         }
         finally
         {
-            if (File.Exists(tempFile))
-            {
-                File.Delete(tempFile);
-            }
-
-            if (File.Exists(bakFile))
-            {
-                File.Delete(bakFile);
-            }
-
-            if (File.Exists(bak1File))
-            {
-                File.Delete(bak1File);
-            }
-
-            if (File.Exists(bak2File))
-            {
-                File.Delete(bak2File);
-            }
-
-            if (File.Exists(bak3File))
-            {
-                File.Delete(bak3File);
-            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
 
     [Fact]
-    public void GetBackupFileName_WithFileInSubdirectory_ReturnsCorrectPath()
+    public void Execute_NonPreferredExtension_RenamesFile()
     {
         // Arrange
-        string tempDir = Path.Combine(Path.GetTempPath(), $"testdir_{Guid.NewGuid()}");
-        _ = Directory.CreateDirectory(tempDir);
-        string tempFile = Path.Combine(tempDir, "test.txt");
-        File.WriteAllText(tempFile, "test");
-
+        string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
+            // JPEG bytes with .jpeg extension — .jpg is the preferred extension
+            string filePath = Path.Combine(workDir, "photo.jpeg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
             // Act
-            string result = ProcessTask.GetBackupFileName(tempFile);
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
 
             // Assert
-            Assert.Equal(tempFile + ".bak", result);
-            Assert.Contains(tempDir, result);
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.Combine(workDir, "photo.jpg")).Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
         }
         finally
         {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, true);
-            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
+
+    // ── Live photos / short videos ───────────────────────────────────────────
+
+    [Fact]
+    public void Execute_ShortVideo_DeletesFile()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.ShortVideoFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ShortVideoFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Failure);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_LivePhotoVideo_DeletesVideoWithMatchingImage()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "livephoto.mp4");
+            string imagePath = Path.Combine(workDir, "livephoto.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), imagePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(videoPath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Failure);
+            File.Exists(videoPath + ".bak").Should().BeTrue();
+            File.Exists(videoPath).Should().BeFalse();
+            File.Exists(imagePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_LongVideoWithMatchingImage_KeepsVideo()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "longvideo.mp4");
+            string imagePath = Path.Combine(workDir, "longvideo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LongVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), imagePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(videoPath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(videoPath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_LiveDurationVideoNoMatchingImage_KeepsVideo()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "solo.mp4");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(videoPath));
+
+            // Assert — no matching image, so video is kept
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(videoPath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    // ── Video conversion — remux ─────────────────────────────────────────────
+
+    [Fact]
+    public void Execute_MtsFile_RemuxesToMp4()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.MtsFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.MtsFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_M2tsFile_RenamesExtensionToMts()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.M2tsFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.M2tsFile), filePath);
+
+            // Act — first pass: .m2ts is not the preferred extension for video/mpeg (.mts is)
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert — file is renamed to .mts and queued for reprocess (remux happens on second pass)
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(Path.ChangeExtension(filePath, ".mts")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_MkvFile_RemuxesToMp4()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.MkvFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.MkvFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    // ── Video conversion — reencode ──────────────────────────────────────────
+
+    [Fact]
+    public void Execute_AviFile_ReencodesToMp4()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.AviFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.AviFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_WmvFile_ReencodesToMp4()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.WmvFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.WmvFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_3gpFile_ReencodesToMp4()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.ThreeGpFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ThreeGpFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_GifFile_ReencodesToMp4()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.GifFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.GifFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    // ── Video conversion — PCM audio ─────────────────────────────────────────
+
+    [Fact]
+    public void Execute_MovWithPcmAudio_ReencodesAudio()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert — first pass: .mov is not the preferred extension for video/quicktime (.mp4 is),
+            // so file is renamed to .mp4 and queued for reprocess; PCM reencode happens on second pass
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(filePath + ".bak").Should().BeFalse();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_MovWithAacAudio_NoConversion()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.AacMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.AacMovFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert — first pass: .mov renamed to .mp4 (preferred extension); no audio reencode triggered
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeTrue();
+            File.Exists(filePath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_Mp4WithPcmAudio_ReencodesAudio()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMp4File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMp4File), filePath);
+
+            // Act — second pass: .mp4 with PCM audio triggers audio reencode
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert — original backed up, re-encoded output has same path
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(filePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_Mp4WithAacAudio_ReturnsSuccess()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.AacMp4File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.AacMp4File), filePath);
+
+            // Act — second pass: .mp4 with AAC audio requires no conversion
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(filePath).Should().BeTrue();
+            File.Exists(filePath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    // ── DNG version warning ───────────────────────────────────────────────────
+
+    [Fact]
+    public void Execute_DngV1_4_NoWarning()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        InMemorySink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV14File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV14File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            sink.Events.Where(e => e.Level == LogEventLevel.Warning)
+                .Should()
+                .NotContain(e =>
+                    e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_DngV1_5_LogsWarning()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        InMemorySink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV15File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV15File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
+                    && e.RenderMessage()
+                        .Contains(TempDirectoryFixture.DngVersion15, StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    // ── Date inference ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void Execute_JpegMissingDateInPath_SetsDate()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Create dated directory structure that DateFromPath can extract
+            string datedDir = Path.Combine(workDir, "2024", "01", "15");
+            Directory.CreateDirectory(datedDir);
+            string filePath = Path.Combine(datedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert — date was inferred from path, file was modified and queued for reprocess
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public void Execute_JpegMissingDateNoPath_ReturnsSuccess()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = ProcessTask.Execute(CreateContext(filePath));
+
+            // Assert — no date in path, warning logged but no modification
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(filePath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static ProcessTask.Context CreateContext(string filePath, bool dryRun = false) =>
+        new()
+        {
+            FileInfo = new FileInfo(filePath),
+            DryRun = dryRun,
+            ReProcessNames = [],
+            UnknownExtensions = new ConcurrentDictionary<string, byte>(),
+        };
 }
