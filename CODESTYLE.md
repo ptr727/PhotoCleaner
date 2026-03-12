@@ -6,26 +6,28 @@
 
 **CRITICAL**: All builds must complete without warnings. The project enforces this through:
 
-1. **VS Code tasks**
-   - `CSharpier Format` → `.Net Build` → `.Net Format`
-   - `.Net Format` must pass with `--verify-no-changes` before commit
-   - Command: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
+1. **Code change workflow** — run steps in this order:
+   1. Format code: `dotnet csharpier format --log-level=debug .`
+   2. Verify style: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
+   3. Build: `dotnet build --verbosity=diagnostic`
+   4. Test: `dotnet test`
+   - All errors and all warnings must be addressed
 
 2. **Analyzer configuration**
-   - `<AnalysisLevel>latest-all</AnalysisLevel>`
-   - `<EnableNETAnalyzers>true</EnableNETAnalyzers>`
-   - Analyzer severity is `suggestion`, but all warnings must be addressed
+   - `.csproj` file: `<AnalysisLevel>latest-all</AnalysisLevel>`
+   - `.csproj` file: `<EnableNETAnalyzers>true</EnableNETAnalyzers>`
+   - `.editorconfig` files
 
-3. **Husky.Net pre-commit hooks**
-   - Automated checks run before commits
+3. **Git pre-commit hooks**
+   - `dotnet husky run`
 
 ### Build Tasks
 
 Available VS Code tasks (use via `run_task` tool):
 
-- `.Net Build`: Build with diagnostic verbosity
-- `.Net Format`: Verify formatting and style (must pass)
 - `CSharpier Format`: Auto-format code with CSharpier
+- `.Net Format`: Verify formatting and style (must pass)
+- `.Net Build`: Build with diagnostic verbosity
 - `.Net Tool Update`: Update dotnet tools
 - `Husky.Net Run`: Run pre-commit hooks manually
 
@@ -33,11 +35,9 @@ Available VS Code tasks (use via `run_task` tool):
 
 ### Code Formatting and Tooling
 
-1. **CSharpier**: Primary code formatter
-   - Run before committing: `dotnet csharpier format --log-level=debug .`
+1. **CSharpier**: Primary code formatter — run before committing
 
-2. **dotnet format**: Style verification
-   - Verify no changes: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
+2. **dotnet format**: Style verification — run after CSharpier to confirm no remaining issues
 
 3. **Husky.Net**: Git hooks for automated checks
    - Installed as a local dotnet tool (via `dotnet tool restore`)
@@ -84,24 +84,45 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - Primary constructors when appropriate
    - Top-level statements for console apps
    - Pattern matching over traditional checks
-   - Collection expressions when types loosely match
-   - Extension methods using `extension()` syntax
-   - Implicit object creation when type is apparent
+   - Collection expressions (`[…]`) when the target type supports them
+   - Extension members using C# 14 `extension()` syntax — do **not** use static class + `this` parameter:
+
+     ```csharp
+     // Correct (C# 14)
+     extension(ILogger logger)
+     {
+         public void LogInfo(string message) => logger.Information(message);
+     }
+
+     // Incorrect (old style)
+     public static class LoggerExtensions
+     {
+         public static void LogInfo(this ILogger logger, string message) =>
+             logger.Information(message);
+     }
+     ```
+
+   - Target-typed `new` expressions (`new()`) when the type is apparent from context
    - Range and index operators
 
 4. **Expression-bodied members**: Use for applicable members
    - Methods, properties, accessors, operators, lambdas, local functions
 
-5. **`var` keyword**: Do NOT use `var` (always use explicit types)
+5. **`var` keyword**: Do NOT use `var` — always use explicit types, including for LINQ results
+   and generic collections
 
    ```csharp
    // Correct
    int count = 42;
    string name = "test";
+   List<string> items = new();
+   IEnumerable<FileInfo> files = directory.EnumerateFiles("*.jpg");
 
    // Incorrect
    var count = 42;
    var name = "test";
+   var items = new List<string>();
+   var files = directory.EnumerateFiles("*.jpg");
    ```
 
 ### Naming Conventions
@@ -136,7 +157,8 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    global using Serilog;
    ```
 
-2. **Usings placement**: Outside namespace, sorted with `System` directives first
+2. **Usings placement**: Outside namespace, sorted with `System` directives first — CSharpier
+   handles sorting automatically
 
    ```csharp
    using System.CommandLine;
@@ -169,11 +191,21 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - Linux scripts (`.sh`): LF
 
 6. **`#region`**: Do not use regions. Prefer logical file/folder/namespace organization.
-7. **Member ordering (StyleCop SA1201)**: const → static readonly → static fields → instance readonly fields → instance fields → constructors → public (events → properties → indexers → methods → operators) → non-public in same order → nested types
+
+7. **Member ordering (StyleCop SA1201)**:
+   1. `const` fields
+   2. `static readonly` fields
+   3. Other `static` fields
+   4. `readonly` instance fields
+   5. Other instance fields
+   6. Constructors
+   7. Public members: events → properties → indexers → methods → operators
+   8. Non-public members: same order as public
+   9. Nested types
 
 ### Comments and Documentation
 
-1. **XML documentation**
+1. **XML documentation** (required for library projects; optional for console apps)
    - `<GenerateDocumentationFile>true</GenerateDocumentationFile>`
    - Missing XML comments for public APIs are suppressed (`.editorconfig`)
    - Must document all public surfaces.
@@ -202,10 +234,12 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    public async Task<string> GetQuoteOfTheDayAsync(string category, CancellationToken cancellationToken) {}
    ```
 
-2. **Code analysis suppressions**
-   - Do not use `#pragma` sections to disable analyzers
-   - For one-off cases, use suppression attributes with justifications
-   - For project-wide suppressions, add rules to `.editorconfig`
+2. **Code analysis suppressions**: When a warning cannot be fixed, choose the appropriate approach:
+   - **Fix the code** — always the preferred option
+   - **`[SuppressMessage]`** — one-off false positives; must include a `Justification`
+   - **`.editorconfig`** — project-wide rules that apply uniformly across all files
+
+   Do not use `#pragma` sections to disable analyzers.
 
    ```csharp
    [System.Diagnostics.CodeAnalysis.SuppressMessage(
@@ -253,16 +287,17 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 2. **Async all the way**: Avoid blocking calls (`.Result`, `.Wait()`); use `async`/`await`
 3. **Cancellation tokens**: Accept `CancellationToken` as the last parameter and pass it through
 4. **ConfigureAwait**: In library code, use `ConfigureAwait(false)` unless context is required
-   - Do not call `ConfigureAwait(false)` in xUnit tests (see xUnit1030)
+   - Do not use `ConfigureAwait` in xUnit tests — xUnit provides its own synchronization context,
+     and using `ConfigureAwait(false)` triggers warning xUnit1030
 5. **Disposables**: Use `await using` for async disposables; prefer `using` declarations
 6. **LINQ vs loops**: Use LINQ for clarity, loops for hot paths or allocations
 7. **HTTP**: Reuse `HttpClient` via factory; avoid per-request instantiation
 8. **Collections**: Prefer `IReadOnlyList<T>`/`IReadOnlyCollection<T>` for public APIs
-9. **Immutability**: Prefer immutable records; use init-only setters when records are not suitable; prefer immutable or frozen collections for read-only data
+9. **Immutability**: Prefer immutable records; use init-only setters when records are not suitable;
+   prefer immutable or frozen collections for read-only data
 10. **Exceptions as control flow**: Avoid using exceptions for expected flow
 11. **Sealing classes**: Seal classes that are not designed for inheritance
-12. **Read-only data**: Use immutable or frozen collections for read-only data sets
-13. **Lazy initialization**: Use `Lazy<T>` for static, thread-safe instantiation (e.g., logger factory, HTTP factory)
+12. **Lazy initialization**: Use `Lazy<T>` for static, thread-safe instantiation (e.g., logger factory, HTTP factory)
 
 ### Testing Conventions
 
@@ -286,6 +321,15 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 2. **Organization**: Arrange-Act-Assert pattern
 3. **Naming**: Descriptive names with underscores
 4. **Theory tests**: Use `[Theory]` with `[InlineData]`
+5. **Null assertions**: After `.Should().NotBeNull()`, use the null-forgiving operator `!` to access
+   members — required to satisfy CS8629
+
+   ```csharp
+   // After NotBeNull(), use ! to satisfy nullable analysis (CS8629)
+   Result? result = GetResult();
+   result.Should().NotBeNull();
+   int value = result!.Value;
+   ```
 
 ## Project Configuration
 
@@ -297,8 +341,8 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 
 3. **Assembly information**
    - Use semantic versioning
-   - Include SourceLink: `<PublishRepositoryUrl>true</PublishRepositoryUrl>`
-   - Embed untracked sources: `<EmbedUntrackedSources>true</EmbedUntrackedSources>`
+   - For packable libraries: Include SourceLink: `<PublishRepositoryUrl>true</PublishRepositoryUrl>`
+   - For packable libraries: Embed untracked sources: `<EmbedUntrackedSources>true</EmbedUntrackedSources>`
 
 4. **Internal visibility**: Use `InternalsVisibleTo` for test and benchmark access
 
@@ -308,7 +352,3 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
      <InternalsVisibleTo Include="Tests" />
    </ItemGroup>
    ```
-
-## Best Practices
-
-1. **Code reviews**: All changes go through pull requests

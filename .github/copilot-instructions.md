@@ -1,5 +1,7 @@
 # PhotoCleaner AI Coding Instructions
 
+> For coding style, formatting rules, and conventions, see [`CODESTYLE.md`](../CODESTYLE.md).
+
 ## Project Overview
 PhotoCleaner is a .NET 10 console application that processes media files in preparation for import into photo management systems (Lightroom, Immich, PhotoPrims). It analyzes and transforms media files through validation, modification, and verification phases.
 
@@ -83,12 +85,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 
 ## Development Workflow
 
-### Build & Format
-```bash
-dotnet build                    # Standard build
-dotnet format --verify-no-changes --verbosity=detailed  # Uses .editorconfig settings
-dotnet csharpier format --log-level=debug .
-```
+See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting commands, and tooling.
 
 ### Dependencies
 - **CliWrap**: External process execution

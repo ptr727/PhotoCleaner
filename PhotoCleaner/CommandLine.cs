@@ -34,12 +34,12 @@ internal sealed class CommandLine
             "PhotoCleaner - Pre-process media files for photo management systems."
         )
         {
-            _logLevelOption,
-            _logFileOption,
-            _logFileClearOption,
             _pathOption,
             _dryRunOption,
             _threadsOption,
+            _logLevelOption,
+            _logFileOption,
+            _logFileClearOption,
         };
         rootCommand.SetAction(
             (parseResult, cancellationToken) =>
@@ -69,22 +69,19 @@ internal sealed class CommandLine
     private static Option<List<DirectoryInfo>> CreatePathOption() =>
         new Option<List<DirectoryInfo>>("--path", "-p")
         {
-            Description = "The directory path to process.",
+            Description = "The directory path to process",
             Required = true,
         }.AcceptExistingOnly();
 
     private static Option<bool> CreateDryRunOption() =>
-        new("--dryrun", "-d")
-        {
-            Description = "Perform a dry run without making changes (default: false).",
-        };
+        new("--dryrun", "-d") { Description = "Perform a dry run without making changes" };
 
     private static Option<int> CreateThreadsOption()
     {
         Option<int> option = new("--threads", "-t")
         {
-            Description = "Number of parallel threads (default: Max(ProcessorCount, 4)).",
-            DefaultValueFactory = _ => Math.Max(Environment.ProcessorCount, 4),
+            Description = "Number of parallel threads",
+            DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4),
         };
 
         option.Validators.Add(result =>
@@ -92,12 +89,12 @@ internal sealed class CommandLine
             int value = result.GetValue(option);
             if (value <= 0)
             {
-                result.AddError("Thread count must be greater than 0.");
+                result.AddError("Thread count must be greater than 0");
             }
             else if (value > Environment.ProcessorCount)
             {
                 result.AddError(
-                    $"Thread count must be less than or equal to {Environment.ProcessorCount}."
+                    $"Thread count must be less than or equal to {Environment.ProcessorCount}"
                 );
             }
         });
@@ -106,16 +103,16 @@ internal sealed class CommandLine
     }
 
     private static Option<bool> CreateLogFileClearOption() =>
-        new("--logfile-clear", "-c")
+        new("--logclear", "-c")
         {
-            Description = "Clear the log file before writing (default: false).",
+            Description = "Clear the log file before writing",
             Recursive = true,
         };
 
     private static Option<LogEventLevel> CreateLogLevelOption() =>
         new("--loglevel", "-l")
         {
-            Description = "Set the log level (default: Information).",
+            Description = "Set the log level",
             DefaultValueFactory = _ => LogEventLevel.Information,
             Recursive = true,
         };
@@ -124,7 +121,7 @@ internal sealed class CommandLine
     {
         Option<string> option = new("--logfile", "-f")
         {
-            Description = "Write logs to the specified file (optional).",
+            Description = "Write logs to the specified file",
             Recursive = true,
         };
         return option.AcceptLegalFileNamesOnly();

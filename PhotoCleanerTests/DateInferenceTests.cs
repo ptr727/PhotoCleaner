@@ -1,6 +1,6 @@
 namespace PhotoCleanerTests;
 
-public class DateInferenceTests
+public sealed class DateInferenceTests
 {
     [Theory]
     [InlineData("Foo_2021_05_02_200152957_iOS-1747.jpg", "2021:05:02 20:01:52")]

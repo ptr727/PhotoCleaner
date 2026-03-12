@@ -1,34 +1,59 @@
 # PhotoCleaner
 
-A .NET console application that processes and prepares media files for import into photo management systems such as Lightroom, Immich, and PhotoPrims.
+A .NET console application that processes and prepares media files for import into photo management systems such as Lightroom, Immich, and PhotoPrism.
 
 ## Overview
 
 PhotoCleaner analyzes and transforms media files through a validation pipeline that:
 
-- **Detects and reports file issues**: Double extensions, mixed case extensions, mismatched MIME types.
-- **Handles Live Photos**: Identifies and manages Apple Live Photo video components.
-- **Converts video formats**: Transforms legacy video formats (MTS, M2TS, WMV, AVI) to MP4.
-- **Processes audio**: Detects PCM audio in video files that may need conversion.
-- **Manages metadata**: Infers creation dates from filenames and directory structures when EXIF capture date is missing.
-- **Validates media integrity**: Ensures files are properly formatted for photo management systems.
+- **Renames mismatched extensions**: Corrects file extensions that do not match the actual file
+  content (MIME type), normalises to the preferred extension (e.g. `.jpeg` → `.jpg`), and strips
+  compound extensions (e.g. `photo.heic.jpg` → `photo.jpg`).
+- **Renames mixed-case extensions**: Converts uppercase or mixed-case extensions to lowercase
+  (e.g. `.JPG` → `.jpg`).
+- **Handles Live Photos**: Removes Apple Live Photo video components — videos ≤ 1s are always
+  removed; videos ≤ 4s with a matching HEIC or JPEG are removed; longer videos with a matching
+  image trigger a warning but are kept.
+- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4; re-encodes WMV, AVI, 3GP, and
+  GIF to MP4 (H.264/AAC); re-encodes PCM audio to AAC in MOV and MP4 files while preserving
+  the video stream.
+- **Sets missing creation dates**: Infers and writes EXIF/QuickTime creation dates from filenames
+  or directory path structures when metadata is absent.
+- **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
+  render correctly in older applications.
 
-The application processes files in parallel and provides detailed logging of all operations, making it easy to track what changes were made during processing.
+Files that are renamed or converted are re-queued through the pipeline so every transformation
+is validated. Original files are preserved with a `.bak` extension before any modification.
+The application processes files in parallel and provides detailed logging of all operations.
 
 ## Usage
 
 ### Command Line Syntax
 
-```bash
-PhotoCleaner --path <directory> [--path <directory> ...] [--dryrun] [--threads <count>]
+```text
+$> PhotoCleaner --help
+Description:
+  PhotoCleaner - Pre-process media files for photo management systems.
+
+Usage:
+  PhotoCleaner [options]
+
+Options:
+  -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
+  -d, --dryrun                                                    Perform a dry run without making changes
+  -t, --threads <threads>                                         Number of parallel threads [default: min(CPU count, 4)]
+  -l, --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
+  -f, --logfile <logfile>                                         Write logs to the specified file
+  -c, --logclear                                                  Clear the log file before writing
+  -?, -h, --help                                                  Show help and usage information
+  --version                                                       Show version information
 ```
 
-### Options
+**Option notes:**
 
-- `--path, -p <directory>` - **Required**. One or more directory paths containing media files to process. Can be specified multiple times to process multiple directories in a single run.
-- `--dryrun, -d` - **Optional**. Perform a dry run without making any actual changes
-- `--threads, -t <count>` - **Optional**. Number of parallel threads to use for processing (default: Max(ProcessorCount, 4), must be 1-ProcessorCount)
-- `--help, -h` - Display help information
+- `--path` / `-p` — can be specified multiple times to process several directories in one run;
+  must point to an existing directory.
+- `--threads` / `-t` — defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
 
 ### Examples
 
@@ -36,33 +61,36 @@ PhotoCleaner --path <directory> [--path <directory> ...] [--dryrun] [--threads <
 # Process multiple directories in one run
 PhotoCleaner --path /home/user/Photos --path /mnt/backup/Photos
 
-# Preview what changes would be made without actually modifying files
+# Preview what changes would be made without modifying files
 PhotoCleaner --path /home/user/Photos --dryrun
 
-# Process with custom thread count
-PhotoCleaner --path /home/user/Photos --threads 8
+# Process with 8 parallel threads and write a log file
+PhotoCleaner --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log
 ```
 
 ## Processing Flow
 
-1. **File Enumeration**: Recursively scans all specified directories to build a list of files to process
-2. **Case Conflict Detection**: Identifies files with similar names but different cases that may cause issues
-3. **Parallel Processing**: Processes files in parallel (based on CPU core count) through the validation pipeline:
-   - Detects double file extensions (e.g., `.jpg.jpg`)
-   - Detects mixed case extensions (e.g., `.JpG`)
-   - Detects MIME type mismatches between file content and extension
-   - Identifies and handles Apple Live Photo components
-   - Converts legacy video formats (MTS, M2TS) via remuxing to MP4
-   - Converts incompatible video formats (WMV, AVI) via re-encoding to MP4
-   - Detects and reports PCM audio in MOV files
-   - Validates EXIF creation dates, inferring from filenames/paths when missing
-4. **Results Summary**: Reports counts of failed, modified, and successfully processed files
+1. **File enumeration**: Recursively scans all specified directories.
+2. **Case conflict detection**: Identifies files with the same name but different casing that
+   would collide on case-insensitive file systems; renames conflicting files before processing.
+3. **Per-file validation pipeline** (runs in parallel, stops on first action per file):
+   1. Rename to canonical MIME extension — corrects mismatches and strips compound extensions.
+   2. Rename mixed-case extension to lowercase.
+   3. Delete short or Live Photo video clips (≤ 1s always; ≤ 4s with matching HEIC/JPEG).
+   4. Convert legacy or incompatible video formats to MP4:
+      - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
+      - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k)
+      - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
+   5. Set missing EXIF/QuickTime creation date inferred from filename or directory path.
+   6. Warn on DNG version > v1.4.
+4. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
+5. **Results summary**: Reports counts of failed, modified, and successfully processed files;
+   lists any unrecognised file extensions.
 
 ## Supported File Types
 
-- **Images**: JPG, JPEG, PNG, HEIC, HEIF, TIFF, TIF, CR2, NEF, ARW, ORF, RW2, DNG
-- **Videos**: MP4, MOV, MTS, M2TS, MKV, AVI, WMV, 3GP
-- **Other**: GIF
+- **Images**: ARW, CR2, DNG, HEIC, HEIF, JPEG, JPG, NEF, ORF, PNG, PSD, RW2, TIF, TIFF
+- **Videos**: 3GP, AVI, GIF, M2TS, MKV, MOV, MP4, MTS, WMV
 
 ## Development Tooling
 

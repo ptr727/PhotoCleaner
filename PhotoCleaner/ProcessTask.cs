@@ -159,10 +159,10 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             { "video/x-msvideo", new[] { ".avi" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    public static ProcessResult Execute(Context processContext)
+    public static Task<ProcessResult> ExecuteAsync(Context processContext)
     {
         ProcessTask processTask = new(processContext);
-        return processTask.ExecuteAsync().GetAwaiter().GetResult();
+        return processTask.ExecuteAsync();
     }
 
     private async Task<ProcessResult> ExecuteAsync()

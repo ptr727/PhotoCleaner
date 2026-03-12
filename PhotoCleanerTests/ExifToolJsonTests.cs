@@ -2,7 +2,7 @@ using PhotoCleaner;
 
 namespace PhotoCleanerTests;
 
-public class ExifToolJsonTests
+public sealed class ExifToolJsonTests
 {
     public static TheoryData<ExifToolJson> IsDateSet_ValidDates =>
         [

@@ -43,9 +43,9 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
             $"PhotoCleanerTests_{Path.GetRandomFileName()}"
         );
         Directory.CreateDirectory(SourceDir);
-        await GenerateImagesAsync().ConfigureAwait(false);
-        await GenerateDngFilesAsync().ConfigureAwait(false);
-        await GenerateVideoFilesAsync().ConfigureAwait(false);
+        await GenerateImagesAsync();
+        await GenerateDngFilesAsync();
+        await GenerateVideoFilesAsync();
     }
 
     public ValueTask DisposeAsync()

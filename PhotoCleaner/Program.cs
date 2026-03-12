@@ -71,7 +71,7 @@ internal sealed class Program(
             // Process files as long as there are files to process
             while (!_fileNames.IsEmpty)
             {
-                ExecuteProcess();
+                await ExecuteProcessAsync().ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
@@ -103,43 +103,52 @@ internal sealed class Program(
         return 0;
     }
 
-    public void ExecuteProcess()
+    private async Task ExecuteProcessAsync()
     {
         // Process files in parallel
         ConcurrentBag<string> reProcessNames = [];
         Log.Information("Processing {FileCount} files ...", _fileNames.Count);
-        _fileNames
-            .AsParallel()
-            .WithDegreeOfParallelism(commandLineOptions.Threads)
-            .ForAll(fileName =>
-            {
-                Log.Debug("Processing file: '{FileName}'", fileName);
-                switch (
-                    ProcessTask.Execute(
-                        new ProcessTask.Context
-                        {
-                            FileInfo = new FileInfo(fileName),
-                            DryRun = commandLineOptions.DryRun,
-                            UnknownExtensions = _unknownExtensions,
-                            ReProcessNames = reProcessNames,
-                        }
-                    )
-                )
+        await Parallel
+            .ForEachAsync(
+                _fileNames,
+                new ParallelOptions
                 {
-                    case ProcessTask.ProcessResult.Failure:
-                    case ProcessTask.ProcessResult.DoubleExtensions:
-                        _ = Interlocked.Increment(ref _failedCount);
-                        break;
-                    case ProcessTask.ProcessResult.Modified:
-                    case ProcessTask.ProcessResult.Reprocess:
-                        _ = Interlocked.Increment(ref _modifiedCount);
-                        break;
-                    case ProcessTask.ProcessResult.UnknownExtension:
-                    case ProcessTask.ProcessResult.Success:
-                    default:
-                        break;
+                    MaxDegreeOfParallelism = commandLineOptions.Threads,
+                    CancellationToken = cancellationToken,
+                },
+                async (fileName, ct) =>
+                {
+                    Log.Debug("Processing file: '{FileName}'", fileName);
+                    switch (
+                        await ProcessTask
+                            .ExecuteAsync(
+                                new ProcessTask.Context
+                                {
+                                    FileInfo = new FileInfo(fileName),
+                                    DryRun = commandLineOptions.DryRun,
+                                    UnknownExtensions = _unknownExtensions,
+                                    ReProcessNames = reProcessNames,
+                                }
+                            )
+                            .ConfigureAwait(false)
+                    )
+                    {
+                        case ProcessTask.ProcessResult.Failure:
+                        case ProcessTask.ProcessResult.DoubleExtensions:
+                            _ = Interlocked.Increment(ref _failedCount);
+                            break;
+                        case ProcessTask.ProcessResult.Modified:
+                        case ProcessTask.ProcessResult.Reprocess:
+                            _ = Interlocked.Increment(ref _modifiedCount);
+                            break;
+                        case ProcessTask.ProcessResult.UnknownExtension:
+                        case ProcessTask.ProcessResult.Success:
+                        default:
+                            break;
+                    }
                 }
-            });
+            )
+            .ConfigureAwait(false);
 
         // Reprocess files
         if (reProcessNames.IsEmpty)

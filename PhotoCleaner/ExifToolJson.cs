@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace PhotoCleaner;
 
-public class ExifToolJson
+public sealed class ExifToolJson
 {
     [JsonPropertyName("File:FileModifyDate")]
     public string? FileModifyDate { get; set; }
