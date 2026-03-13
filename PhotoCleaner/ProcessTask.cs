@@ -24,7 +24,6 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         Reprocess,
         Modified,
         UnknownExtension,
-        DoubleExtensions,
     }
 
     internal const double LiveVideoDuration = 4.0;
@@ -38,6 +37,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
     {
         ".3gp",
         ".arw",
+        ".asf",
         ".avi",
         ".cr2",
         ".dng",
@@ -107,21 +107,6 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         ".mp4",
         ".mov",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_jpegExtensions = new[]
-    {
-        ".jpg",
-        ".jpeg",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_heicExtensions = new[]
-    {
-        ".heic",
-        ".heif",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-    private static readonly FrozenSet<string> s_tiffExtensions = new[]
-    {
-        ".tif",
-        ".tiff",
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private static readonly FrozenDictionary<string, FrozenSet<string>> s_mimeTypeExtensions =
         new Dictionary<string, FrozenSet<string>>
@@ -131,11 +116,23 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
                 new[] { ".psd" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
             },
             { "image/gif", new[] { ".gif" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "image/heic", s_heicExtensions },
-            { "image/heif", s_heicExtensions },
-            { "image/jpeg", s_jpegExtensions },
+            {
+                "image/heic",
+                new[] { ".heic", ".heif" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
+            {
+                "image/heif",
+                new[] { ".heif", ".heic" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
+            {
+                "image/jpeg",
+                new[] { ".jpg", ".jpeg" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
             { "image/png", new[] { ".png" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "image/tiff", s_tiffExtensions },
+            {
+                "image/tiff",
+                new[] { ".tif", ".tiff" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
             { "image/x-adobe-dng", new[] { ".dng" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
             { "image/x-canon-cr2", new[] { ".cr2" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
             { "image/x-nikon-nef", new[] { ".nef" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
@@ -155,7 +152,10 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
                 new[] { ".mts", ".m2ts" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
             },
             { "video/x-matroska", new[] { ".mkv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
-            { "video/x-ms-asf", new[] { ".wmv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
+            {
+                "video/x-ms-asf",
+                new[] { ".asf", ".wmv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+            },
             { "video/x-ms-wmv", new[] { ".wmv" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
             { "video/x-msvideo", new[] { ".avi" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase) },
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
@@ -287,7 +287,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             return false;
         }
 
-        // Rename extension to match MIME type
+        // Rename extension to match MIME type preferred extension
         _modified = true;
         string outputFile = baseName + expectedExtensions.First();
         MoveFile(processContext.FileInfo.FullName, outputFile);

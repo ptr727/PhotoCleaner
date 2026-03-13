@@ -152,6 +152,46 @@ dotnet tool update --all
 dotnet outdated --upgrade:prompt
 ```
 
+## Workflow
+
+### iCloud Photos Downloader
+
+Run [icloudpd](https://icloud-photos-downloader.github.io) from Docker:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run -it --rm --name icloudpd \
+    -v $(pwd)/.icloudpd:/cookies \
+    -v /data/media/TestiCloud:/data \
+    -e TZ=America/Los_Angeles \
+    icloudpd/icloudpd:latest \
+    icloudpd \
+        --cookie-directory /cookies \
+        --username your@icloud.email \
+        --directory /data \
+        --set-exif-datetime \
+        --folder-structure "{:%Y/%m}" \
+        --recent 1000
+        # --skip-created-before 2025-01-01
+```
+
+Run PhotoCleaner from source:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+# https://github.com/ptr727/PhotoCleaner
+
+dotnet run --project PhotoCleaner/PhotoCleaner.csproj -- \
+    --path /data/media/TestiCloud \
+    --threads 4
+```
+
 ## License
 
 Licensed under the [MIT License][license-link]\

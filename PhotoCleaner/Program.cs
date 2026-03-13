@@ -92,7 +92,7 @@ internal sealed class Program(
 
         if (_failedCount > 0)
         {
-            Log.Warning("Failed files: {FailedCount}", _failedCount);
+            Log.Warning("Failed or deleted files: {FailedCount}", _failedCount);
         }
 
         if (_modifiedCount > 0)
@@ -135,7 +135,6 @@ internal sealed class Program(
                     )
                     {
                         case ProcessTask.ProcessResult.Failure:
-                        case ProcessTask.ProcessResult.DoubleExtensions:
                             _ = Interlocked.Increment(ref _failedCount);
                             break;
                         case ProcessTask.ProcessResult.Modified:
