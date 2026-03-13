@@ -73,6 +73,14 @@ public sealed class ExifToolJson
     [JsonPropertyName("Matroska:DateTimeOriginal")]
     public string? MatroskaDateTimeOriginal { get; set; }
 
+    [JsonPropertyName("QuickTime:ContentIdentifier")]
+    public string? QuickTimeContentIdentifier { get; set; }
+
+    [JsonPropertyName("Keys:ContentIdentifier")]
+    public string? KeysContentIdentifier { get; set; }
+
+    public string? ContentIdentifier => QuickTimeContentIdentifier ?? KeysContentIdentifier;
+
     public bool IsDateSet() =>
         // EXIF:DateTimeOriginal
         // EXIF:CreateDate

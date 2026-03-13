@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using CliWrap;
 using PhotoCleaner;
 using Serilog;
 using Serilog.Core;
@@ -180,16 +181,19 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
-    public async Task ExecuteAsync_LivePhotoVideo_DeletesVideoWithMatchingImage()
+    public async Task ExecuteAsync_LivePhotoVideo_DeletesVideoWithMatchingContentIdentifier()
     {
         // Arrange
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
             string videoPath = Path.Combine(workDir, "livephoto.mp4");
-            string imagePath = Path.Combine(workDir, "livephoto.jpg");
+            string imagePath = Path.Combine(workDir, "livephoto.heic");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), imagePath);
+            // Use a copy of the video file as companion (ISOBMFF container supports ContentIdentifier)
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), imagePath);
+            await SetContentIdentifierAsync(videoPath, "test-uuid-livephoto");
+            await SetContentIdentifierAsync(imagePath, "test-uuid-livephoto");
 
             // Act
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
@@ -209,16 +213,18 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
-    public async Task ExecuteAsync_LongVideoWithMatchingImage_KeepsVideo()
+    public async Task ExecuteAsync_LivePhotoHevcSuffix_DeletesVideoWithMatchingContentIdentifier()
     {
-        // Arrange
+        // Arrange — new iPhone naming: IMG_1234_HEVC.mov pairs with IMG_1234.heic
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
-            string videoPath = Path.Combine(workDir, "longvideo.mp4");
-            string imagePath = Path.Combine(workDir, "longvideo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.LongVideoFile), videoPath);
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), imagePath);
+            string videoPath = Path.Combine(workDir, "img_1234_hevc.mp4");
+            string imagePath = Path.Combine(workDir, "img_1234.heic");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), imagePath);
+            await SetContentIdentifierAsync(videoPath, "test-uuid-hevc");
+            await SetContentIdentifierAsync(imagePath, "test-uuid-hevc");
 
             // Act
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
@@ -226,6 +232,95 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             );
 
             // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Failure);
+            File.Exists(videoPath + ".bak").Should().BeTrue();
+            File.Exists(videoPath).Should().BeFalse();
+            File.Exists(imagePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LivePhotoContentIdentifierMismatch_KeepsVideo()
+    {
+        // Arrange — same name, different ContentIdentifier: not a live photo pair
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "photo.mp4");
+            string imagePath = Path.Combine(workDir, "photo.heic");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), imagePath);
+            await SetContentIdentifierAsync(videoPath, "uuid-video-AAA");
+            await SetContentIdentifierAsync(imagePath, "uuid-image-BBB");
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateContext(videoPath)
+            );
+
+            // Assert — mismatch means not a live pair, video kept
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(videoPath).Should().BeTrue();
+            File.Exists(videoPath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LivePhotoNoContentIdentifier_KeepsVideo()
+    {
+        // Arrange — companion image found by name but no ContentIdentifier on either file
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "photo.mp4");
+            string imagePath = Path.Combine(workDir, "photo.heic");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), imagePath);
+
+            // Act — no ContentIdentifier set on either file
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateContext(videoPath)
+            );
+
+            // Assert — cannot confirm pair without ContentIdentifier, video kept
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(videoPath).Should().BeTrue();
+            File.Exists(videoPath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LongVideoWithMatchingImage_KeepsVideo()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "longvideo.mp4");
+            string imagePath = Path.Combine(workDir, "longvideo.heic");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LongVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), imagePath);
+            await SetContentIdentifierAsync(videoPath, "test-uuid-long");
+            await SetContentIdentifierAsync(imagePath, "test-uuid-long");
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateContext(videoPath)
+            );
+
+            // Assert — long video is always kept regardless of ContentIdentifier match
             result.Should().Be(ProcessTask.ProcessResult.Success);
             File.Exists(videoPath).Should().BeTrue();
         }
@@ -250,7 +345,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 CreateContext(videoPath)
             );
 
-            // Assert — no matching image, so video is kept
+            // Assert — no matching image candidate, so video is kept
             result.Should().Be(ProcessTask.ProcessResult.Success);
             File.Exists(videoPath).Should().BeTrue();
         }
@@ -555,6 +650,47 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_PcmMovWithContentIdentifier_PreservesContentIdentifierAfterConversion()
+    {
+        // Arrange — live photo MOV with PCM audio: first pass re-encodes audio, second pass deletes
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "livephoto.mov");
+            string imagePath = Path.Combine(workDir, "livephoto.heic");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), imagePath);
+            await SetContentIdentifierAsync(videoPath, "test-uuid-pcm-preserved");
+            await SetContentIdentifierAsync(imagePath, "test-uuid-pcm-preserved");
+
+            // Act — first pass: re-encodes PCM audio to AAC, queues .mp4 for reprocess
+            ProcessTask.ProcessResult firstResult = await ProcessTask.ExecuteAsync(
+                CreateContext(videoPath)
+            );
+
+            // Assert — first pass queues for reprocess
+            firstResult.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            string mp4Path = Path.ChangeExtension(videoPath, ".mp4");
+            File.Exists(mp4Path).Should().BeTrue();
+
+            // Act — second pass: live photo detection on the converted .mp4
+            ProcessTask.ProcessResult secondResult = await ProcessTask.ExecuteAsync(
+                CreateContext(mp4Path)
+            );
+
+            // Assert — ContentIdentifier was preserved through conversion, video is deleted
+            secondResult.Should().Be(ProcessTask.ProcessResult.Failure);
+            File.Exists(mp4Path + ".bak").Should().BeTrue();
+            File.Exists(mp4Path).Should().BeFalse();
+            File.Exists(imagePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // ── DNG version warning ───────────────────────────────────────────────────
 
     [Fact]
@@ -716,6 +852,17 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static async Task SetContentIdentifierAsync(string filePath, string contentId) =>
+        // exiftool may exit with code 1 for warnings; suppress validation
+        await Cli.Wrap("exiftool")
+            .WithArguments([
+                $"-Keys:ContentIdentifier={contentId}",
+                "-overwrite_original",
+                filePath,
+            ])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteAsync();
 
     private static ProcessTask.Context CreateContext(
         string filePath,

@@ -7,16 +7,18 @@ A .NET console application that processes and prepares media files for import in
 PhotoCleaner analyzes and transforms media files through a validation pipeline that:
 
 - **Renames mismatched extensions**: Corrects file extensions that do not match the actual file
-  content (MIME type), normalises to the preferred extension (e.g. `.jpeg` → `.jpg`), and strips
+  content (MIME type), normalizes to the preferred extension (e.g. `.jpeg` → `.jpg`), and strips
   compound extensions (e.g. `photo.heic.jpg` → `photo.jpg`).
 - **Renames mixed-case extensions**: Converts uppercase or mixed-case extensions to lowercase
   (e.g. `.JPG` → `.jpg`).
 - **Handles Live Photos**: Removes Apple Live Photo video components — videos ≤ 1s are always
-  removed; videos ≤ 4s with a matching HEIC or JPEG are removed; longer videos with a matching
-  image trigger a warning but are kept.
+  removed; videos ≤ 4s with a candidate companion image (same basename, or basename with `_hevc`
+  suffix stripped) are removed when both files share the same `ContentIdentifier` EXIF tag;
+  longer videos with a matching image trigger a warning but are kept.
 - **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4; re-encodes WMV, AVI, 3GP, and
   GIF to MP4 (H.264/AAC); re-encodes PCM audio to AAC in MOV and MP4 files while preserving
-  the video stream.
+  the video stream. All source metadata (including `ContentIdentifier` and other QuickTime tags)
+  is copied to the converted file using `exiftool -TagsFromFile`.
 - **Sets missing creation dates** (opt-in via `--datefrompath`): Infers and writes
   EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
   absent.
@@ -80,17 +82,20 @@ PhotoCleaner --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.lo
 3. **Per-file validation pipeline** (runs in parallel, stops on first action per file):
    1. Rename to canonical MIME extension — corrects mismatches and strips compound extensions.
    2. Rename mixed-case extension to lowercase.
-   3. Delete short or Live Photo video clips (≤ 1s always; ≤ 4s with matching HEIC/JPEG).
+   3. Delete short or Live Photo video clips: videos ≤ 1s are always deleted; videos ≤ 4s
+      with a candidate companion image (direct name match or `_hevc`-suffix match) are deleted
+      when both files share a matching `ContentIdentifier` tag.
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k)
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
+      - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Set missing EXIF/QuickTime creation date inferred from filename or directory path
       (only when `--datefrompath` is specified).
    6. Warn on DNG version > v1.4.
 4. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
 5. **Results summary**: Reports counts of failed, modified, and successfully processed files;
-   lists any unrecognised file extensions.
+   lists any unrecognized file extensions.
 
 ## Supported File Types
 
@@ -152,11 +157,9 @@ dotnet tool update --all
 dotnet outdated --upgrade:prompt
 ```
 
-## Workflow
+## Workflow Example
 
-### iCloud Photos Downloader
-
-Run [icloudpd](https://icloud-photos-downloader.github.io) from Docker:
+**Run [icloudpd](https://icloud-photos-downloader.github.io) to download photos from iCloud**:
 
 ```shell
 #!/bin/bash
@@ -165,9 +168,9 @@ set -Eeuo pipefail
 
 docker run -it --rm --name icloudpd \
     -v $(pwd)/.icloudpd:/cookies \
-    -v /data/media/TestiCloud:/data \
+    -v /data/media/Test:/data \
     -e TZ=America/Los_Angeles \
-    icloudpd/icloudpd:latest \
+    docker.io/icloudpd/icloudpd:latest \
     icloudpd \
         --cookie-directory /cookies \
         --username your@icloud.email \
@@ -178,18 +181,62 @@ docker run -it --rm --name icloudpd \
         # --skip-created-before 2025-01-01
 ```
 
-Run PhotoCleaner from source:
+**Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to cleanup photos**:
 
 ```shell
 #!/bin/bash
 
 set -Eeuo pipefail
 
-# https://github.com/ptr727/PhotoCleaner
-
-dotnet run --project PhotoCleaner/PhotoCleaner.csproj -- \
-    --path /data/media/TestiCloud \
+dotnet run --project ./PhotoCleaner/PhotoCleaner/PhotoCleaner.csproj -- \
+    --path /data/media/Test \
     --threads 4
+```
+
+**Run [Immich CLI](https://docs.immich.app/features/command-line-interface/) to import photos into Immich**:"
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run -it --rm --name immichcli \
+    -v /data/media/Test:/upload:ro \
+    -e IMMICH_INSTANCE_URL=https://your.immich.server/api \
+    -e IMMICH_API_KEY=yourapikey \
+    -e TZ=America/Los_Angeles \
+    ghcr.io/immich-app/immich-cli:latest \
+    upload \
+        --recursive \
+        --concurrency 4 \
+        --ignore "**/*.bak*" \
+        --ignore "**/*.xmp" \
+        --ignore "**/*.tmp" \
+        --ignore "**/.DS_Store" \
+        --ignore "**/Thumbs.db" \
+        --ignore "**/@eaDir/**" \
+        --ignore "**/._*" \
+        /upload
+```
+
+**Run [immich-go](https://github.com/simulot/immich-go) to import photos into Immich**:"
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+immich-go upload from-folder --server=https://your.immich.server \
+    --api-key=yourapikey \
+    --manage-raw-jpeg=StackCoverJPG \
+    --manage-heic-jpeg=StackCoverJPG \
+    --manage-burst=NoStack \
+    --recursive \
+    --concurrent-tasks=4 \
+    --client-timeout=60m \
+    --on-errors=continue \
+    --include-extensions=.mp4,.mov,.tif,.jpg,.png,.dng,.heif,.heic \
+    /data/media/Test
 ```
 
 ## License

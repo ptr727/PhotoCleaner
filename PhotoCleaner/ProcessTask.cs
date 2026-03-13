@@ -361,12 +361,13 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             }
 
             _modified = true;
-            BackupFile(processContext.FileInfo.FullName, false);
+            _ = BackupFile(processContext.FileInfo.FullName, false);
             return false;
         }
 
-        // No matching image then skip
-        if (!IsVideoMatchingImageExtension())
+        // No matching image candidate then skip
+        string? companionPath = FindCompanionImagePath();
+        if (companionPath == null)
         {
             return true;
         }
@@ -383,7 +384,30 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             return true;
         }
 
-        // Delete live video with matching image
+        // Verify ContentIdentifier tags match to confirm this is a live photo pair
+        string? videoContentId = _exifToolJson?.ContentIdentifier;
+        string? imageContentId = await GetContentIdentifierAsync(companionPath)
+            .ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(videoContentId) || string.IsNullOrEmpty(imageContentId))
+        {
+            Log.Warning(
+                "Cannot confirm live photo pair, ContentIdentifier missing: '{FileName}'.",
+                processContext.FileInfo.FullName
+            );
+            return true;
+        }
+
+        if (!string.Equals(videoContentId, imageContentId, StringComparison.Ordinal))
+        {
+            Log.Warning(
+                "ContentIdentifier mismatch, not a live photo pair: '{FileName}'.",
+                processContext.FileInfo.FullName
+            );
+            return true;
+        }
+
+        // Delete live video with confirmed matching image
         if (IsDryRun())
         {
             return false;
@@ -391,12 +415,24 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
         _modified = true;
         Log.Warning(
-            "Deleting {Duration}s video clip with matching image file: '{FileName}'.",
+            "Deleting {Duration}s live photo video with matching image file: '{FileName}'.",
             duration,
             processContext.FileInfo.FullName
         );
-        BackupFile(processContext.FileInfo.FullName, false);
+        _ = BackupFile(processContext.FileInfo.FullName, false);
         return false;
+    }
+
+    private static async Task<string?> GetContentIdentifierAsync(string filePath)
+    {
+        BufferedCommandResult result = await Cli.Wrap("exiftool")
+            .WithArguments(["-groupNames", "-json", filePath])
+            .ExecuteBufferedAsync();
+        ExifToolJson? json = JsonSerializer.Deserialize(
+            result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']']),
+            SourceGenerationContext.Default.ExifToolJson
+        );
+        return json?.ContentIdentifier;
     }
 
     private async Task<bool> ConvertVideoAsync()
@@ -511,18 +547,16 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
         // Backup original file
         _modified = true;
-        BackupFile(processContext.FileInfo.FullName, false);
+        string sourceBackup = BackupFile(processContext.FileInfo.FullName, false);
 
         // Rename temp output to MP4
         string outputFile = Path.ChangeExtension(processContext.FileInfo.FullName, ".mp4");
         MoveFile(tempFile, outputFile);
 
-        // Set timestamps on remuxed file from original timestamps
-        string? createdDate = _exifToolJson!.GetDateString();
-        return !string.IsNullOrEmpty(createdDate)
-            ? await SetCreateDateAsync(outputFile, createdDate).ConfigureAwait(false)
-                && ReProcess(outputFile)
-            : ReProcess(outputFile);
+        // Copy all metadata from the original to the converted file
+        await CopyMetadataFromSourceAsync(sourceBackup, outputFile).ConfigureAwait(false);
+
+        return ReProcess(outputFile);
     }
 
     private async Task<bool> SetMissingCreateDateAsync()
@@ -569,7 +603,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
         // Backup original file and keep original
         _modified = true;
-        BackupFile(processContext.FileInfo.FullName, true);
+        _ = BackupFile(processContext.FileInfo.FullName, true);
 
         // Set the created date using exiftool
         return await SetCreateDateAsync(processContext.FileInfo.FullName, createdDate)
@@ -594,6 +628,21 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
         return true;
     }
+
+    private static async Task CopyMetadataFromSourceAsync(string sourceFile, string outputFile) =>
+        // Copy all metadata from the source file to the output using exiftool.
+        // exiftool exits with code 1 for warnings (e.g. tags skipped for incompatible formats)
+        // so validation is suppressed — the write still succeeds.
+        _ = await Cli.Wrap("exiftool")
+            .WithArguments([
+                "-TagsFromFile",
+                sourceFile,
+                "-all:all",
+                "-overwrite_original",
+                outputFile,
+            ])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync();
 
     private static async Task<bool> SetCreateDateAsync(string outputFile, string createdDate)
     {
@@ -654,7 +703,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         return backupFileName;
     }
 
-    private static void BackupFile(string fileName, bool copy)
+    private static string BackupFile(string fileName, bool copy)
     {
         string backupFileName = GetBackupFileName(fileName);
         if (copy)
@@ -675,6 +724,8 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             );
             File.Move(fileName, backupFileName, false);
         }
+
+        return backupFileName;
     }
 
     private static void MoveFile(string sourceFileName, string targetFileName)
@@ -682,7 +733,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         // Backup target if it exists
         if (File.Exists(targetFileName))
         {
-            BackupFile(targetFileName, false);
+            _ = BackupFile(targetFileName, false);
         }
 
         Log.Information(
@@ -693,16 +744,53 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         File.Move(sourceFileName, targetFileName, false);
     }
 
-    private bool IsVideoMatchingImageExtension() =>
-        // Find matching HEIC or JPEG file
+    private string? FindCompanionImagePath()
+    {
         // Extension on disk must be all lowercase or all uppercase
         // Static extension list is already lowercase
-        s_liveVideoImageExtensions.Any(extension =>
-            File.Exists(Path.ChangeExtension(processContext.FileInfo.FullName, extension))
-            || File.Exists(
-                Path.ChangeExtension(processContext.FileInfo.FullName, extension.ToUpperInvariant())
-            )
-        );
+        // 1. Direct basename match
+        foreach (string extension in s_liveVideoImageExtensions)
+        {
+            string candidate = Path.ChangeExtension(processContext.FileInfo.FullName, extension);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            string candidateUpper = Path.ChangeExtension(
+                processContext.FileInfo.FullName,
+                extension.ToUpperInvariant()
+            );
+            if (File.Exists(candidateUpper))
+            {
+                return candidateUpper;
+            }
+        }
+
+        // 2. Strip _hevc suffix (new iPhone naming: IMG_1234_HEVC.mov → IMG_1234.heic)
+        string nameNoExt = Path.GetFileNameWithoutExtension(processContext.FileInfo.FullName);
+        if (nameNoExt.EndsWith("_hevc", StringComparison.OrdinalIgnoreCase))
+        {
+            string dir = processContext.FileInfo.DirectoryName!;
+            string stripped = nameNoExt[..^"_hevc".Length];
+            foreach (string extension in s_liveVideoImageExtensions)
+            {
+                string candidate = Path.Combine(dir, stripped + extension);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                string candidateUpper = Path.Combine(dir, stripped + extension.ToUpperInvariant());
+                if (File.Exists(candidateUpper))
+                {
+                    return candidateUpper;
+                }
+            }
+        }
+
+        return null;
+    }
 
     internal static bool IsMixedCaseExtension(ReadOnlySpan<char> extension)
     {

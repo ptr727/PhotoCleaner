@@ -15,11 +15,11 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
   - `Extensions.cs`: Extension methods for logging and error handling
-- **PhotoCleanerTests/**: Comprehensive test project with 112 tests
+- **PhotoCleanerTests/**: Comprehensive test project with 143 tests
   - `DateInferenceTests.cs`: Core date inference functionality tests (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Edge cases and comprehensive scenarios (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation tests (26 tests including thread option)
-  - `ProcessTaskTests.cs`: Process task tests (34 tests)
+  - `CommandLineTests.cs`: Command line parsing and validation tests (30 tests including thread option)
+  - `ProcessTaskTests.cs`: Process task tests (61 tests)
 
 ### Core Processing Pipeline
 
@@ -64,6 +64,8 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - Uses `ExifToolJson` class with `JsonPropertyName` attributes for precise metadata field mapping
 - Date validation prioritizes `EXIF:DateTimeOriginal` over `QuickTime:CreateDate`
 - Custom `IsDateSet()` and `GetDateString()` methods handle metadata extraction logic
+- `ContentIdentifier` property maps both `QuickTime:ContentIdentifier` and `Keys:ContentIdentifier`
+  group names (both occur in the wild for ISOBMFF files) returning whichever is set
 
 ### Date Inference System (DateFromPath.cs)
 - **Static Internal Methods**: All methods are `internal static` for testability with `InternalsVisibleTo`
@@ -99,27 +101,30 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **xUnit**: Testing framework for PhotoCleanerTests project
 
 ### Test Architecture
-- **PhotoCleanerTests Project**: 116 comprehensive tests covering all functionality
+- **PhotoCleanerTests Project**: 143 comprehensive tests covering all functionality
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
 - **Test Categories**:
   - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests)
   - `CommandLineTests.cs`: Command line parsing and validation (30 tests including multiple path and thread validation scenarios)
-  - `ProcessTaskTests.cs`: Process task tests (34 tests)
-- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths, thread configuration and boundary validation), integration scenarios, process task execution
+  - `ProcessTaskTests.cs`: Process task tests (61 tests)
+- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths, thread configuration and boundary validation), integration scenarios, process task execution, live photo detection (ContentIdentifier matching, `_hevc` suffix naming, mismatch/missing tag scenarios), metadata preservation through conversion
 
 ## Critical Implementation Details
 
 ### Video Conversion Logic
-- **Three-tier approach**: Remux (.mts, .m2ts) → Re-encode (.wmv, .avi) → Audio-only (.mov with PCM)
-- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion
-- **Metadata Preservation**: ExifTool sets QuickTime create/modify dates on converted files
+- **Three-tier approach**: Remux (.mts, .m2ts, .mkv) → Re-encode (.wmv, .avi, .3gp, .gif) → Audio-only (.mov/.mp4 with PCM)
+- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion; `BackupFile()` returns the backup path
+- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source.bak> <output> -all:all -overwrite_original` copies all source metadata to the output file. `ffmpeg -map_metadata` is not used — it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` handles cross-format date mapping, so no separate date-setting step is needed after conversion.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
 ### Live Photo Detection
-- **Duration-based**: Videos ≤0.5s are always flagged for deletion
-- **HEIC Association**: Videos ≤3.0s with matching `.heic`/`.HEIC` files are flagged
-- **Commented Deletions**: Actual `_fileInfo.Delete()` calls are commented for safety
+- **Short videos** (≤ `ShortVideoDuration` = 1.0s): always deleted regardless of companion file
+- **Companion file search** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file by:
+  1. Direct basename match (`IMG_1234.mov` → `IMG_1234.heic`)
+  2. Basename minus `_hevc` suffix (`IMG_1234_HEVC.mov` → `IMG_1234.heic`) — new iPhone naming
+- **ContentIdentifier confirmation**: a candidate pair is only deleted when both files expose a `ContentIdentifier` tag that matches exactly. If either file lacks the tag, or the tags differ, the video is kept. There is no fallback to name-only deletion.
+- **Long videos** (≥ `LiveVideoDuration` = 4.0s): always kept even with a matching companion; a warning is logged
 
 ### Error Handling Strategy
 - Console output uses structured prefixes: `WARNING:`, `INFORMATION:`
