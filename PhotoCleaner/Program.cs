@@ -13,6 +13,7 @@ internal sealed class Program(
         StringComparer.OrdinalIgnoreCase
     );
     private int _failedCount;
+    private int _deletedCount;
     private int _modifiedCount;
 
     internal CommandLine.Options GetCommandLineOptions() => commandLineOptions;
@@ -53,22 +54,20 @@ internal sealed class Program(
         }
     }
 
-    internal async Task<int> ExecuteAsync()
+    internal async Task<int> ProcessCommandAsync()
     {
-        Log.Information("Processing started...");
+        Log.Information("Processing started");
         try
         {
+            // Rename duplicate mixed case files
             bool foundConflicts = true;
             while (foundConflicts)
             {
-                // Get list of files to process
                 GetFileList(commandLineOptions.Paths);
-
-                // Rename mixed case files
-                foundConflicts = FindCaseConflicts();
+                foundConflicts = FixCaseConflicts();
             }
 
-            // Process files as long as there are files to process
+            // Process files
             while (!_fileNames.IsEmpty)
             {
                 await ExecuteProcessAsync().ConfigureAwait(false);
@@ -78,7 +77,7 @@ internal sealed class Program(
         {
             return 1;
         }
-        Log.Information("Processing complete.");
+        Log.Information("Processing complete");
 
         if (!_unknownExtensions.IsEmpty)
         {
@@ -90,16 +89,80 @@ internal sealed class Program(
             }
         }
 
-        if (_failedCount > 0)
-        {
-            Log.Warning("Failed or deleted files: {FailedCount}", _failedCount);
-        }
-
         if (_modifiedCount > 0)
         {
             Log.Information("Modified files: {ModifiedCount}", _modifiedCount);
         }
 
+        if (_deletedCount > 0)
+        {
+            Log.Information("Deleted files: {DeletedCount}", _deletedCount);
+        }
+
+        if (_failedCount > 0)
+        {
+            Log.Warning("Failed files: {FailedCount}", _failedCount);
+        }
+
+        return 0;
+    }
+
+    internal async Task<int> UndoCommandAsync()
+    {
+        Log.Information("Undo started");
+        try
+        {
+            GetFileList(commandLineOptions.Paths);
+            await ExecuteUndoAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+        Log.Information("Undo complete");
+
+        if (_modifiedCount > 0)
+        {
+            Log.Information("Restored files: {RestoredCount}", _modifiedCount);
+        }
+
+        if (_deletedCount > 0)
+        {
+            Log.Information("Deleted files: {DeletedCount}", _deletedCount);
+        }
+
+        if (_failedCount > 0)
+        {
+            Log.Warning("Failed files: {FailedCount}", _failedCount);
+        }
+
+        return 0;
+    }
+
+    internal async Task<int> CleanupCommandAsync()
+    {
+        Log.Information("Cleanup started");
+        try
+        {
+            GetFileList(commandLineOptions.Paths);
+            (int deleted, int failed) = new CleanupTask(commandLineOptions.DryRun).ExecuteCleanup([
+                .. _fileNames,
+            ]);
+            if (deleted > 0)
+            {
+                Log.Information("Deleted {Count} non-media files", deleted);
+            }
+
+            if (failed > 0)
+            {
+                Log.Warning("Failed to delete {Count} files", failed);
+            }
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+        Log.Information("Cleanup complete");
         return 0;
     }
 
@@ -107,7 +170,7 @@ internal sealed class Program(
     {
         // Process files in parallel
         ConcurrentBag<string> reProcessNames = [];
-        Log.Information("Processing {FileCount} files ...", _fileNames.Count);
+        Log.Information("Processing {FileCount} files", _fileNames.Count);
         await Parallel
             .ForEachAsync(
                 _fileNames,
@@ -127,6 +190,7 @@ internal sealed class Program(
                                     FileInfo = new FileInfo(fileName),
                                     DryRun = commandLineOptions.DryRun,
                                     DateFromPath = commandLineOptions.DateFromPath,
+                                    SkipBackup = commandLineOptions.SkipBackup,
                                     UnknownExtensions = _unknownExtensions,
                                     ReProcessNames = reProcessNames,
                                 }
@@ -136,6 +200,9 @@ internal sealed class Program(
                     {
                         case ProcessTask.ProcessResult.Failure:
                             _ = Interlocked.Increment(ref _failedCount);
+                            break;
+                        case ProcessTask.ProcessResult.Deleted:
+                            _ = Interlocked.Increment(ref _deletedCount);
                             break;
                         case ProcessTask.ProcessResult.Modified:
                         case ProcessTask.ProcessResult.Reprocess:
@@ -157,12 +224,19 @@ internal sealed class Program(
         }
         else
         {
-            Log.Information(
-                "Adding {ReprocessCount} files for reprocessing.",
-                reProcessNames.Count
-            );
+            Log.Information("Adding {ReprocessCount} files for reprocessing", reProcessNames.Count);
             _fileNames = reProcessNames;
         }
+    }
+
+    private Task ExecuteUndoAsync()
+    {
+        UndoTask undoTask = new(commandLineOptions.DryRun);
+        (int undoRestored, int undoDeleted, int undoFailed) = undoTask.ExecuteUndo([.. _fileNames]);
+        _modifiedCount += undoRestored;
+        _deletedCount += undoDeleted;
+        _failedCount += undoFailed;
+        return Task.CompletedTask;
     }
 
     private void GetFileList(List<DirectoryInfo> directoryList)
@@ -170,7 +244,7 @@ internal sealed class Program(
         _fileNames = [];
         foreach (DirectoryInfo directoryInfo in directoryList)
         {
-            Log.Information("Enumerating files in '{DirectoryPath}' ...", directoryInfo.FullName);
+            Log.Information("Enumerating files in '{DirectoryPath}'", directoryInfo.FullName);
 
             int count = 0;
             directoryInfo
@@ -184,14 +258,14 @@ internal sealed class Program(
                 });
 
             Log.Information(
-                "Found {FileCount} files in '{DirectoryPath}'.",
+                "Found {FileCount} files in '{DirectoryPath}'",
                 count,
                 directoryInfo.FullName
             );
         }
     }
 
-    private bool FindCaseConflicts()
+    private bool FixCaseConflicts()
     {
         // Create case insensitive map of file names to list of case sensitive file names
         Dictionary<string, List<string>> fileNameMap = new(
@@ -266,7 +340,7 @@ internal sealed class Program(
     {
         if (commandLineOptions.DryRun)
         {
-            Log.Verbose("Dry run enabled, skipping action in {Function}.", function);
+            Log.Verbose("Dry run enabled, skipping action in {Function}", function);
         }
         return commandLineOptions.DryRun;
     }

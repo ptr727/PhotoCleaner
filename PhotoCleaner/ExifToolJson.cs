@@ -76,10 +76,13 @@ public sealed class ExifToolJson
     [JsonPropertyName("QuickTime:ContentIdentifier")]
     public string? QuickTimeContentIdentifier { get; set; }
 
-    [JsonPropertyName("Keys:ContentIdentifier")]
-    public string? KeysContentIdentifier { get; set; }
+    [JsonPropertyName("MakerNotes:ContentIdentifier")]
+    public string? MakerNotesContentIdentifier { get; set; }
 
-    public string? ContentIdentifier => QuickTimeContentIdentifier ?? KeysContentIdentifier;
+    public string? ContentIdentifier => QuickTimeContentIdentifier ?? MakerNotesContentIdentifier;
+
+    public string FileDetails =>
+        $"type='{FileType}', extension='{FileTypeExtension}', MIME='{MIMEType}'";
 
     public bool IsDateSet() =>
         // EXIF:DateTimeOriginal

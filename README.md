@@ -26,8 +26,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   render correctly in older applications.
 
 Files that are renamed or converted are re-queued through the pipeline so every transformation
-is validated. Original files are preserved with a `.bak` extension before any modification.
-The application processes files in parallel and provides detailed logging of all operations.
+is validated. Original files are preserved with a `.bak` extension before any modification
+(unless `--skipbackup` is used). The application processes files in parallel and provides
+detailed logging of all operations.
 
 ## Usage
 
@@ -39,18 +40,53 @@ Description:
   PhotoCleaner - Pre-process media files for photo management systems.
 
 Usage:
-  PhotoCleaner [options]
+  PhotoCleaner [command] [options]
+
+Commands:
+  process  Process media files
+  undo     Undo media file processing
+  cleanup  Delete files not in the supported media list
+
+Options:
+  -l, --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
+  -f, --logfile <logfile>                                         Write logs to the specified file
+  -c, --logclear                                                  Clear the log file before writing
+  -?, -h, --help                                                  Show help and usage information
+  --version                                                       Show version information
+```
+
+```text
+$> PhotoCleaner process --help
+Description:
+  Process media files
 
 Options:
   -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
   -d, --dryrun                                                    Perform a dry run without making changes
   -t, --threads <threads>                                         Number of parallel threads [default: 4]
   -a, --datefrompath                                              Set missing EXIF creation date from file path
-  -l, --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
-  -f, --logfile <logfile>                                         Write logs to the specified file
-  -c, --logclear                                                  Clear the log file before writing
-  -?, -h, --help                                                  Show help and usage information
-  --version                                                       Show version information
+  -s, --skipbackup                                                Skip creating backup files (disables undo)
+```
+
+```text
+$> PhotoCleaner undo --help
+Description:
+  Undo media file processing
+
+Options:
+  -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
+  -d, --dryrun                                                    Perform a dry run without making changes
+```
+
+```text
+$> PhotoCleaner cleanup --help
+Description:
+  Delete files not in the supported media list
+
+Options:
+  -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
+  -d, --dryrun                                                    Perform a dry run without making changes
+  -t, --threads <threads>                                         Number of parallel threads [default: 4]
 ```
 
 **Option notes:**
@@ -60,18 +96,35 @@ Options:
 - `--threads` / `-t` — defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
 - `--datefrompath` / `-a` — opt-in; when absent, EXIF date inference from the file path is
   skipped entirely.
+- `--skipbackup` / `-s` — opt-in (`process` only); skips all `.bak` file creation. The `undo`
+  command cannot reverse a run made with this flag.
 
 ### Examples
 
 ```bash
 # Process multiple directories in one run
-PhotoCleaner --path /home/user/Photos --path /mnt/backup/Photos
+PhotoCleaner process --path /home/user/Photos --path /mnt/backup/Photos
 
 # Preview what changes would be made without modifying files
-PhotoCleaner --path /home/user/Photos --dryrun
+PhotoCleaner process --path /home/user/Photos --dryrun
 
 # Process with 8 parallel threads, log to file, infer missing created date from the path
-PhotoCleaner --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log --datefrompath
+PhotoCleaner process --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log --datefrompath
+
+# Process without creating backup files (faster, but undo is not possible)
+PhotoCleaner process --path /home/user/Photos --skipbackup
+
+# Undo all processing changes in a directory (restores .bak files)
+PhotoCleaner undo --path /home/user/Photos
+
+# Preview what undo would do without modifying files
+PhotoCleaner undo --path /home/user/Photos --dryrun
+
+# Remove all non-media files (.bak artefacts, .DS_Store, Thumbs.db, etc.)
+PhotoCleaner cleanup --path /home/user/Photos
+
+# Preview what cleanup would remove without deleting anything
+PhotoCleaner cleanup --path /home/user/Photos --dryrun
 ```
 
 ## Processing Flow
@@ -96,6 +149,39 @@ PhotoCleaner --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.lo
 4. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
 5. **Results summary**: Reports counts of failed, modified, and successfully processed files;
    lists any unrecognized file extensions.
+
+## Undo Flow
+
+Every file modification or deletion made by `process` creates a `.bak` backup alongside the
+original: the first backup is `X.bak`; if that already exists (from a prior run) the next is
+`X.bak1`, then `X.bak2`, etc. The `undo` command reverses all processing by scanning the given
+directories for backup files and applying a two-pass algorithm:
+
+1. **Identify derived files** — an output file is "derived" (not original) when either:
+   - a numbered backup (`.bak1`, `.bak2`, …) exists for it (processed more than once), or
+   - it is a `.mp4` file whose stem has a non-`.mp4` primary backup in the same directory
+     (it was the conversion output).
+2. **Restore or delete**:
+   - *Derived* base: delete the current file and all its backup files.
+   - *Non-derived* base: delete the current file if it exists (overwritten in-place), rename
+     `X.bak` → `X` to restore the original. The converted output is located via the
+     `X.bak.out` companion file written at conversion time (handles uniquified names like
+     `stem_1.mp4`); if no companion exists, falls back to deleting `stem.mp4` when present
+     and untracked (legacy single-run heuristic).
+
+**Known limitation**: extension renames that target a filename that did not previously exist
+(e.g. `photo.JPEG` → `photo.jpg` when `photo.jpg` was absent) create no backup and cannot be
+undone by this command.
+
+## Cleanup Flow
+
+The `cleanup` command deletes every file in the target directories whose extension is **not** in
+the supported media list. This removes processing artefacts (`.bak`, `.bak1`, `.bak.out`),
+system junk (`.DS_Store`, `Thumbs.db`), and any other non-media files. Backup artefacts are
+logged as warnings before deletion; other files are logged as informational.
+
+Run `cleanup` after verifying `process` results, or use `process --skipbackup` followed by
+`cleanup` for a no-artefact workflow.
 
 ## Supported File Types
 
@@ -189,6 +275,7 @@ docker run -it --rm --name icloudpd \
 set -Eeuo pipefail
 
 dotnet run --project ./PhotoCleaner/PhotoCleaner/PhotoCleaner.csproj -- \
+    process \
     --path /data/media/Test \
     --threads 4
 ```

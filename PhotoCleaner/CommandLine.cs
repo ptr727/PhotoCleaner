@@ -12,6 +12,7 @@ internal sealed class CommandLine
     private readonly Option<bool> _dryRunOption = CreateDryRunOption();
     private readonly Option<int> _threadsOption = CreateThreadsOption();
     private readonly Option<bool> _dateFromPathOption = CreateDateFromPathOption();
+    private readonly Option<bool> _skipBackupOption = CreateSkipBackupOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -30,37 +31,84 @@ internal sealed class CommandLine
 
     internal RootCommand CreateRootCommand()
     {
-        // Default root command
-        RootCommand rootCommand = new(
+        RootCommand command = new(
             "PhotoCleaner - Pre-process media files for photo management systems."
         )
+        {
+            _logLevelOption,
+            _logFileOption,
+            _logFileClearOption,
+        };
+        command.Subcommands.Add(CreateProcessCommand());
+        command.Subcommands.Add(CreateUndoCommand());
+        command.Subcommands.Add(CreateCleanupCommand());
+
+        return command;
+    }
+
+    private Command CreateProcessCommand()
+    {
+        Command command = new("process", "Process media files")
         {
             _pathOption,
             _dryRunOption,
             _threadsOption,
             _dateFromPathOption,
-            _logLevelOption,
-            _logFileOption,
-            _logFileClearOption,
+            _skipBackupOption,
         };
-        rootCommand.SetAction(
+        command.SetAction(
             (parseResult, cancellationToken) =>
             {
                 Program program = new(CreateOptions(parseResult), cancellationToken);
-                return program.ExecuteAsync();
+                return program.ProcessCommandAsync();
             }
         );
 
-        return rootCommand;
+        return command;
+    }
+
+    private Command CreateCleanupCommand()
+    {
+        Command command = new("cleanup", "Delete files not in the supported media list")
+        {
+            _pathOption,
+            _dryRunOption,
+        };
+        command.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(CreateOptions(parseResult), cancellationToken);
+                return program.CleanupCommandAsync();
+            }
+        );
+
+        return command;
+    }
+
+    private Command CreateUndoCommand()
+    {
+        Command command = new("undo", "Undo media file processing") { _pathOption, _dryRunOption };
+        command.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(CreateOptions(parseResult), cancellationToken);
+                return program.UndoCommandAsync();
+            }
+        );
+
+        return command;
     }
 
     internal Options CreateOptions(ParseResult parseResult) =>
         new()
         {
             Paths = parseResult.GetValue(_pathOption) ?? [],
-            Threads = parseResult.GetValue(_threadsOption),
+            Threads = parseResult.GetValue(_threadsOption) is int t and > 0
+                ? t
+                : Math.Min(Environment.ProcessorCount, 4),
             DryRun = parseResult.GetValue(_dryRunOption),
             DateFromPath = parseResult.GetValue(_dateFromPathOption),
+            SkipBackup = parseResult.GetValue(_skipBackupOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -84,6 +132,9 @@ internal sealed class CommandLine
         {
             Description = "Set missing EXIF creation date from file path",
         };
+
+    private static Option<bool> CreateSkipBackupOption() =>
+        new("--skipbackup", "-s") { Description = "Skip creating backup files (disables undo)" };
 
     private static Option<int> CreateThreadsOption()
     {
@@ -149,6 +200,7 @@ internal sealed class CommandLine
         public required int Threads { get; init; }
         public required bool DryRun { get; init; }
         public required bool DateFromPath { get; init; }
+        public required bool SkipBackup { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }
