@@ -48,8 +48,10 @@ internal sealed class OrganizeTask(
 
                     try
                     {
+                        DateTime lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
                         _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
                         File.Move(file, finalDest);
+                        File.SetLastWriteTimeUtc(finalDest, lastWriteTimeUtc);
                         _ = Interlocked.Increment(ref moved);
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

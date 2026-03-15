@@ -6,7 +6,7 @@
 
 ## Critical Rule
 
-After every code change, run `dotnet build` and ensure 0 errors and 0 warnings before finishing.
+After every code change, follow the **Code change workflow** in [`CODESTYLE.md`](./CODESTYLE.md) - all steps are mandatory before finishing.
 
 ## Key Commands
 

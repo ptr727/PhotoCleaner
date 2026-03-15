@@ -226,6 +226,47 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    // -- Timestamp: moved file retains original LastWriteTime -------------------
+
+    [Fact]
+    public async Task ExecuteOrganizeAsync_MovedFile_PreservesLastWriteTime()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+            DateTime originalMtime = new(2020, 6, 15, 12, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(jpg, originalMtime);
+
+            OrganizeTask task = new(
+                dryRun: false,
+                new DirectoryInfo(outDir),
+                "yyyy-MM",
+                threads: 1,
+                deleteEmpty: false
+            );
+            (int moved, int ignored, int failed, int deletedDirs) = await task.ExecuteOrganizeAsync(
+                [jpg],
+                [],
+                TestContext.Current.CancellationToken
+            );
+
+            moved.Should().Be(1);
+            string dest = Path.Combine(outDir, "0001-01", "photo.jpg");
+            File.Exists(dest).Should().BeTrue();
+            File.GetLastWriteTimeUtc(dest)
+                .Should()
+                .BeCloseTo(originalMtime, TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
     // -- DeleteEmpty: empty subdirectories are removed after organize ----------
 
     [Fact]

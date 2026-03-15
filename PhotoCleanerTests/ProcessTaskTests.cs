@@ -930,6 +930,70 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    // -- Timestamp preservation -----------------------------------------------
+
+    [Fact]
+    public async Task ExecuteAsync_JpegMissingDateInPath_PreservesLastWriteTime()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string datedDir = Path.Combine(workDir, "2024", "01", "15");
+            Directory.CreateDirectory(datedDir);
+            string filePath = Path.Combine(datedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            DateTime originalMtime = new(2020, 3, 10, 8, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(filePath, originalMtime);
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateContext(filePath, dateFromPath: true)
+            );
+
+            // Assert - exiftool rewrites the file; original mtime must be restored
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.GetLastWriteTimeUtc(filePath)
+                .Should()
+                .BeCloseTo(originalMtime, TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MkvFile_ConversionPreservesLastWriteTime()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.MkvFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.MkvFile), filePath);
+            DateTime originalMtime = new(2019, 7, 22, 14, 30, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(filePath, originalMtime);
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateContext(filePath)
+            );
+
+            // Assert - ffmpeg and exiftool both reset mtime; original must be restored on output
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            string outputFile = Path.ChangeExtension(filePath, ".mp4");
+            File.Exists(outputFile).Should().BeTrue();
+            File.GetLastWriteTimeUtc(outputFile)
+                .Should()
+                .BeCloseTo(originalMtime, TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- GetUniqueFileName -----------------------------------------------------
 
     [Fact]

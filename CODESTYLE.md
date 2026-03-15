@@ -52,6 +52,7 @@ Available VS Code tasks (use via `run_task` tool):
 
 1. **Required VS Code extensions**: CSharpier, markdownlint, CSpell
 2. **VS Code settings**: Use the workspace settings without overrides
+3. **ASCII only**: Use only ASCII characters in all files - code, comments, and markdown. Never use Unicode punctuation: em dash (U+2014 `\u2014`), smart quotes (U+201C/U+201D), ellipsis (U+2026), etc. Use `-`, `"`, and `...` instead.
 
 ### Markdown Files
 

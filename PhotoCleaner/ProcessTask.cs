@@ -515,6 +515,8 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             return false;
         }
 
+        DateTime sourceLastWriteTimeUtc = processContext.FileInfo.LastWriteTimeUtc;
+
         // Delete temp output if it exists
         if (File.Exists(tempFile))
         {
@@ -555,6 +557,9 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         {
             await SetCreateDateAsync(createdDate, outputFile).ConfigureAwait(false);
         }
+
+        // Restore original file's modified timestamp on the converted output
+        File.SetLastWriteTimeUtc(outputFile, sourceLastWriteTimeUtc);
 
         return ReProcess(outputFile);
     }
@@ -607,6 +612,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
         // Backup original file (skip if --skipbackup; file is modified in-place either way)
         _modified = true;
+        DateTime sourceLastWriteTimeUtc = processContext.FileInfo.LastWriteTimeUtc;
         if (!processContext.SkipBackup)
         {
             _ = BackupFile(processContext.FileInfo.FullName, true);
@@ -615,6 +621,9 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         // Set the created date using exiftool
         await SetCreateDateAsync(createdDate, processContext.FileInfo.FullName)
             .ConfigureAwait(false);
+
+        // Restore original file's modified timestamp after exiftool rewrites the file
+        File.SetLastWriteTimeUtc(processContext.FileInfo.FullName, sourceLastWriteTimeUtc);
 
         return ReProcess(processContext.FileInfo.FullName);
     }
