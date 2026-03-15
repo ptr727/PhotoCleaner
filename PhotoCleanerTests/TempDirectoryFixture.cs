@@ -5,7 +5,7 @@ namespace PhotoCleanerTests;
 
 public sealed class TempDirectoryFixture : IAsyncLifetime
 {
-    // Test duration constants — expressed as offsets from ProcessTask thresholds
+    // Test duration constants - expressed as offsets from ProcessTask thresholds
     internal const double TooShortDuration = ProcessTask.ShortVideoDuration - 0.5;
     internal const double LiveDuration = ProcessTask.LiveVideoDuration - 1.0;
     internal const double LongDuration = ProcessTask.LiveVideoDuration + 6.0;

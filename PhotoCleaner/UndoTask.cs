@@ -23,7 +23,7 @@ internal sealed partial class UndoTask(bool dryRun)
     )
     {
         // Collect only backup files and group them by base path
-        // e.g. img.mov.bak and img.mp4.bak1 → groups keyed by img.mov and img.mp4
+        // e.g. img.mov.bak and img.mp4.bak1 -> groups keyed by img.mov and img.mp4
         Dictionary<string, List<string>> groups = new(StringComparer.OrdinalIgnoreCase);
         foreach (string file in allFiles)
         {
@@ -48,12 +48,12 @@ internal sealed partial class UndoTask(bool dryRun)
             return (0, 0, 0);
         }
 
-        // Pass 1 — identify derived base paths
+        // Pass 1 - identify derived base paths
         HashSet<string> derivedBases = new(StringComparer.OrdinalIgnoreCase);
 
         // Among groups that share the same stem+dir but different
         // extensions, the one whose base file currently exists on disk is the derived conversion
-        // output — the original was backed up then removed; the output is still present.
+        // output - the original was backed up then removed; the output is still present.
         foreach (KeyValuePair<string, List<string>> kvp in groups)
         {
             string basePath = kvp.Key;
@@ -87,7 +87,7 @@ internal sealed partial class UndoTask(bool dryRun)
             }
         }
 
-        // Pass 2 — act on each group
+        // Pass 2 - act on each group
         int restored = 0;
         int deleted = 0;
         int failed = 0;
@@ -143,9 +143,9 @@ internal sealed partial class UndoTask(bool dryRun)
                     }
                 }
 
-                // Restore primary backup → original name
+                // Restore primary backup -> original name
                 Log.Information(
-                    "Restoring '{BackupPath}' to '{BasePath}'",
+                    "Restoring '{BackupPath}' to '{FilePath}'",
                     primaryBackup,
                     basePath
                 );
@@ -157,8 +157,8 @@ internal sealed partial class UndoTask(bool dryRun)
 
                 restored++;
 
-                // Delete any extra (numbered) backups for this group — the original is now
-                // restored and intermediate-state backups (.bak1, .bak2, …) serve no purpose.
+                // Delete any extra (numbered) backups for this group - the original is now
+                // restored and intermediate-state backups (.bak1, .bak2, ...) serve no purpose.
                 // The primaryBackup was already consumed (moved) by TryRestore, so we skip it.
                 foreach (
                     string backup in backups.Where(b =>
@@ -166,7 +166,7 @@ internal sealed partial class UndoTask(bool dryRun)
                     )
                 )
                 {
-                    Log.Information("Deleting superseded backup: '{Backup}'", backup);
+                    Log.Information("Deleting superseded backup: '{BackupPath}'", backup);
                     if (!TryDelete(backup))
                     {
                         failed++;
@@ -185,10 +185,7 @@ internal sealed partial class UndoTask(bool dryRun)
                 if (File.Exists(companionPath))
                 {
                     string trackedOutput = File.ReadAllText(companionPath).Trim();
-                    Log.Information(
-                        "Deleting conversion tracker: '{CompanionPath}'",
-                        companionPath
-                    );
+                    Log.Information("Deleting conversion tracker: '{FilePath}'", companionPath);
                     if (!TryDelete(companionPath))
                     {
                         failed++;
@@ -201,7 +198,7 @@ internal sealed partial class UndoTask(bool dryRun)
                     if (File.Exists(trackedOutput) && !groups.ContainsKey(trackedOutput))
                     {
                         Log.Information(
-                            "Deleting tracked derived output: '{TrackedOutput}'",
+                            "Deleting tracked derived output: '{FilePath}'",
                             trackedOutput
                         );
                         if (!TryDelete(trackedOutput))
@@ -236,7 +233,7 @@ internal sealed partial class UndoTask(bool dryRun)
                     if (File.Exists(derivedOutput) && !groups.ContainsKey(derivedOutput))
                     {
                         Log.Information(
-                            "Deleting single-run derived output: '{DerivedOutput}'",
+                            "Deleting single-run derived output: '{FilePath}'",
                             derivedOutput
                         );
                         if (!TryDelete(derivedOutput))
@@ -277,14 +274,9 @@ internal sealed partial class UndoTask(bool dryRun)
             File.Delete(path);
             return true;
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Error(ex, "Failed to delete '{Path}'", path);
-            return false;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Log.Error(ex, "Failed to delete '{Path}'", path);
+            Log.Error(ex, "Failed to delete '{FilePath}'", path);
             return false;
         }
     }
@@ -301,14 +293,9 @@ internal sealed partial class UndoTask(bool dryRun)
             File.Move(backup, target);
             return true;
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Error(ex, "Failed to restore '{Backup}' to '{Target}'", backup, target);
-            return false;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Log.Error(ex, "Failed to restore '{Backup}' to '{Target}'", backup, target);
+            Log.Error(ex, "Failed to restore '{BackupPath}' to '{FilePath}'", backup, target);
             return false;
         }
     }

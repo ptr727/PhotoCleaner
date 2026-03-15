@@ -10,6 +10,9 @@ public sealed class ExifToolJsonTests
             new ExifToolJson { EXIFCreateDate = "2024:01:15 12:30:45" },
             new ExifToolJson { XMPCreateDate = "2024:01:15 12:30:45" },
             new ExifToolJson { QuickTimeCreateDate = "2024:01:15 12:30:45" },
+            new ExifToolJson { H264DateTimeOriginal = "2024:01:15 12:30:45" },
+            new ExifToolJson { ASFCreationDate = "2024:01:15 12:30:45" },
+            new ExifToolJson { RIFFDateTimeOriginal = "2024:01:15 12:30:45" },
         ];
 
     public static TheoryData<ExifToolJson, string> GetDateString_SingleFieldData =>
@@ -99,45 +102,6 @@ public sealed class ExifToolJsonTests
 
         // Assert
         result.Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsDateSet_WhenOnlyH264DateTimeOriginalSet_ReturnsFalse()
-    {
-        // Arrange
-        ExifToolJson json = new() { H264DateTimeOriginal = "2024:01:15 12:30:45" };
-
-        // Act
-        bool result = json.IsDateSet();
-
-        // Assert
-        result.Should().BeFalse();
-    }
-
-    [Fact]
-    public void IsDateSet_WhenOnlyASFCreationDateSet_ReturnsFalse()
-    {
-        // Arrange
-        ExifToolJson json = new() { ASFCreationDate = "2024:01:15 12:30:45" };
-
-        // Act
-        bool result = json.IsDateSet();
-
-        // Assert
-        result.Should().BeFalse();
-    }
-
-    [Fact]
-    public void IsDateSet_WhenOnlyRIFFDateTimeOriginalSet_ReturnsFalse()
-    {
-        // Arrange
-        ExifToolJson json = new() { RIFFDateTimeOriginal = "2024:01:15 12:30:45" };
-
-        // Act
-        bool result = json.IsDateSet();
-
-        // Assert
-        result.Should().BeFalse();
     }
 
     [Fact]
@@ -324,6 +288,40 @@ public sealed class ExifToolJsonTests
         // Assert
         result.Should().BeNull();
     }
+
+    // -- GetDate --------------------------------------------------------------
+
+    [Fact]
+    public void GetDate_WhenValidDateSet_ReturnsParsedDateTime()
+    {
+        ExifToolJson json = new() { EXIFDateTimeOriginal = "2024:06:15 10:30:00" };
+
+        DateTime? result = json.GetDate();
+
+        result.Should().Be(new DateTime(2024, 6, 15, 10, 30, 0));
+    }
+
+    [Fact]
+    public void GetDate_WhenNoDatesSet_ReturnsNull()
+    {
+        ExifToolJson json = new();
+
+        DateTime? result = json.GetDate();
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetDate_ReturnsNullForZeroQuickTimeDate()
+    {
+        ExifToolJson json = new() { QuickTimeCreateDate = "0000:00:00 00:00:00" };
+
+        DateTime? result = json.GetDate();
+
+        result.Should().BeNull();
+    }
+
+    // -- IsDngVersionNewer ----------------------------------------------------
 
     [Theory]
     [InlineData(null)]

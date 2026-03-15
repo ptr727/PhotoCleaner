@@ -126,7 +126,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (!processContext.FileInfo.Exists)
         {
             Log.Warning(
-                "Skipping file that no longer exists: '{FileName}'",
+                "Skipping file that no longer exists: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             return ProcessResult.Success;
@@ -135,7 +135,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         // Skip non-media files
         if (!SupportedExtensions.Contains(processContext.FileInfo.Extension))
         {
-            Log.Warning("Skipping non-media file: '{FileName}'", processContext.FileInfo.FullName);
+            Log.Debug("Skipping non-media file: '{FilePath}'", processContext.FileInfo.FullName);
             if (!processContext.UnknownExtensions.ContainsKey(processContext.FileInfo.Extension))
             {
                 _ = processContext.UnknownExtensions.TryAdd(processContext.FileInfo.Extension, 0);
@@ -173,7 +173,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         }
 
         Log.Warning(
-            "Mixed case extension detected '{Extension}': '{FileName}'",
+            "Mixed case extension detected '{Extension}': '{FilePath}'",
             processContext.FileInfo.Extension,
             processContext.FileInfo.FullName
         );
@@ -200,13 +200,13 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (string.IsNullOrEmpty(_exifToolJson!.FileTypeExtension))
         {
             Log.Warning(
-                "No FileTypeExtension returned by exiftool for '{FileName}'; skipping extension check",
+                "No FileTypeExtension returned by exiftool for '{FilePath}'; skipping extension check",
                 processContext.FileInfo.FullName
             );
             return true;
         }
         Log.Debug(
-            "Exiftool MIME details for '{FileName}': '{FileDetails}'",
+            "Exiftool MIME details for '{FilePath}': '{FileDetails}'",
             processContext.FileInfo.FullName,
             _exifToolJson.FileDetails
         );
@@ -216,7 +216,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (!SupportedExtensions.Contains(expectedExtension))
         {
             Log.Warning(
-                "Exiftool FileTypeExtension '{ExpectedExtension}' is not in process list for '{FileName}'; skipping extension check",
+                "Exiftool FileTypeExtension '{ExpectedExtension}' is not in process list for '{FilePath}'; skipping extension check",
                 expectedExtension,
                 processContext.FileInfo.FullName
             );
@@ -235,7 +235,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         }
 
         Log.Warning(
-            "File extension '{Extension}' does not match exiftool expected '{Expected}': '{FileName}'",
+            "File extension '{Extension}' does not match exiftool expected '{Expected}': '{FilePath}'",
             mediaExtension,
             expectedExtension,
             processContext.FileInfo.FullName
@@ -258,7 +258,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
     private async Task<bool> IsPcmAudioAsync()
     {
         Log.Debug(
-            "ffprobe: Checking for PCM audio stream in '{FileName}'",
+            "ffprobe: Checking for PCM audio stream in '{FilePath}'",
             processContext.FileInfo.FullName
         );
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
@@ -283,7 +283,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
     private async Task<float> GetDurationAsync()
     {
         Log.Debug(
-            "ffprobe: Getting play duration for '{FileName}'",
+            "ffprobe: Getting play duration for '{FilePath}'",
             processContext.FileInfo.FullName
         );
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
@@ -315,7 +315,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (duration <= ShortVideoDuration)
         {
             Log.Warning(
-                "Deleting {Duration}s short video clip: '{FileName}'",
+                "Deleting {Duration}s short video clip: '{FilePath}'",
                 duration,
                 processContext.FileInfo.FullName
             );
@@ -349,7 +349,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         {
             // Warn in case the video length threshold needs adjustment
             Log.Warning(
-                "Long {Duration}s video clip has matching image file: '{FileName}'",
+                "Long {Duration}s video clip has matching image file: '{FilePath}'",
                 duration,
                 processContext.FileInfo.FullName
             );
@@ -362,12 +362,12 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             await GetExifToolJsonAsync(companionPath).ConfigureAwait(false)
         )?.ContentIdentifier;
         Log.Debug(
-            "ContentIdentifier tag for video: '{FileName}' = '{ContentIdentifier}'",
+            "ContentIdentifier tag for video: '{FilePath}' = '{ContentIdentifier}'",
             processContext.FileInfo.FullName,
             videoContentId
         );
         Log.Debug(
-            "ContentIdentifier tag for image: '{FileName}' = '{ContentIdentifier}'",
+            "ContentIdentifier tag for image: '{FilePath}' = '{ContentIdentifier}'",
             companionPath,
             imageContentId
         );
@@ -375,7 +375,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (string.IsNullOrEmpty(videoContentId) || string.IsNullOrEmpty(imageContentId))
         {
             Log.Warning(
-                "Cannot confirm live photo pair, ContentIdentifier missing: '{FileName}'",
+                "Cannot confirm live photo pair, ContentIdentifier missing: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             return true;
@@ -384,7 +384,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (!string.Equals(videoContentId, imageContentId, StringComparison.Ordinal))
         {
             Log.Warning(
-                "ContentIdentifier mismatch, not a live photo pair: '{FileName}'",
+                "ContentIdentifier mismatch, not a live photo pair: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             return true;
@@ -399,7 +399,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         _modified = true;
         _deleted = true;
         Log.Warning(
-            "Deleting {Duration}s live photo video with matching image file: '{FileName}'",
+            "Deleting {Duration}s live photo video with matching image file: '{FilePath}'",
             duration,
             processContext.FileInfo.FullName
         );
@@ -423,7 +423,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         {
             // Remux audio and video
             Log.Information(
-                "ffmpeg: Remuxing audio and video by file extension: '{FileName}'",
+                "ffmpeg: Remuxing audio and video by file extension: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             ffmpegArguments =
@@ -445,7 +445,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         {
             // Reencode audio and video
             Log.Information(
-                "ffmpeg: Reencode audio and video by file extension: '{FileName}'",
+                "ffmpeg: Reencode audio and video by file extension: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             ffmpegArguments =
@@ -483,7 +483,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
             // Reencode audio and remux video
             Log.Information(
-                "ffmpeg: Reencode PCM audio and remux video: '{FileName}'",
+                "ffmpeg: Reencode PCM audio and remux video: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             ffmpegArguments =
@@ -545,7 +545,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         await CopyMetadataAsync(sourceForMetadata, outputFile).ConfigureAwait(false);
         if (processContext.SkipBackup)
         {
-            Log.Information("Deleting original after conversion: '{FileName}'", sourceForMetadata);
+            Log.Information("Deleting original after conversion: '{FilePath}'", sourceForMetadata);
             File.Delete(sourceForMetadata);
         }
 
@@ -566,7 +566,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         {
             return true;
         }
-        Log.Warning("Created date is missing: '{FileName}'", processContext.FileInfo.FullName);
+        Log.Warning("Created date is missing: '{FilePath}'", processContext.FileInfo.FullName);
 
         // Date inference from path is opt-in
         if (!processContext.DateFromPath)
@@ -578,7 +578,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (!s_setdateExtensions.Contains(processContext.FileInfo.Extension))
         {
             Log.Warning(
-                "Setting created date not supported for file type: '{FileName}'",
+                "Setting created date not supported for file type: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             return true;
@@ -589,14 +589,14 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (!DateFromPath.InferCreatedDate(processContext.FileInfo.FullName, ref createdDate))
         {
             Log.Warning(
-                "Failed to infer date from path: '{FileName}'",
+                "Failed to infer date from path: '{FilePath}'",
                 processContext.FileInfo.FullName
             );
             return true;
         }
 
         Log.Information(
-            "Inferred created date from path '{CreatedDate}': '{FileName}'",
+            "Inferred created date from path '{CreatedDate}': '{FilePath}'",
             createdDate,
             processContext.FileInfo.FullName
         );
@@ -629,7 +629,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         if (ExifToolJson.IsDngVersionNewer(_exifToolJson!.EXIFDNGVersion))
         {
             Log.Warning(
-                "DNG version {DngVersion} is newer than v1.4, file may not render correctly: '{FileName}'",
+                "DNG version {DngVersion} is newer than v1.4, file may not render correctly: '{FilePath}'",
                 _exifToolJson!.EXIFDNGVersion,
                 processContext.FileInfo.FullName
             );
@@ -641,7 +641,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
     private static async Task CopyMetadataAsync(string sourceFile, string outputFile)
     {
         Log.Debug(
-            "exiftool: Copying metadata from '{SourceFile}' to '{OutputFile}'",
+            "exiftool: Copying metadata from '{SourcePath}' to '{DestinationPath}'",
             sourceFile,
             outputFile
         );
@@ -662,7 +662,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
     {
         // Use tag appropriate to file type to set date
         Log.Debug(
-            "exiftool: Setting created date '{CreatedDate}' on '{OutputFile}'",
+            "exiftool: Setting created date '{CreatedDate}' on '{DestinationPath}'",
             createdDate,
             outputFile
         );
@@ -684,10 +684,10 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         _ = await Cli.Wrap("exiftool").WithArguments(arguments).ExecuteBufferedAsync();
     }
 
-    private static async Task<ExifToolJson?> GetExifToolJsonAsync(string filePath)
+    internal static async Task<ExifToolJson?> GetExifToolJsonAsync(string filePath)
     {
         // Get exiftool info
-        Log.Debug("exiftool: Getting metadata for '{FileName}'", filePath);
+        Log.Debug("exiftool: Getting metadata for '{FilePath}'", filePath);
         BufferedCommandResult result = await Cli.Wrap("exiftool")
             .WithArguments(["-groupNames", "-json", filePath])
             .ExecuteBufferedAsync();
@@ -702,7 +702,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
     private bool ReProcess(string fileName)
     {
         // Queue file for further processing
-        Log.Information("Queuing '{FileName}' for further processing", fileName);
+        Log.Information("Queuing '{FilePath}' for further processing", fileName);
         processContext.ReProcessNames.Add(fileName);
         _reprocess = true;
         return false;
@@ -746,13 +746,17 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         string backupFileName = GetBackupFileName(fileName);
         if (copy)
         {
-            Log.Information("Copying '{OldFileName}' to '{NewFileName}'", fileName, backupFileName);
+            Log.Information(
+                "Copying '{SourcePath}' to '{DestinationPath}'",
+                fileName,
+                backupFileName
+            );
             File.Copy(fileName, backupFileName, false);
         }
         else
         {
             Log.Information(
-                "Renaming '{OldFileName}' to '{NewFileName}'",
+                "Renaming '{SourcePath}' to '{DestinationPath}'",
                 fileName,
                 backupFileName
             );
@@ -773,7 +777,10 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         {
             if (skipBackup)
             {
-                Log.Information("Deleting conflicting file (no backup): '{File}'", targetFileName);
+                Log.Information(
+                    "Deleting conflicting file (no backup): '{FilePath}'",
+                    targetFileName
+                );
                 File.Delete(targetFileName);
             }
             else
@@ -783,7 +790,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         }
 
         Log.Information(
-            "Renaming '{OldFileName}' to '{NewFileName}'",
+            "Renaming '{SourcePath}' to '{DestinationPath}'",
             sourceFileName,
             targetFileName
         );
@@ -792,7 +799,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
     private string? FindCompanionImagePath()
     {
-        // e.g. IMG_1234.mov → IMG_1234.heic / IMG_1234.HEIC
+        // e.g. IMG_1234.mov -> IMG_1234.heic / IMG_1234.HEIC
         foreach (string extension in s_liveVideoImageExtensions)
         {
             string candidate = Path.ChangeExtension(processContext.FileInfo.FullName, extension);
@@ -811,7 +818,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             }
         }
 
-        // e.g. IMG_1234_HEVC.mov → IMG_1234.heic / IMG_1234.HEIC
+        // e.g. IMG_1234_HEVC.mov -> IMG_1234.heic / IMG_1234.HEIC
         string nameNoExt = Path.GetFileNameWithoutExtension(processContext.FileInfo.FullName);
         if (nameNoExt.EndsWith("_hevc", StringComparison.OrdinalIgnoreCase))
         {

@@ -6,7 +6,7 @@
 
 **CRITICAL**: All builds must complete without warnings. The project enforces this through:
 
-1. **Code change workflow** — run steps in this order:
+1. **Code change workflow** - run steps in this order:
    1. Format code: `dotnet csharpier format --log-level=debug .`
    2. Verify style: `dotnet format style --verify-no-changes --severity=info --verbosity=detailed`
    3. Build: `dotnet build --verbosity=diagnostic`
@@ -35,9 +35,9 @@ Available VS Code tasks (use via `run_task` tool):
 
 ### Code Formatting and Tooling
 
-1. **CSharpier**: Primary code formatter — run before committing
+1. **CSharpier**: Primary code formatter - run before committing
 
-2. **dotnet format**: Style verification — run after CSharpier to confirm no remaining issues
+2. **dotnet format**: Style verification - run after CSharpier to confirm no remaining issues
 
 3. **Husky.Net**: Git hooks for automated checks
    - Installed as a local dotnet tool (via `dotnet tool restore`)
@@ -84,8 +84,8 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - Primary constructors when appropriate
    - Top-level statements for console apps
    - Pattern matching over traditional checks
-   - Collection expressions (`[…]`) when the target type supports them
-   - Extension members using C# 14 `extension()` syntax — do **not** use static class + `this` parameter:
+   - Collection expressions (`[...]`) when the target type supports them
+   - Extension members using C# 14 `extension()` syntax - do **not** use static class + `this` parameter:
 
      ```csharp
      // Correct (C# 14)
@@ -108,7 +108,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 4. **Expression-bodied members**: Use for applicable members
    - Methods, properties, accessors, operators, lambdas, local functions
 
-5. **`var` keyword**: Do NOT use `var` — always use explicit types, including for LINQ results
+5. **`var` keyword**: Do NOT use `var` - always use explicit types, including for LINQ results
    and generic collections
 
    ```csharp
@@ -157,7 +157,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    global using Serilog;
    ```
 
-2. **Usings placement**: Outside namespace, sorted with `System` directives first — CSharpier
+2. **Usings placement**: Outside namespace, sorted with `System` directives first - CSharpier
    handles sorting automatically
 
    ```csharp
@@ -199,7 +199,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    4. `readonly` instance fields
    5. Other instance fields
    6. Constructors
-   7. Public members: events → properties → indexers → methods → operators
+   7. Public members: events -> properties -> indexers -> methods -> operators
    8. Non-public members: same order as public
    9. Nested types
 
@@ -235,9 +235,9 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    ```
 
 2. **Code analysis suppressions**: When a warning cannot be fixed, choose the appropriate approach:
-   - **Fix the code** — always the preferred option
-   - **`[SuppressMessage]`** — one-off false positives; must include a `Justification`
-   - **`.editorconfig`** — project-wide rules that apply uniformly across all files
+   - **Fix the code** - always the preferred option
+   - **`[SuppressMessage]`** - one-off false positives; must include a `Justification`
+   - **`.editorconfig`** - project-wide rules that apply uniformly across all files
 
    Do not use `#pragma` sections to disable analyzers.
 
@@ -287,7 +287,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 2. **Async all the way**: Avoid blocking calls (`.Result`, `.Wait()`); use `async`/`await`
 3. **Cancellation tokens**: Accept `CancellationToken` as the last parameter and pass it through
 4. **ConfigureAwait**: In library code, use `ConfigureAwait(false)` unless context is required
-   - Do not use `ConfigureAwait` in xUnit tests — xUnit provides its own synchronization context,
+   - Do not use `ConfigureAwait` in xUnit tests - xUnit provides its own synchronization context,
      and using `ConfigureAwait(false)` triggers warning xUnit1030
 5. **Disposables**: Use `await using` for async disposables; prefer `using` declarations
 6. **LINQ vs loops**: Use LINQ for clarity, loops for hot paths or allocations
@@ -322,7 +322,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
 3. **Naming**: Descriptive names with underscores
 4. **Theory tests**: Use `[Theory]` with `[InlineData]`
 5. **Null assertions**: After `.Should().NotBeNull()`, use the null-forgiving operator `!` to access
-   members — required to satisfy CS8629
+   members - required to satisfy CS8629
 
    ```csharp
    // After NotBeNull(), use ! to satisfy nullable analysis (CS8629)
@@ -352,3 +352,20 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
      <InternalsVisibleTo Include="Tests" />
    </ItemGroup>
    ```
+
+## Structured Logging
+
+Use message templates - never string interpolation.
+
+- **Consistent property names**: use the same name for the same concept across all call sites - inconsistency breaks log queries. Choose names that describe the *role* of the value (`{FilePath}`, `{SourcePath}`, `{DestinationPath}`) not its type (`{String}`) or local variable name (`{f}`).
+- **Distinct names for distinct metrics**: summary counters must have unique names (`{MovedCount}`, `{FailedCount}`) so queries can filter by type, not just by value.
+- **Correct log levels**: `Warning` is for unexpected conditions that warrant attention. Do not use it for expected, by-design outcomes - use `Information`. Reserve `Error` for genuine failures.
+- **Exception as first argument**: always pass the exception object as the first positional argument, before the message template.
+- **Consolidate identical catch blocks** with an exception filter rather than duplicating the log call:
+
+  ```csharp
+  catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+  {
+      logger.LogError(ex, "Failed to delete '{FilePath}'", path);
+  }
+  ```

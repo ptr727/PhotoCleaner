@@ -13,6 +13,9 @@ internal sealed class CommandLine
     private readonly Option<int> _threadsOption = CreateThreadsOption();
     private readonly Option<bool> _dateFromPathOption = CreateDateFromPathOption();
     private readonly Option<bool> _skipBackupOption = CreateSkipBackupOption();
+    private readonly Option<DirectoryInfo> _outPathOption = CreateOutPathOption();
+    private readonly Option<string> _formatOption = CreateFormatOption();
+    private readonly Option<bool> _deleteEmptyOption = CreateDeleteEmptyOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -42,6 +45,7 @@ internal sealed class CommandLine
         command.Subcommands.Add(CreateProcessCommand());
         command.Subcommands.Add(CreateUndoCommand());
         command.Subcommands.Add(CreateCleanupCommand());
+        command.Subcommands.Add(CreateOrganizeCommand());
 
         return command;
     }
@@ -85,6 +89,27 @@ internal sealed class CommandLine
         return command;
     }
 
+    private Command CreateOrganizeCommand()
+    {
+        Command command = new("organize", "Move media files into date-based subdirectories")
+        {
+            _pathOption,
+            _dryRunOption,
+            _threadsOption,
+            _outPathOption,
+            _formatOption,
+            _deleteEmptyOption,
+        };
+        command.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(CreateOptions(parseResult), cancellationToken);
+                return program.OrganizeCommandAsync();
+            }
+        );
+        return command;
+    }
+
     private Command CreateUndoCommand()
     {
         Command command = new("undo", "Undo media file processing") { _pathOption, _dryRunOption };
@@ -109,6 +134,9 @@ internal sealed class CommandLine
             DryRun = parseResult.GetValue(_dryRunOption),
             DateFromPath = parseResult.GetValue(_dateFromPathOption),
             SkipBackup = parseResult.GetValue(_skipBackupOption),
+            OutPath = parseResult.GetValue(_outPathOption),
+            Format = parseResult.GetValue(_formatOption) ?? "yyyy-MM",
+            DeleteEmpty = parseResult.GetValue(_deleteEmptyOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -118,27 +146,24 @@ internal sealed class CommandLine
         };
 
     private static Option<List<DirectoryInfo>> CreatePathOption() =>
-        new Option<List<DirectoryInfo>>("--path", "-p")
+        new Option<List<DirectoryInfo>>("--path")
         {
             Description = "The directory path to process",
             Required = true,
         }.AcceptExistingOnly();
 
     private static Option<bool> CreateDryRunOption() =>
-        new("--dryrun", "-d") { Description = "Perform a dry run without making changes" };
+        new("--dryrun") { Description = "Perform a dry run without making changes" };
 
     private static Option<bool> CreateDateFromPathOption() =>
-        new("--datefrompath", "-a")
-        {
-            Description = "Set missing EXIF creation date from file path",
-        };
+        new("--datefrompath") { Description = "Set missing EXIF creation date from file path" };
 
     private static Option<bool> CreateSkipBackupOption() =>
-        new("--skipbackup", "-s") { Description = "Skip creating backup files (disables undo)" };
+        new("--skipbackup") { Description = "Skip creating backup files (disables undo)" };
 
     private static Option<int> CreateThreadsOption()
     {
-        Option<int> option = new("--threads", "-t")
+        Option<int> option = new("--threads")
         {
             Description = "Number of parallel threads",
             DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4),
@@ -162,15 +187,57 @@ internal sealed class CommandLine
         return option;
     }
 
-    private static Option<bool> CreateLogFileClearOption() =>
-        new("--logclear", "-c")
+    private static Option<bool> CreateDeleteEmptyOption() =>
+        new("--deleteempty")
         {
-            Description = "Clear the log file before writing",
-            Recursive = true,
+            Description = "Delete empty source subdirectories after organizing",
         };
 
+    private static Option<DirectoryInfo> CreateOutPathOption() =>
+        new("--outpath") { Description = "Output directory for organized files", Required = true };
+
+    private static Option<string> CreateFormatOption()
+    {
+        Option<string> option = new("--format")
+        {
+            Description = "Date format for output subdirectory names",
+            DefaultValueFactory = _ => "yyyy-MM",
+        };
+        option.Validators.Add(result =>
+        {
+            string? format = result.GetValue(option);
+            if (string.IsNullOrEmpty(format))
+            {
+                result.AddError("Format cannot be empty");
+                return;
+            }
+            try
+            {
+                DateTime morning = new(2024, 6, 15, 8, 0, 0);
+                DateTime evening = new(2024, 6, 15, 20, 30, 45);
+                if (
+                    morning.ToString(format, CultureInfo.InvariantCulture)
+                    != evening.ToString(format, CultureInfo.InvariantCulture)
+                )
+                {
+                    result.AddError(
+                        $"Format '{format}' contains time components; only date-based formats are allowed"
+                    );
+                }
+            }
+            catch (FormatException)
+            {
+                result.AddError($"'{format}' is not a valid date format specifier");
+            }
+        });
+        return option;
+    }
+
+    private static Option<bool> CreateLogFileClearOption() =>
+        new("--logclear") { Description = "Clear the log file before writing", Recursive = true };
+
     private static Option<LogEventLevel> CreateLogLevelOption() =>
-        new("--loglevel", "-l")
+        new("--loglevel")
         {
             Description = "Set the log level",
             DefaultValueFactory = _ => LogEventLevel.Information,
@@ -179,7 +246,7 @@ internal sealed class CommandLine
 
     private static Option<string> CreateLogFileOption()
     {
-        Option<string> option = new("--logfile", "-f")
+        Option<string> option = new("--logfile")
         {
             Description = "Write logs to the specified file",
             Recursive = true,
@@ -201,6 +268,9 @@ internal sealed class CommandLine
         public required bool DryRun { get; init; }
         public required bool DateFromPath { get; init; }
         public required bool SkipBackup { get; init; }
+        public required DirectoryInfo? OutPath { get; init; }
+        public required string Format { get; init; }
+        public required bool DeleteEmpty { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

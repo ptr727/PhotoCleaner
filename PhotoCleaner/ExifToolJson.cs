@@ -84,18 +84,25 @@ public sealed class ExifToolJson
     public string FileDetails =>
         $"type='{FileType}', extension='{FileTypeExtension}', MIME='{MIMEType}'";
 
-    public bool IsDateSet() =>
-        // EXIF:DateTimeOriginal
-        // EXIF:CreateDate
-        // XMP:CreateDate
-        // QuickTime:CreateDate
-        !string.IsNullOrEmpty(EXIFDateTimeOriginal)
-        || !string.IsNullOrEmpty(EXIFCreateDate)
-        || !string.IsNullOrEmpty(XMPCreateDate)
-        || (
-            !string.IsNullOrEmpty(QuickTimeCreateDate)
-            && QuickTimeCreateDate != "0000:00:00 00:00:00"
-        );
+    public bool IsDateSet() => GetDateString() is not null;
+
+    private const string ExifDateFormat = "yyyy:MM:dd HH:mm:ss";
+
+    public DateTime? GetDate()
+    {
+        string? dateStr = GetDateString();
+        return
+            !string.IsNullOrEmpty(dateStr)
+            && DateTime.TryParseExact(
+                dateStr,
+                ExifDateFormat,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateTime date
+            )
+            ? date
+            : null;
+    }
 
     public string? GetDateString()
     {

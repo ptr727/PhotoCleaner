@@ -1,4 +1,4 @@
-# PhotoCleaner — AI Coding Agent Instructions
+# PhotoCleaner - AI Coding Agent Instructions
 
 PhotoCleaner is a .NET 10 console application that processes and prepares media files
 (photos and videos) for import into Lightroom, Immich, and PhotoPrism. It validates,

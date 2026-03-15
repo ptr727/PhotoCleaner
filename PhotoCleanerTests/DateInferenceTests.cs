@@ -11,7 +11,7 @@ public sealed class DateInferenceTests
     [InlineData("20030219_123456.jpg", "2003:02:19 12:34:56")]
     [InlineData("20090709_081500.mov", "2009:07:09 08:15:00")]
     [InlineData("20090709.mov", "2009:07:09 00:00:00")]
-    [InlineData("20090709_0815.mov", "2009:07:09 00:00:00")] // 4 digits — no time parsing
+    [InlineData("20090709_0815.mov", "2009:07:09 00:00:00")] // 4 digits - no time parsing
     [InlineData("EX_20030219_3378.jpg", "2003:02:19 00:00:00")]
     [InlineData("PV_20090709_0081.mp4", "2009:07:09 00:00:00")]
     [InlineData("PHOTO-2024-06-22-07-56-41.jpg", "2024:06:22 07:56:41")]
@@ -66,8 +66,8 @@ public sealed class DateInferenceTests
     }
 
     [Theory]
-    [InlineData("20991231_120000.jpg", "2099:12:31 12:00:00")] // Future date — extracted but fails validation
-    [InlineData("18991231_120000.jpg", "1899:12:31 12:00:00")] // Too old — extracted but fails validation
+    [InlineData("20991231_120000.jpg", "2099:12:31 12:00:00")] // Future date - extracted but fails validation
+    [InlineData("18991231_120000.jpg", "1899:12:31 12:00:00")] // Too old - extracted but fails validation
     public void ExtractDateFromFilename_OutOfRangeDate_StillReturnsDate(
         string filename,
         string expectedDateString

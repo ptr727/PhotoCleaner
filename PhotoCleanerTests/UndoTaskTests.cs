@@ -4,7 +4,7 @@ namespace PhotoCleanerTests;
 
 public sealed class UndoTaskTests
 {
-    // ── Helper utilities ─────────────────────────────────────────────────────
+    // -- Helper utilities -----------------------------------------------------
 
     private static string TempDir()
     {
@@ -15,7 +15,7 @@ public sealed class UndoTaskTests
 
     private static void Touch(string path) => File.WriteAllBytes(path, []);
 
-    // ── IsBackupFile ─────────────────────────────────────────────────────────
+    // -- IsBackupFile ---------------------------------------------------------
 
     [Theory]
     [InlineData("photo.jpg.bak", true)]
@@ -27,7 +27,7 @@ public sealed class UndoTaskTests
     public void IsBackupFile_VariousPaths_ReturnsExpected(string path, bool expected) =>
         UndoTask.IsBackupFile(path).Should().Be(expected);
 
-    // ── IsNumberedBackup ─────────────────────────────────────────────────────
+    // -- IsNumberedBackup -----------------------------------------------------
 
     [Theory]
     [InlineData("photo.jpg.bak", false)]
@@ -37,7 +37,7 @@ public sealed class UndoTaskTests
     public void IsNumberedBackup_VariousPaths_ReturnsExpected(string path, bool expected) =>
         UndoTask.IsNumberedBackup(path).Should().Be(expected);
 
-    // ── GetBackupBase ─────────────────────────────────────────────────────────
+    // -- GetBackupBase ---------------------------------------------------------
 
     [Theory]
     [InlineData("photo.jpg.bak", "photo.jpg")]
@@ -46,7 +46,7 @@ public sealed class UndoTaskTests
     public void GetBackupBase_VariousPaths_ReturnsBase(string path, string expected) =>
         UndoTask.GetBackupBase(path).Should().Be(expected);
 
-    // ── ExecuteUndo: no backups ───────────────────────────────────────────────
+    // -- ExecuteUndo: no backups -----------------------------------------------
 
     [Fact]
     public void ExecuteUndo_NoBackupFiles_ReturnsZeros()
@@ -71,7 +71,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario 1: deleted live photo / short video (only .bak exists) ──────
+    // -- Scenario 1: deleted live photo / short video (only .bak exists) ------
 
     [Fact]
     public void ExecuteUndo_SingleBackupNoCurrentFile_RestoresOriginal()
@@ -99,7 +99,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario 2: date-from-path (current file AND .bak both exist) ────────
+    // -- Scenario 2: date-from-path (current file AND .bak both exist) --------
 
     [Fact]
     public void ExecuteUndo_BackupAndCurrentFileExist_DeletesCurrentAndRestoresBackup()
@@ -128,7 +128,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario 3: single-run video conversion (img.mov.bak + img.mp4) ──────
+    // -- Scenario 3: single-run video conversion (img.mov.bak + img.mp4) ------
 
     [Fact]
     public void ExecuteUndo_SingleRunConversion_RestoresMovAndDeletesMp4()
@@ -158,7 +158,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario 4: two-run conversion (Rule 2 — .mp4 derived) ──────────────
+    // -- Scenario 4: two-run conversion (Rule 2 - .mp4 derived) --------------
     // Files: img.mov.bak  img.mp4.bak  img.mp4
 
     [Fact]
@@ -193,7 +193,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario 5: three-run conversion (Rule 1 — numbered backup) ──────────
+    // -- Scenario 5: three-run conversion (Rule 1 - numbered backup) ----------
     // Files: img.mov.bak  img.mp4.bak  img.mp4.bak1  img.mp4
 
     [Fact]
@@ -232,7 +232,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario 6: dry run — no file changes ────────────────────────────────
+    // -- Scenario 6: dry run - no file changes --------------------------------
 
     [Fact]
     public void ExecuteUndo_DryRun_ReturnsCountsButDoesNotChangeFiles()
@@ -265,7 +265,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario: in-place double modification (regression: numbered backup ≠ derived) ────
+    // -- Scenario: in-place double modification (regression: numbered backup != derived) ----
 
     [Fact]
     public void ExecuteUndo_InPlaceDoubleModification_RestoresOriginalAndDeletesAllBackups()
@@ -274,7 +274,7 @@ public sealed class UndoTaskTests
         try
         {
             // img.jpg was modified in-place twice (e.g. date-from-path run twice):
-            //   original → img.jpg.bak, modified → img.jpg.bak1, img.jpg updated again
+            //   original -> img.jpg.bak, modified -> img.jpg.bak1, img.jpg updated again
             string filePath = Path.Combine(dir, "img.jpg");
             string bakPath = filePath + ".bak";
             string bak1Path = filePath + ".bak1";
@@ -299,7 +299,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Companion image not touched ───────────────────────────────────────────
+    // -- Companion image not touched -------------------------------------------
 
     [Fact]
     public void ExecuteUndo_CompanionImageWithNoBackup_IsNotTouched()
@@ -307,7 +307,7 @@ public sealed class UndoTaskTests
         string dir = TempDir();
         try
         {
-            // heic companion has no backup — undo must leave it alone
+            // heic companion has no backup - undo must leave it alone
             string heicPath = Path.Combine(dir, "img.heic");
             string movBak = Path.Combine(dir, "img.mov.bak");
             Touch(heicPath);
@@ -323,7 +323,7 @@ public sealed class UndoTaskTests
         }
     }
 
-    // ── Scenario: uniquified output via .bak.out companion ───────────────────
+    // -- Scenario: uniquified output via .bak.out companion -------------------
     // img.mp4 pre-existed; process wrote img_1.mp4 + img.gif.bak + img.gif.bak.out
 
     [Fact]

@@ -1,4 +1,4 @@
-# PhotoCleaner — Claude Code Instructions
+# PhotoCleaner - Claude Code Instructions
 
 @.github/copilot-instructions.md
 

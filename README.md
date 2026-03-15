@@ -7,12 +7,12 @@ A .NET console application that processes and prepares media files for import in
 PhotoCleaner analyzes and transforms media files through a validation pipeline that:
 
 - **Renames mismatched extensions**: Corrects file extensions that do not match the actual file
-  content (MIME type), normalizes to the preferred extension (e.g. `.jpeg` → `.jpg`), and strips
-  compound extensions (e.g. `photo.heic.jpg` → `photo.jpg`).
+  content (MIME type), normalizes to the preferred extension (e.g. `.jpeg` -> `.jpg`), and strips
+  compound extensions (e.g. `photo.heic.jpg` -> `photo.jpg`).
 - **Renames mixed-case extensions**: Converts uppercase or mixed-case extensions to lowercase
-  (e.g. `.JPG` → `.jpg`).
-- **Handles Live Photos**: Removes Apple Live Photo video components — videos ≤ 1s are always
-  removed; videos ≤ 4s with a candidate companion image (same basename, or basename with `_hevc`
+  (e.g. `.JPG` -> `.jpg`).
+- **Handles Live Photos**: Removes Apple Live Photo video components - videos <= 1s are always
+  removed; videos <= 4s with a candidate companion image (same basename, or basename with `_hevc`
   suffix stripped) are removed when both files share the same `ContentIdentifier` EXIF tag;
   longer videos with a matching image trigger a warning but are kept.
 - **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4; re-encodes WMV, AVI, 3GP, and
@@ -22,6 +22,10 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
 - **Sets missing creation dates** (opt-in via `--datefrompath`): Infers and writes
   EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
   absent.
+- **Organizes into date folders** (via `organize` command): Moves supported media files from
+  source directories into `outpath/date/filename` using EXIF date metadata. Falls back to a
+  deterministic `0001-01` bucket when no date is found. Supports a custom `--format` string
+  (default `yyyy-MM`) validated as a date-only pattern.
 - **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
   render correctly in older applications.
 
@@ -43,16 +47,17 @@ Usage:
   PhotoCleaner [command] [options]
 
 Commands:
-  process  Process media files
-  undo     Undo media file processing
-  cleanup  Delete files not in the supported media list
+  process   Process media files
+  undo      Undo media file processing
+  cleanup   Delete files not in the supported media list
+  organize  Move media files into date-based subdirectories
 
 Options:
-  -l, --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
-  -f, --logfile <logfile>                                         Write logs to the specified file
-  -c, --logclear                                                  Clear the log file before writing
-  -?, -h, --help                                                  Show help and usage information
-  --version                                                       Show version information
+  --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
+  --logfile <logfile>                                         Write logs to the specified file
+  --logclear                                                  Clear the log file before writing
+  -?, -h, --help                                              Show help and usage information
+  --version                                                   Show version information
 ```
 
 ```text
@@ -61,11 +66,11 @@ Description:
   Process media files
 
 Options:
-  -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
-  -d, --dryrun                                                    Perform a dry run without making changes
-  -t, --threads <threads>                                         Number of parallel threads [default: 4]
-  -a, --datefrompath                                              Set missing EXIF creation date from file path
-  -s, --skipbackup                                                Skip creating backup files (disables undo)
+  --path <path> (REQUIRED)      The directory path to process (repeatable)
+  --dryrun                      Perform a dry run without making changes
+  --threads <threads>           Number of parallel threads [default: 4]
+  --datefrompath                Set missing EXIF creation date from file path
+  --skipbackup                  Skip creating backup files (disables undo)
 ```
 
 ```text
@@ -74,8 +79,8 @@ Description:
   Undo media file processing
 
 Options:
-  -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
-  -d, --dryrun                                                    Perform a dry run without making changes
+  --path <path> (REQUIRED)      The directory path to process (repeatable)
+  --dryrun                      Perform a dry run without making changes
 ```
 
 ```text
@@ -84,20 +89,40 @@ Description:
   Delete files not in the supported media list
 
 Options:
-  -p, --path <path> (REQUIRED)                                    The directory path to process (repeatable)
-  -d, --dryrun                                                    Perform a dry run without making changes
-  -t, --threads <threads>                                         Number of parallel threads [default: 4]
+  --path <path> (REQUIRED)      The directory path to process (repeatable)
+  --dryrun                      Perform a dry run without making changes
+```
+
+```text
+$> PhotoCleaner organize --help
+Description:
+  Move media files into date-based subdirectories
+
+Options:
+  --path <path> (REQUIRED)      The directory path to process (repeatable)
+  --dryrun                      Perform a dry run without making changes
+  --threads <threads>           Number of parallel threads [default: 4]
+  --outpath <outpath> (REQUIRED) Output directory for organized files
+  --format <format>             Date format for output subdirectory names [default: yyyy-MM]
+  --deleteempty                 Delete empty source subdirectories after organizing
 ```
 
 **Option notes:**
 
-- `--path` / `-p` — can be specified multiple times to process several directories in one run;
+- `--path` - can be specified multiple times to process several directories in one run;
   must point to an existing directory.
-- `--threads` / `-t` — defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
-- `--datefrompath` / `-a` — opt-in; when absent, EXIF date inference from the file path is
+- `--threads` - defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
+- `--datefrompath` - opt-in; when absent, EXIF date inference from the file path is
   skipped entirely.
-- `--skipbackup` / `-s` — opt-in (`process` only); skips all `.bak` file creation. The `undo`
+- `--skipbackup` - opt-in (`process` only); skips all `.bak` file creation. The `undo`
   command cannot reverse a run made with this flag.
+- `--outpath` - required for `organize`; target directory (created on demand).
+- `--format` - optional (`organize` only); a C# date format string used to name date
+  subdirectories (default `"yyyy-MM"`). Must be date-only - time components are rejected.
+  Files with no EXIF date land in a `"0001-01"` fallback bucket.
+- `--deleteempty` - optional (`organize` only); after all files are moved, deletes empty
+  child subdirectories from each source `--path` (deepest first). The source root itself is
+  never deleted. Useful for cleaning up directory trees left behind after organizing.
 
 ### Examples
 
@@ -125,6 +150,18 @@ PhotoCleaner cleanup --path /home/user/Photos
 
 # Preview what cleanup would remove without deleting anything
 PhotoCleaner cleanup --path /home/user/Photos --dryrun
+
+# Organize media into date-based subdirectories (YYYY-MM by default)
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized
+
+# Organize with a custom date format (creates e.g. 2024/06/15/ subdirectories)
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/dd"
+
+# Preview what organize would move without changing anything
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --dryrun
+
+# Organize and remove empty source subdirectories afterward
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --deleteempty
 ```
 
 ## Processing Flow
@@ -133,9 +170,9 @@ PhotoCleaner cleanup --path /home/user/Photos --dryrun
 2. **Case conflict detection**: Identifies files with the same name but different casing that
    would collide on case-insensitive file systems; renames conflicting files before processing.
 3. **Per-file validation pipeline** (runs in parallel, stops on first action per file):
-   1. Rename to canonical MIME extension — corrects mismatches and strips compound extensions.
+   1. Rename to canonical MIME extension - corrects mismatches and strips compound extensions.
    2. Rename mixed-case extension to lowercase.
-   3. Delete short or Live Photo video clips: videos ≤ 1s are always deleted; videos ≤ 4s
+   3. Delete short or Live Photo video clips: videos <= 1s are always deleted; videos <= 4s
       with a candidate companion image (direct name match or `_hevc`-suffix match) are deleted
       when both files share a matching `ContentIdentifier` tag.
    4. Convert legacy or incompatible video formats to MP4:
@@ -157,20 +194,20 @@ original: the first backup is `X.bak`; if that already exists (from a prior run)
 `X.bak1`, then `X.bak2`, etc. The `undo` command reverses all processing by scanning the given
 directories for backup files and applying a two-pass algorithm:
 
-1. **Identify derived files** — an output file is "derived" (not original) when either:
-   - a numbered backup (`.bak1`, `.bak2`, …) exists for it (processed more than once), or
+1. **Identify derived files** - an output file is "derived" (not original) when either:
+   - a numbered backup (`.bak1`, `.bak2`, ...) exists for it (processed more than once), or
    - it is a `.mp4` file whose stem has a non-`.mp4` primary backup in the same directory
      (it was the conversion output).
 2. **Restore or delete**:
    - *Derived* base: delete the current file and all its backup files.
    - *Non-derived* base: delete the current file if it exists (overwritten in-place), rename
-     `X.bak` → `X` to restore the original. The converted output is located via the
+     `X.bak` -> `X` to restore the original. The converted output is located via the
      `X.bak.out` companion file written at conversion time (handles uniquified names like
      `stem_1.mp4`); if no companion exists, falls back to deleting `stem.mp4` when present
      and untracked (legacy single-run heuristic).
 
 **Known limitation**: extension renames that target a filename that did not previously exist
-(e.g. `photo.JPEG` → `photo.jpg` when `photo.jpg` was absent) create no backup and cannot be
+(e.g. `photo.JPEG` -> `photo.jpg` when `photo.jpg` was absent) create no backup and cannot be
 undone by this command.
 
 ## Cleanup Flow
@@ -182,6 +219,27 @@ logged as warnings before deletion; other files are logged as informational.
 
 Run `cleanup` after verifying `process` results, or use `process --skipbackup` followed by
 `cleanup` for a no-artefact workflow.
+
+## Organize Flow
+
+The `organize` command moves every supported media file in the source directories to
+`outpath/date/filename`:
+
+1. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
+   `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
+   is found - those files land in a `"0001-01"` bucket (with the default `yyyy-MM` format),
+   making undated files easy to locate and handle manually.
+2. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy-MM"`).
+   The format is validated at startup - time components are rejected.
+3. **Collision handling**: if a file with the same name already exists in the destination,
+   `_1`, `_2`, ... suffixes are appended (e.g. `photo_1.jpg`). A warning is logged.
+4. **Unsupported files**: non-media files are counted as ignored and left in place.
+5. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are moved,
+   iterates each source directory and deletes empty child subdirectories deepest-first.
+   The source root itself is never deleted.
+
+The `organize` command is non-destructive in the sense that it only *moves* files. Run with
+`--dryrun` to preview the planned moves without touching the file system.
 
 ## Supported File Types
 

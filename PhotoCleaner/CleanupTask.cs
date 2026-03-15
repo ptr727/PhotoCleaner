@@ -16,11 +16,11 @@ internal sealed class CleanupTask(bool dryRun)
 
             if (UndoTask.IsBackupFile(file))
             {
-                Log.Warning("Deleting backup artefact: '{File}'", file);
+                Log.Warning("Deleting backup artefact: '{FilePath}'", file);
             }
             else
             {
-                Log.Warning("Deleting non-media file: '{File}'", file);
+                Log.Information("Deleting non-media file: '{FilePath}'", file);
             }
 
             if (dryRun)
@@ -34,14 +34,9 @@ internal sealed class CleanupTask(bool dryRun)
                 File.Delete(file);
                 deleted++;
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Log.Error(ex, "Failed to delete '{File}'", file);
-                failed++;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                Log.Error(ex, "Failed to delete '{File}'", file);
+                Log.Error(ex, "Failed to delete '{FilePath}'", file);
                 failed++;
             }
         }

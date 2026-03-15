@@ -11,7 +11,7 @@ internal static partial class LogExtensions
             [CallerMemberName] string function = "unknown"
         )
         {
-            logger.Error(exception, "{Function}", function);
+            logger.Error(exception, "Exception in {Function}", function);
             return false;
         }
 
@@ -20,7 +20,7 @@ internal static partial class LogExtensions
             [CallerMemberName] string function = "unknown"
         )
         {
-            logger.Error(exception, "{Function}", function);
+            logger.Error(exception, "Exception in {Function}", function);
             return true;
         }
 

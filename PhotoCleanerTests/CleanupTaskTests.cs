@@ -16,7 +16,7 @@ public sealed class CleanupTaskTests
 
     private static void Touch(string path) => File.WriteAllBytes(path, []);
 
-    // ── No files ──────────────────────────────────────────────────────────────
+    // -- No files --------------------------------------------------------------
 
     [Fact]
     public void ExecuteCleanup_NoFiles_ReturnsZeros()
@@ -27,7 +27,7 @@ public sealed class CleanupTaskTests
         failed.Should().Be(0);
     }
 
-    // ── Supported extensions kept ─────────────────────────────────────────────
+    // -- Supported extensions kept ---------------------------------------------
 
     [Fact]
     public void ExecuteCleanup_SupportedExtension_NotDeleted()
@@ -53,7 +53,7 @@ public sealed class CleanupTaskTests
         }
     }
 
-    // ── Unsupported extensions deleted ────────────────────────────────────────
+    // -- Unsupported extensions deleted ----------------------------------------
 
     [Fact]
     public void ExecuteCleanup_UnsupportedExtension_Deleted()
@@ -79,7 +79,7 @@ public sealed class CleanupTaskTests
         }
     }
 
-    // ── Backup files deleted ──────────────────────────────────────────────────
+    // -- Backup files deleted --------------------------------------------------
 
     [Fact]
     public void ExecuteCleanup_BackupFile_Deleted()
@@ -112,7 +112,7 @@ public sealed class CleanupTaskTests
         }
     }
 
-    // ── Mixed: supported files kept, unsupported deleted ─────────────────────
+    // -- Mixed: supported files kept, unsupported deleted ---------------------
 
     [Fact]
     public void ExecuteCleanup_MixedFiles_DeletesOnlyUnsupported()
@@ -145,7 +145,7 @@ public sealed class CleanupTaskTests
         }
     }
 
-    // ── Dry run ───────────────────────────────────────────────────────────────
+    // -- Dry run ---------------------------------------------------------------
 
     [Fact]
     public void ExecuteCleanup_DryRun_ReportsCountButLeavesFilesIntact()

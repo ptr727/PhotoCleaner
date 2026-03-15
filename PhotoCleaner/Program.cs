@@ -139,6 +139,53 @@ internal sealed class Program(
         return 0;
     }
 
+    internal async Task<int> OrganizeCommandAsync()
+    {
+        Log.Information("Organize started");
+        try
+        {
+            GetFileList(commandLineOptions.Paths);
+            OrganizeTask task = new(
+                commandLineOptions.DryRun,
+                commandLineOptions.OutPath!,
+                commandLineOptions.Format,
+                commandLineOptions.Threads,
+                commandLineOptions.DeleteEmpty
+            );
+            (int moved, int ignored, int failed, int deletedDirs) = await task.ExecuteOrganizeAsync(
+                    [.. _fileNames],
+                    commandLineOptions.Paths,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            if (moved > 0)
+            {
+                Log.Information("Moved {MovedCount} files", moved);
+            }
+
+            if (ignored > 0)
+            {
+                Log.Information("Ignored {IgnoredCount} non-media files", ignored);
+            }
+
+            if (deletedDirs > 0)
+            {
+                Log.Information("Deleted {DeletedCount} empty directories", deletedDirs);
+            }
+
+            if (failed > 0)
+            {
+                Log.Warning("Failed {FailedCount} files", failed);
+            }
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+        Log.Information("Organize complete");
+        return 0;
+    }
+
     internal async Task<int> CleanupCommandAsync()
     {
         Log.Information("Cleanup started");
@@ -150,12 +197,12 @@ internal sealed class Program(
             ]);
             if (deleted > 0)
             {
-                Log.Information("Deleted {Count} non-media files", deleted);
+                Log.Information("Deleted {DeletedCount} non-media files", deleted);
             }
 
             if (failed > 0)
             {
-                Log.Warning("Failed to delete {Count} files", failed);
+                Log.Warning("Failed to delete {FailedCount} files", failed);
             }
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
@@ -299,12 +346,12 @@ internal sealed class Program(
 
     private void RenamedMixedCaseFiles(List<string> files)
     {
-        Log.Warning("Found {FileCount} case variants of file: '{FileName}'", files.Count, files[0]);
+        Log.Warning("Found {FileCount} case variants of file: '{FilePath}'", files.Count, files[0]);
         int counter = 1;
         foreach (string file in files)
         {
             string uniqueFileName = GetUniqueFileName(file, ref counter);
-            Log.Warning("Renaming '{OldFileName}' to '{NewFileName}'", file, uniqueFileName);
+            Log.Warning("Renaming '{SourcePath}' to '{DestinationPath}'", file, uniqueFileName);
             if (!IsDryRun())
             {
                 File.Move(file, uniqueFileName, false);

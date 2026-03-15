@@ -63,5 +63,26 @@
             "console": "internalConsole",
             "stopAtEntry": false
         },
+        {
+            "name": "Organize",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "organize",
+                "--path=/data/media/Temp/Import",
+                "--outpath=/data/media/Temp/Organized",
+                "--deleteempty=true",
+                "--threads=4",
+                "--dryrun=false",
+                "--loglevel=verbose",
+                "--logfile=PhotoCleaner.log",
+                "--logclear=true"
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
     ]
 }
