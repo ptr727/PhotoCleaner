@@ -5,17 +5,28 @@ internal sealed class OrganizeTask(
     DirectoryInfo outPath,
     string format,
     int threads,
-    bool deleteEmpty
+    bool deleteEmpty,
+    bool move,
+    Database? database
 )
 {
-    internal async Task<(int moved, int ignored, int failed, int deletedDirs)> ExecuteOrganizeAsync(
+    internal async Task<(
+        int organized,
+        int ignored,
+        int skippedSamePath,
+        int skippedDuplicate,
+        int failed,
+        int deletedDirs
+    )> ExecuteOrganizeAsync(
         IReadOnlyCollection<string> allFiles,
         IReadOnlyCollection<DirectoryInfo> sourceDirs,
         CancellationToken cancellationToken = default
     )
     {
-        int moved = 0,
+        int organized = 0,
             ignored = 0,
+            skippedSamePath = 0,
+            skippedDuplicate = 0,
             failed = 0;
         await Parallel
             .ForEachAsync(
@@ -33,32 +44,104 @@ internal sealed class OrganizeTask(
                         return;
                     }
 
-                    string finalDest = await BuildDestinationPathAsync(file).ConfigureAwait(false);
+                    ExifToolJson? meta = await GetFileMetaAsync(file).ConfigureAwait(false);
+                    string finalDest = BuildDestinationPath(file, meta);
 
                     Log.Information(
-                        "Moving '{SourcePath}' to '{DestinationPath}'",
+                        move
+                            ? "Moving '{SourcePath}' to '{DestinationPath}'"
+                            : "Copying '{SourcePath}' to '{DestinationPath}'",
                         file,
                         finalDest
                     );
                     if (dryRun)
                     {
-                        _ = Interlocked.Increment(ref moved);
+                        _ = Interlocked.Increment(ref organized);
                         return;
+                    }
+
+                    string? hash = null;
+                    if (database is not null)
+                    {
+                        hash = await Database.ComputeHashAsync(file).ConfigureAwait(false);
+                        string? recordedSourcePath = await database
+                            .GetSourcePathAsync(hash)
+                            .ConfigureAwait(false);
+                        Log.Debug(
+                            "File '{FilePath}' has hash '{Hash}' (exists in database: {Exists})",
+                            file,
+                            hash,
+                            recordedSourcePath is not null
+                        );
+                        if (recordedSourcePath is not null)
+                        {
+                            if (recordedSourcePath != file)
+                            {
+                                Log.Information(
+                                    "Skipping '{FilePath}' (duplicate of already-organized '{RecordedSourcePath}')",
+                                    file,
+                                    recordedSourcePath
+                                );
+                                _ = Interlocked.Increment(ref skippedDuplicate);
+                            }
+                            else
+                            {
+                                Log.Information("Skipping '{FilePath}' (already organized)", file);
+                                _ = Interlocked.Increment(ref skippedSamePath);
+                            }
+                            return;
+                        }
                     }
 
                     try
                     {
                         DateTime lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
                         _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
-                        File.Move(file, finalDest);
+                        if (File.Exists(finalDest))
+                        {
+                            Log.Warning(
+                                "Destination exists, overwriting '{DestinationPath}'",
+                                finalDest
+                            );
+                        }
+
+                        if (move)
+                        {
+                            File.Move(file, finalDest, overwrite: true);
+                        }
+                        else
+                        {
+                            File.Copy(file, finalDest, overwrite: true);
+                        }
+
                         File.SetLastWriteTimeUtc(finalDest, lastWriteTimeUtc);
-                        _ = Interlocked.Increment(ref moved);
+
+                        if (hash is not null)
+                        {
+                            Log.Debug("Recording organized file in database: '{FilePath}'", file);
+                            MediaFileRecord record = new(
+                                hash,
+                                file,
+                                Path.GetFileName(file),
+                                meta?.ContentIdentifier,
+                                meta?.GetDateString(),
+                                new FileInfo(finalDest).Length,
+                                meta?.MIMEType,
+                                DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                                finalDest
+                            );
+                            await database!.InsertAsync(record).ConfigureAwait(false);
+                        }
+
+                        _ = Interlocked.Increment(ref organized);
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
                         Log.Error(
                             ex,
-                            "Failed to move '{SourcePath}' to '{DestinationPath}'",
+                            move
+                                ? "Failed to move '{SourcePath}' to '{DestinationPath}'"
+                                : "Failed to copy '{SourcePath}' to '{DestinationPath}'",
                             file,
                             finalDest
                         );
@@ -69,7 +152,7 @@ internal sealed class OrganizeTask(
             .ConfigureAwait(false);
 
         int deletedDirs = deleteEmpty ? DeleteEmptyDirectories(sourceDirs) : 0;
-        return (moved, ignored, failed, deletedDirs);
+        return (organized, ignored, skippedSamePath, skippedDuplicate, failed, deletedDirs);
     }
 
     private int DeleteEmptyDirectories(IReadOnlyCollection<DirectoryInfo> sourceDirs)
@@ -114,38 +197,25 @@ internal sealed class OrganizeTask(
         return count;
     }
 
-    private async Task<string> BuildDestinationPathAsync(string filePath)
+    private string BuildDestinationPath(string filePath, ExifToolJson? meta)
     {
-        DateTime date = await GetFileDateAsync(filePath).ConfigureAwait(false);
-        string dateDir = date.ToString(format, CultureInfo.InvariantCulture);
+        DateTime date = meta?.GetDate() ?? DateTime.MinValue;
+        string dateDir = date.ToString(format, CultureInfo.InvariantCulture)
+            .Replace('/', Path.DirectorySeparatorChar);
         string destPath = Path.Combine(outPath.FullName, dateDir, Path.GetFileName(filePath));
-        string finalDest = ProcessTask.GetUniqueFileName(destPath);
-        if (!string.Equals(destPath, finalDest, StringComparison.OrdinalIgnoreCase))
-        {
-            Log.Warning("Destination exists, using '{DestinationPath}'", finalDest);
-        }
-        return finalDest;
+        return destPath;
     }
 
-    private static async Task<DateTime> GetFileDateAsync(string filePath)
+    private static async Task<ExifToolJson?> GetFileMetaAsync(string filePath)
     {
         try
         {
-            ExifToolJson? meta = await ProcessTask
-                .GetExifToolJsonAsync(filePath)
-                .ConfigureAwait(false);
-            DateTime? date = meta?.GetDate();
-            if (date.HasValue)
-            {
-                return date.Value;
-            }
+            return await ProcessTask.GetExifToolJsonAsync(filePath).ConfigureAwait(false);
         }
         catch (IOException ex)
         {
             Log.Error(ex, "Failed to read metadata for '{FilePath}'", filePath);
+            return null;
         }
-
-        Log.Information("No EXIF date found, using DateTime.MinValue for: '{FilePath}'", filePath);
-        return DateTime.MinValue;
     }
 }

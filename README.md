@@ -22,10 +22,11 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
 - **Sets missing creation dates** (opt-in via `--datefrompath`): Infers and writes
   EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
   absent.
-- **Organizes into date folders** (via `organize` command): Moves supported media files from
-  source directories into `outpath/date/filename` using EXIF date metadata. Falls back to a
-  deterministic `0001-01` bucket when no date is found. Supports a custom `--format` string
-  (default `yyyy-MM`) validated as a date-only pattern.
+- **Organizes into date folders** (via `organize` command): Copies (default) or moves supported
+  media files from source directories into `outpath/date/filename` using EXIF date metadata.
+  Falls back to a deterministic `0001-01` bucket when no date is found. Supports a custom
+  `--format` string (default `yyyy-MM`) validated as a date-only pattern. Optional SQLite
+  deduplication via `--db` tracks source file hashes so re-runs skip already-organized files.
 - **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
   render correctly in older applications.
 
@@ -96,15 +97,17 @@ Options:
 ```text
 $> PhotoCleaner organize --help
 Description:
-  Move media files into date-based subdirectories
+  Organize media files into date-based subdirectories
 
 Options:
-  --path <path> (REQUIRED)      The directory path to process (repeatable)
-  --dryrun                      Perform a dry run without making changes
-  --threads <threads>           Number of parallel threads [default: 4]
+  --path <path> (REQUIRED)       The directory path to process (repeatable)
+  --dryrun                       Perform a dry run without making changes
+  --threads <threads>            Number of parallel threads [default: 4]
   --outpath <outpath> (REQUIRED) Output directory for organized files
-  --format <format>             Date format for output subdirectory names [default: yyyy-MM]
-  --deleteempty                 Delete empty source subdirectories after organizing
+  --format <format>              Date format for output subdirectory names [default: yyyy-MM]
+  --deleteempty                  Delete empty source subdirectories after organizing
+  --move                         Move files instead of copying (default: copy)
+  --db <db>                      SQLite database file for deduplication tracking
 ```
 
 **Option notes:**
@@ -120,9 +123,19 @@ Options:
 - `--format` - optional (`organize` only); a C# date format string used to name date
   subdirectories (default `"yyyy-MM"`). Must be date-only - time components are rejected.
   Files with no EXIF date land in a `"0001-01"` fallback bucket.
-- `--deleteempty` - optional (`organize` only); after all files are moved, deletes empty
+- `--deleteempty` - optional (`organize` only); after all files are organized, deletes empty
   child subdirectories from each source `--path` (deepest first). The source root itself is
-  never deleted. Useful for cleaning up directory trees left behind after organizing.
+  never deleted. Useful for cleaning up directory trees left behind after organizing with
+  `--move`.
+- `--move` - optional (`organize` only); moves files instead of copying. Default behavior is
+  to copy, which preserves the source files. Use `--move` when the source directory is
+  temporary or when used alongside `--deleteempty` to clean up after organizing.
+- `--db <path>` - optional (`organize` only); path to a SQLite database file used for
+  deduplication. On each run, source files are SHA-256 hashed and checked against the DB.
+  Files whose hash is already recorded are skipped; new files are copied/moved and their hash
+  and EXIF metadata (including `ContentIdentifier`) are inserted. The DB file is created on
+  first use. Useful for `icloudpd` workflows where the source directory is continuously synced
+  and only new arrivals should be processed.
 
 ### Examples
 
@@ -151,17 +164,23 @@ PhotoCleaner cleanup --path /home/user/Photos
 # Preview what cleanup would remove without deleting anything
 PhotoCleaner cleanup --path /home/user/Photos --dryrun
 
-# Organize media into date-based subdirectories (YYYY-MM by default)
+# Organize (copy) media into date-based subdirectories - source files are kept
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized
 
 # Organize with a custom date format (creates e.g. 2024/06/15/ subdirectories)
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/dd"
 
-# Preview what organize would move without changing anything
+# Preview what organize would do without changing anything
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --dryrun
 
-# Organize and remove empty source subdirectories afterward
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --deleteempty
+# Move instead of copy (source files are removed)
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --move
+
+# Organize and remove empty source subdirectories afterward (use with --move)
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --move --deleteempty
+
+# Organize with deduplication: only copy files not already in the database
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Intermediate --db /data/photos.db
 ```
 
 ## Processing Flow
@@ -222,24 +241,30 @@ Run `cleanup` after verifying `process` results, or use `process --skipbackup` f
 
 ## Organize Flow
 
-The `organize` command moves every supported media file in the source directories to
-`outpath/date/filename`:
+The `organize` command copies (default) or moves every supported media file in the source
+directories to `outpath/date/filename`:
 
-1. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
+1. **Deduplication** (opt-in via `--db`): before any file operation, the source file is
+   SHA-256 hashed and checked against the SQLite database. If the hash is already present,
+   the file is skipped (counted as "skipped"). If not, the file is copied/moved and a record
+   is inserted containing the hash, source path, EXIF metadata, and destination path. The DB
+   file is created automatically on first use.
+2. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
    `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
    is found - those files land in a `"0001-01"` bucket (with the default `yyyy-MM` format),
    making undated files easy to locate and handle manually.
-2. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy-MM"`).
+3. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy-MM"`).
    The format is validated at startup - time components are rejected.
-3. **Collision handling**: if a file with the same name already exists in the destination,
+4. **Copy or move**: by default files are copied and the source is preserved. Pass `--move`
+   to remove the source file after a successful copy.
+5. **Collision handling**: if a file with the same name already exists in the destination,
    `_1`, `_2`, ... suffixes are appended (e.g. `photo_1.jpg`). A warning is logged.
-4. **Unsupported files**: non-media files are counted as ignored and left in place.
-5. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are moved,
+6. **Unsupported files**: non-media files are counted as ignored and left in place.
+7. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are organized,
    iterates each source directory and deletes empty child subdirectories deepest-first.
-   The source root itself is never deleted.
+   The source root itself is never deleted. Typically combined with `--move`.
 
-The `organize` command is non-destructive in the sense that it only *moves* files. Run with
-`--dryrun` to preview the planned moves without touching the file system.
+Run with `--dryrun` to preview the planned operations without touching the file system.
 
 ## Supported File Types
 
@@ -325,7 +350,25 @@ docker run -it --rm --name icloudpd \
         # --skip-created-before 2025-01-01
 ```
 
-**Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to cleanup photos**:
+**Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to organize new photos**:
+
+Copy only new files (not already in the DB) from the icloudpd directory to an intermediate
+directory, without touching the icloudpd originals:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+dotnet run --project ./PhotoCleaner/PhotoCleaner/PhotoCleaner.csproj -- \
+    organize \
+    --path /data/media/icloud \
+    --outpath /data/media/intermediate \
+    --db /data/media/photos.db \
+    --threads 4
+```
+
+**Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to process the intermediate photos**:
 
 ```shell
 #!/bin/bash
@@ -334,7 +377,7 @@ set -Eeuo pipefail
 
 dotnet run --project ./PhotoCleaner/PhotoCleaner/PhotoCleaner.csproj -- \
     process \
-    --path /data/media/Test \
+    --path /data/media/intermediate \
     --threads 4
 ```
 

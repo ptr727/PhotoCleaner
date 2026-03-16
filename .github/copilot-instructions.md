@@ -14,7 +14,8 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `ProcessTask.cs`: Core file processing pipeline
   - `UndoTask.cs`: Undo logic - two-pass algorithm that restores `.bak` files
   - `CleanupTask.cs`: Cleanup logic - deletes files whose extensions are not in the supported list
-  - `OrganizeTask.cs`: Organize logic - moves supported media files into date-based subdirectories
+  - `OrganizeTask.cs`: Organize logic - copies (default) or moves supported media files into date-based subdirectories; optional SQLite deduplication via `Database`
+  - `Database.cs`: SQLite wrapper for source file deduplication tracking (SHA-256 hash, EXIF metadata, ContentIdentifier)
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
   - `Extensions.cs`: Extension methods for logging and error handling
@@ -26,7 +27,8 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `UndoTaskTests.cs`: Undo task tests (13 tests)
   - `CleanupTaskTests.cs`: Cleanup task tests (6 tests)
   - `ExifToolJsonTests.cs`: ExifToolJson unit tests (includes GetDate, IsDngVersionNewer) (33 tests)
-  - `OrganizeTaskTests.cs`: Organize task tests (5 tests)
+  - `OrganizeTaskTests.cs`: Organize task tests (12 tests)
+  - `DatabaseTests.cs`: Database deduplication tests (8 tests)
 
 ### Core Processing Pipeline
 
@@ -95,7 +97,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Optional `--datefrompath` Flag** (process only): Opt-in; when absent, `SetMissingCreateDateAsync` is skipped entirely - date inference from paths is a destructive write that cannot be undone
 - **Optional `--skipbackup` Flag** (process only): Skips all `.bak` file creation - originals are deleted/overwritten in-place. Logs a warning at startup. Disables undo.
 - **`cleanup` subcommand**: Deletes every file whose extension is not in `ProcessTask.SupportedExtensions`. Logs a warning for `.bak*` artefacts before deleting them. Supports `--dryrun` only (no `--threads` - pure I/O, no benefit).
-- **`organize` subcommand**: Moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001-01"` bucket when absent). `--format` (default `"yyyy-MM"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from source paths after all files are moved (deepest first; source roots are never deleted).
+- **`organize` subcommand**: Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001-01"` bucket when absent). `--format` (default `"yyyy-MM"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from source paths after all files are organized (deepest first; source roots are never deleted). `--move` (default `false`) moves files instead of copying. `--db <sqlite-file>` (optional) enables SHA-256 deduplication: files whose hash is already in the DB are skipped; new files are copied/moved and recorded with EXIF metadata including `ContentIdentifier`.
 - **Program Construction**: Creates `Program` instance with primary constructor parameters passed via `CommandLine.Options`
 - **Built-in Help System**: Automatic help generation and validation
 
@@ -107,6 +109,7 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **CliWrap**: External process execution
 - **System.CommandLine**: Modern CLI argument parsing and validation
 - **System.Text.Json**: High-performance JSON with source generation
+- **Microsoft.Data.Sqlite**: SQLite database access for source file deduplication
 - **Serilog**: Structured logging with console output
 - **Native AOT**: Project configured for `PublishAot=true` with `InvariantGlobalization=true`
 - **xUnit**: Testing framework for PhotoCleanerTests project
@@ -190,10 +193,22 @@ PhotoCleaner undo --path /photos --dryrun
 PhotoCleaner cleanup --path /photos
 PhotoCleaner cleanup --path /photos --dryrun
 
-# Organize: move media files into date-based subdirectories
+# Organize: copy media files into date-based subdirectories (default: copy)
 PhotoCleaner organize --path /photos --outpath /organized
 PhotoCleaner organize --path /photos --outpath /organized --format "yyyy/MM/dd"
 PhotoCleaner organize --path /photos --outpath /organized --dryrun
+
+# Organize with move (removes source files, old default behavior)
+PhotoCleaner organize --path /photos --outpath /organized --move
+
+# Organize with deduplication DB (skip files already organized)
+PhotoCleaner organize --path /icloud/originals --outpath /intermediate --db /data/photos.db
+
+# Full workflow: only copy new files from icloudpd directory, skip already-imported
+PhotoCleaner organize --path /icloud/originals --outpath /intermediate --db /data/photos.db
+PhotoCleaner process --path /intermediate
+# import /intermediate to Immich
+# subsequent runs: only new files from icloudpd are copied
 
 # Help
 PhotoCleaner --help

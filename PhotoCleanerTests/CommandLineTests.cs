@@ -195,4 +195,64 @@ public sealed class CommandLineTests
 
         cli.Result.Errors.Should().NotBeEmpty();
     }
+
+    // -- --move option ---------------------------------------------------------
+
+    [Fact]
+    public void MoveOption_DefaultFalse()
+    {
+        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.Move.Should().BeFalse();
+    }
+
+    [Fact]
+    public void MoveOption_Flag_ParsedTrue()
+    {
+        CommandLine cli = new([
+            "organize",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--move",
+        ]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.Move.Should().BeTrue();
+    }
+
+    // -- --db option -----------------------------------------------------------
+
+    [Fact]
+    public void DbPathOption_DefaultNull()
+    {
+        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.DbPath.Should().BeNull();
+    }
+
+    [Fact]
+    public void DbPathOption_Path_ParsedCorrectly()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), "photos.db");
+        CommandLine cli = new([
+            "organize",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--db",
+            dbPath,
+        ]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.DbPath!.FullName.Should().Be(dbPath);
+    }
 }

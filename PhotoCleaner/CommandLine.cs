@@ -16,6 +16,8 @@ internal sealed class CommandLine
     private readonly Option<DirectoryInfo> _outPathOption = CreateOutPathOption();
     private readonly Option<string> _formatOption = CreateFormatOption();
     private readonly Option<bool> _deleteEmptyOption = CreateDeleteEmptyOption();
+    private readonly Option<bool> _moveOption = CreateMoveOption();
+    private readonly Option<FileInfo?> _dbPathOption = CreateDbPathOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -91,7 +93,7 @@ internal sealed class CommandLine
 
     private Command CreateOrganizeCommand()
     {
-        Command command = new("organize", "Move media files into date-based subdirectories")
+        Command command = new("organize", "Organize media files into date-based subdirectories")
         {
             _pathOption,
             _dryRunOption,
@@ -99,6 +101,8 @@ internal sealed class CommandLine
             _outPathOption,
             _formatOption,
             _deleteEmptyOption,
+            _moveOption,
+            _dbPathOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
@@ -137,6 +141,8 @@ internal sealed class CommandLine
             OutPath = parseResult.GetValue(_outPathOption),
             Format = parseResult.GetValue(_formatOption) ?? "yyyy-MM",
             DeleteEmpty = parseResult.GetValue(_deleteEmptyOption),
+            Move = parseResult.GetValue(_moveOption),
+            DbPath = parseResult.GetValue(_dbPathOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -193,6 +199,12 @@ internal sealed class CommandLine
             Description = "Delete empty source subdirectories after organizing",
         };
 
+    private static Option<bool> CreateMoveOption() =>
+        new("--move") { Description = "Move files instead of copying (default: copy)" };
+
+    private static Option<FileInfo?> CreateDbPathOption() =>
+        new("--db") { Description = "SQLite database file for deduplication tracking" };
+
     private static Option<DirectoryInfo> CreateOutPathOption() =>
         new("--outpath") { Description = "Output directory for organized files", Required = true };
 
@@ -200,7 +212,8 @@ internal sealed class CommandLine
     {
         Option<string> option = new("--format")
         {
-            Description = "Date format for output subdirectory names",
+            Description =
+                "Date format for output subdirectory names; use '/' to create nested subdirectories (e.g. yyyy/MM/dd)",
             DefaultValueFactory = _ => "yyyy-MM",
         };
         option.Validators.Add(result =>
@@ -271,6 +284,8 @@ internal sealed class CommandLine
         public required DirectoryInfo? OutPath { get; init; }
         public required string Format { get; init; }
         public required bool DeleteEmpty { get; init; }
+        public required bool Move { get; init; }
+        public required FileInfo? DbPath { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

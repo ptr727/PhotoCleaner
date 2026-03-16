@@ -145,43 +145,91 @@ internal sealed class Program(
         try
         {
             GetFileList(commandLineOptions.Paths);
-            OrganizeTask task = new(
-                commandLineOptions.DryRun,
-                commandLineOptions.OutPath!,
-                commandLineOptions.Format,
-                commandLineOptions.Threads,
-                commandLineOptions.DeleteEmpty
-            );
-            (int moved, int ignored, int failed, int deletedDirs) = await task.ExecuteOrganizeAsync(
-                    [.. _fileNames],
-                    commandLineOptions.Paths,
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-            if (moved > 0)
-            {
-                Log.Information("Moved {MovedCount} files", moved);
-            }
 
-            if (ignored > 0)
+            // CA2000 false positive: database is disposed in the finally block below
+#pragma warning disable CA2000
+            Database? database = commandLineOptions.DbPath is not null
+                ? new Database(commandLineOptions.DbPath.FullName)
+                : null;
+#pragma warning restore CA2000
+            try
             {
-                Log.Information("Ignored {IgnoredCount} non-media files", ignored);
-            }
+                if (database is not null)
+                {
+                    await database.InitializeAsync().ConfigureAwait(false);
+                }
 
-            if (deletedDirs > 0)
-            {
-                Log.Information("Deleted {DeletedCount} empty directories", deletedDirs);
-            }
+                OrganizeTask task = new(
+                    commandLineOptions.DryRun,
+                    commandLineOptions.OutPath!,
+                    commandLineOptions.Format,
+                    commandLineOptions.Threads,
+                    commandLineOptions.DeleteEmpty,
+                    commandLineOptions.Move,
+                    database
+                );
+                (
+                    int organized,
+                    int ignored,
+                    int skippedSamePath,
+                    int skippedDuplicate,
+                    int failed,
+                    int deletedDirs
+                ) = await task.ExecuteOrganizeAsync(
+                        [.. _fileNames],
+                        commandLineOptions.Paths,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+                if (organized > 0)
+                {
+                    Log.Information("Organized {OrganizedCount} files", organized);
+                }
 
-            if (failed > 0)
+                if (ignored > 0)
+                {
+                    Log.Information("Ignored {IgnoredCount} non-media files", ignored);
+                }
+
+                if (skippedSamePath > 0)
+                {
+                    Log.Information(
+                        "Skipped {SkippedCount} already-organized files",
+                        skippedSamePath
+                    );
+                }
+
+                if (skippedDuplicate > 0)
+                {
+                    Log.Information(
+                        "Skipped {SkippedCount} files with duplicate content (different source path)",
+                        skippedDuplicate
+                    );
+                }
+
+                if (deletedDirs > 0)
+                {
+                    Log.Information("Deleted {DeletedCount} empty directories", deletedDirs);
+                }
+
+                if (failed > 0)
+                {
+                    Log.Warning("Failed {FailedCount} files", failed);
+                }
+            }
+            finally
             {
-                Log.Warning("Failed {FailedCount} files", failed);
+                if (database is not null)
+                {
+                    await database.DisposeAsync().ConfigureAwait(false);
+                }
             }
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
         {
             return 1;
         }
+
         Log.Information("Organize complete");
         return 0;
     }
