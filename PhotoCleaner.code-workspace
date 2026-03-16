@@ -8,7 +8,9 @@
         "cSpell.words": [
             "Betz",
             "datefrompath",
+            "Diagnoser",
             "dryrun",
+            "ebug",
             "Eeuo",
             "Exif",
             "exiftool",
@@ -17,6 +19,7 @@
             "Gyan",
             "icloudpd",
             "Immich",
+            "lavfi",
             "libx",
             "Lightroom",
             "logclear",
@@ -35,6 +38,7 @@
             "Remuxing",
             "Serilog",
             "setdate",
+            "subdirs",
             "winget",
             "Xunit",
             "yourapikey"

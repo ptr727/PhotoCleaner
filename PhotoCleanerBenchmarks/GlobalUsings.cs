@@ -1,0 +1,9 @@
+global using System;
+global using System.Globalization;
+global using System.IO;
+global using System.Threading;
+global using System.Threading.Tasks;
+global using BenchmarkDotNet.Attributes;
+global using CliWrap;
+global using CliWrap.Buffered;
+global using PhotoCleaner;

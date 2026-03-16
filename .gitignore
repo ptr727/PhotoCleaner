@@ -8,3 +8,5 @@
 .artifacts
 .DS_Store
 *.user
+
+BenchmarkDotNet.Artifacts/

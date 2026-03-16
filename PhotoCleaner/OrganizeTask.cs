@@ -44,24 +44,8 @@ internal sealed class OrganizeTask(
                         return;
                     }
 
-                    ExifToolJson? meta = await GetFileMetaAsync(file).ConfigureAwait(false);
-                    string finalDest = BuildDestinationPath(file, meta);
-
-                    Log.Information(
-                        move
-                            ? "Moving '{SourcePath}' to '{DestinationPath}'"
-                            : "Copying '{SourcePath}' to '{DestinationPath}'",
-                        file,
-                        finalDest
-                    );
-                    if (dryRun)
-                    {
-                        _ = Interlocked.Increment(ref organized);
-                        return;
-                    }
-
                     string? hash = null;
-                    if (database is not null)
+                    if (!dryRun && database is not null)
                     {
                         hash = await Database.ComputeHashAsync(file).ConfigureAwait(false);
                         string? recordedSourcePath = await database
@@ -93,9 +77,25 @@ internal sealed class OrganizeTask(
                         }
                     }
 
+                    ExifToolJson? meta = await GetFileMetaAsync(file).ConfigureAwait(false);
+                    string finalDest = BuildDestinationPath(file, meta);
+
+                    Log.Information(
+                        move
+                            ? "Moving '{SourcePath}' to '{DestinationPath}'"
+                            : "Copying '{SourcePath}' to '{DestinationPath}'",
+                        file,
+                        finalDest
+                    );
+                    if (dryRun)
+                    {
+                        _ = Interlocked.Increment(ref organized);
+                        return;
+                    }
+
                     try
                     {
-                        DateTime lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
+                        FileInfo sourceInfo = new(file);
                         _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
                         if (File.Exists(finalDest))
                         {
@@ -114,7 +114,7 @@ internal sealed class OrganizeTask(
                             File.Copy(file, finalDest, overwrite: true);
                         }
 
-                        File.SetLastWriteTimeUtc(finalDest, lastWriteTimeUtc);
+                        File.SetLastWriteTimeUtc(finalDest, sourceInfo.LastWriteTimeUtc);
 
                         if (hash is not null)
                         {
@@ -125,7 +125,7 @@ internal sealed class OrganizeTask(
                                 Path.GetFileName(file),
                                 meta?.ContentIdentifier,
                                 meta?.GetDateString(),
-                                new FileInfo(finalDest).Length,
+                                sourceInfo.Length,
                                 meta?.MIMEType,
                                 DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
                                 finalDest

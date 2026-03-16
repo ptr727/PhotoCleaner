@@ -19,6 +19,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="PhotoCleanerTests" />
+    <InternalsVisibleTo Include="PhotoCleanerBenchmarks" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CliWrap" Version="3.10.0" />
