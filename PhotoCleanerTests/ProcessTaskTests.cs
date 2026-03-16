@@ -1080,5 +1080,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             SkipBackup = skipBackup,
             ReProcessNames = [],
             UnknownExtensions = new ConcurrentDictionary<string, byte>(),
+            Database = null,
         };
 }

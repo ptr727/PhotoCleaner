@@ -9,7 +9,7 @@ public sealed class DatabaseTests
     private static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"db_{Path.GetRandomFileName()}.db");
 
-    private static MediaFileRecord MakeRecord(string hash) =>
+    private static OrganizedFileRecord MakeRecord(string hash) =>
         new(
             hash,
             "/source/photo.jpg",
@@ -35,7 +35,7 @@ public sealed class DatabaseTests
             await conn.OpenAsync();
             SqliteCommand cmd = conn.CreateCommand();
             cmd.CommandText =
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='media_files'";
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='organized_files'";
             object? result = await cmd.ExecuteScalarAsync();
             Convert.ToInt64(result).Should().Be(1);
         }

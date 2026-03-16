@@ -61,6 +61,7 @@ internal sealed class CommandLine
             _threadsOption,
             _dateFromPathOption,
             _skipBackupOption,
+            _dbPathOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>

@@ -3,7 +3,14 @@ using Microsoft.Data.Sqlite;
 
 namespace PhotoCleaner;
 
-internal sealed record MediaFileRecord(
+internal sealed record ProcessedFileRecord(
+    string SourceHash,
+    string SourcePath,
+    string ProcessedAt,
+    string StepsApplied
+);
+
+internal sealed record OrganizedFileRecord(
     string SourceHash,
     string SourcePath,
     string FileName,
@@ -22,12 +29,13 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
 
     internal async Task InitializeAsync()
     {
+        Log.Debug("Initializing database at '{DbPath}'", dbPath);
         _connection = new SqliteConnection($"Data Source={dbPath}");
         await _connection.OpenAsync().ConfigureAwait(false);
 
         SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS media_files (
+            CREATE TABLE IF NOT EXISTS organized_files (
                 source_hash        TEXT NOT NULL PRIMARY KEY,
                 source_path        TEXT NOT NULL,
                 file_name          TEXT NOT NULL,
@@ -37,6 +45,12 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
                 mime_type          TEXT,
                 organized_at       TEXT NOT NULL,
                 organized_to       TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS processed_files (
+                source_hash  TEXT NOT NULL PRIMARY KEY,
+                source_path  TEXT NOT NULL,
+                processed_at TEXT NOT NULL,
+                steps_applied TEXT NOT NULL
             )
             """;
         _ = await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -49,7 +63,7 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
         {
             SqliteCommand cmd = _connection!.CreateCommand();
             cmd.CommandText =
-                "SELECT source_path FROM media_files WHERE source_hash = @hash LIMIT 1";
+                "SELECT source_path FROM organized_files WHERE source_hash = @hash LIMIT 1";
             _ = cmd.Parameters.AddWithValue("@hash", hash);
             object? result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
             return result as string;
@@ -66,7 +80,7 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
         try
         {
             SqliteCommand cmd = _connection!.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM media_files WHERE source_hash = @hash";
+            cmd.CommandText = "SELECT COUNT(*) FROM organized_files WHERE source_hash = @hash";
             _ = cmd.Parameters.AddWithValue("@hash", hash);
             object? result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
             return result is long count && count > 0;
@@ -77,14 +91,56 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
         }
     }
 
-    internal async Task InsertAsync(MediaFileRecord record)
+    internal async Task<string?> GetProcessedSourcePathAsync(string hash)
+    {
+        await _semaphore.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            SqliteCommand cmd = _connection!.CreateCommand();
+            cmd.CommandText =
+                "SELECT source_path FROM processed_files WHERE source_hash = @hash LIMIT 1";
+            _ = cmd.Parameters.AddWithValue("@hash", hash);
+            object? result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+            return result as string;
+        }
+        finally
+        {
+            _ = _semaphore.Release();
+        }
+    }
+
+    internal async Task InsertProcessedAsync(ProcessedFileRecord record)
     {
         await _semaphore.WaitAsync().ConfigureAwait(false);
         try
         {
             SqliteCommand cmd = _connection!.CreateCommand();
             cmd.CommandText = """
-                INSERT OR IGNORE INTO media_files
+                INSERT OR IGNORE INTO processed_files
+                    (source_hash, source_path, processed_at, steps_applied)
+                VALUES
+                    (@hash, @sourcePath, @processedAt, @stepsApplied)
+                """;
+            _ = cmd.Parameters.AddWithValue("@hash", record.SourceHash);
+            _ = cmd.Parameters.AddWithValue("@sourcePath", record.SourcePath);
+            _ = cmd.Parameters.AddWithValue("@processedAt", record.ProcessedAt);
+            _ = cmd.Parameters.AddWithValue("@stepsApplied", record.StepsApplied);
+            _ = await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _ = _semaphore.Release();
+        }
+    }
+
+    internal async Task InsertAsync(OrganizedFileRecord record)
+    {
+        await _semaphore.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            SqliteCommand cmd = _connection!.CreateCommand();
+            cmd.CommandText = """
+                INSERT OR IGNORE INTO organized_files
                     (source_hash, source_path, file_name, content_identifier,
                      exif_date, file_size, mime_type, organized_at, organized_to)
                 VALUES

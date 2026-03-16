@@ -15,6 +15,7 @@ internal sealed class Program(
     private int _failedCount;
     private int _deletedCount;
     private int _modifiedCount;
+    private int _skippedCount;
 
     internal CommandLine.Options GetCommandLineOptions() => commandLineOptions;
 
@@ -59,18 +60,43 @@ internal sealed class Program(
         Log.Information("Processing started");
         try
         {
-            // Rename duplicate mixed case files
-            bool foundConflicts = true;
-            while (foundConflicts)
+            // CA2000 false positive: database is disposed in the finally block below
+#pragma warning disable CA2000
+            Database? database = commandLineOptions.DbPath is not null
+                ? new Database(commandLineOptions.DbPath.FullName)
+                : null;
+#pragma warning restore CA2000
+            try
             {
-                GetFileList(commandLineOptions.Paths);
-                foundConflicts = FixCaseConflicts();
-            }
+                if (database is not null)
+                {
+                    await database.InitializeAsync().ConfigureAwait(false);
+                    Log.Warning(
+                        "Skipping already processed files using database '{DbPath}'",
+                        commandLineOptions.DbPath!.FullName
+                    );
+                }
 
-            // Process files
-            while (!_fileNames.IsEmpty)
+                // Rename duplicate mixed case files
+                bool foundConflicts = true;
+                while (foundConflicts)
+                {
+                    GetFileList(commandLineOptions.Paths);
+                    foundConflicts = FixCaseConflicts();
+                }
+
+                // Process files
+                while (!_fileNames.IsEmpty)
+                {
+                    await ExecuteProcessAsync(database).ConfigureAwait(false);
+                }
+            }
+            finally
             {
-                await ExecuteProcessAsync().ConfigureAwait(false);
+                if (database is not null)
+                {
+                    await database.DisposeAsync().ConfigureAwait(false);
+                }
             }
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
@@ -87,6 +113,11 @@ internal sealed class Program(
             {
                 Log.Warning("Unknown file extension: '{Extension}'", extension);
             }
+        }
+
+        if (_skippedCount > 0)
+        {
+            Log.Information("Skipped {SkippedCount} already processed files", _skippedCount);
         }
 
         if (_modifiedCount > 0)
@@ -261,7 +292,7 @@ internal sealed class Program(
         return 0;
     }
 
-    private async Task ExecuteProcessAsync()
+    private async Task ExecuteProcessAsync(Database? database)
     {
         // Process files in parallel
         ConcurrentBag<string> reProcessNames = [];
@@ -288,6 +319,7 @@ internal sealed class Program(
                                     SkipBackup = commandLineOptions.SkipBackup,
                                     UnknownExtensions = _unknownExtensions,
                                     ReProcessNames = reProcessNames,
+                                    Database = database,
                                 }
                             )
                             .ConfigureAwait(false)
@@ -302,6 +334,9 @@ internal sealed class Program(
                         case ProcessTask.ProcessResult.Modified:
                         case ProcessTask.ProcessResult.Reprocess:
                             _ = Interlocked.Increment(ref _modifiedCount);
+                            break;
+                        case ProcessTask.ProcessResult.Skipped:
+                            _ = Interlocked.Increment(ref _skippedCount);
                             break;
                         case ProcessTask.ProcessResult.UnknownExtension:
                         case ProcessTask.ProcessResult.Success:

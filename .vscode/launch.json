@@ -14,10 +14,11 @@
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
                 "process",
-                "--path=/data/media/Temp/Import",
-                "--threads=4",
+                "--path=/data/media/Temp/Organized",
+                "--db=/data/media/Temp/Organized/PhotoCleaner.db",
+                "--threads=8",
                 "--datefrompath=false",
-                "--skipbackup=false",
+                "--skipbackup=true",
                 "--dryrun=false",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",
@@ -35,7 +36,7 @@
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
                 "undo",
-                "--path=/data/media/Temp/Import",
+                "--path=/data/media/Temp/Organized",
                 "--dryrun=false",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",
@@ -53,7 +54,7 @@
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
                 "cleanup",
-                "--path=/data/media/Temp/Import",
+                "--path=/data/media/Temp/Organized",
                 "--dryrun=false",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",

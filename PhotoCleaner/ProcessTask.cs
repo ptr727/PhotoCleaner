@@ -16,6 +16,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         public required bool DryRun { get; init; }
         public required bool DateFromPath { get; init; }
         public required bool SkipBackup { get; init; }
+        public required Database? Database { get; init; }
     }
 
     public enum ProcessResult
@@ -26,6 +27,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         Reprocess,
         Modified,
         UnknownExtension,
+        Skipped,
     }
 
     internal const double LiveVideoDuration = 4.0;
@@ -143,26 +145,73 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             return ProcessResult.UnknownExtension;
         }
 
+        // Hash file before any modification for DB deduplication
+        string? preProcessHash = null;
+        if (processContext.Database is not null)
+        {
+            preProcessHash = await Database
+                .ComputeHashAsync(processContext.FileInfo.FullName)
+                .ConfigureAwait(false);
+            Log.Debug(
+                "File '{FilePath}' has pre-process hash '{Hash}'",
+                processContext.FileInfo.FullName,
+                preProcessHash
+            );
+            string? processedPath = await processContext
+                .Database.GetProcessedSourcePathAsync(preProcessHash)
+                .ConfigureAwait(false);
+            if (processedPath is not null)
+            {
+                Log.Information(
+                    "Skipping '{FilePath}' (already processed)",
+                    processContext.FileInfo.FullName
+                );
+                return ProcessResult.Skipped;
+            }
+        }
+
         // Get exiftool info
         _exifToolJson = await GetExifToolJsonAsync(processContext.FileInfo.FullName)
             .ConfigureAwait(false);
 
         // Process files
-        return
+        ProcessResult result =
             !RenameMismatchedMimeExtensions()
             || !RenameMixedCaseExtensions()
             || !await DeleteLivePhotosAsync().ConfigureAwait(false)
             || !await ConvertVideoAsync().ConfigureAwait(false)
             || !await SetMissingCreateDateAsync().ConfigureAwait(false)
             || !WarnDngVersion()
-            ? _reprocess
-                ? ProcessResult.Reprocess
-                : _deleted
-                    ? ProcessResult.Deleted
-                    : ProcessResult.Failure
-            : _modified
-                ? ProcessResult.Modified
-                : ProcessResult.Success;
+                ? _reprocess
+                    ? ProcessResult.Reprocess
+                    : _deleted
+                        ? ProcessResult.Deleted
+                        : ProcessResult.Failure
+                : _modified
+                    ? ProcessResult.Modified
+                    : ProcessResult.Success;
+
+        // Record terminal results in DB so re-runs skip already processed files
+        if (preProcessHash is not null && result is ProcessResult.Success or ProcessResult.Modified)
+        {
+            Log.Debug(
+                "Recording processed file in database: '{FilePath}' with hash '{Hash}'",
+                processContext.FileInfo.FullName,
+                preProcessHash
+            );
+            await processContext
+                .Database!.InsertProcessedAsync(
+                    new ProcessedFileRecord(
+                        preProcessHash,
+                        processContext.FileInfo.FullName,
+                        DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        result.ToString()
+                    )
+                )
+                .ConfigureAwait(false);
+        }
+
+        return result;
     }
 
     private bool RenameMixedCaseExtensions()

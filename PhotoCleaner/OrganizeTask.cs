@@ -62,7 +62,7 @@ internal sealed class OrganizeTask(
                             if (recordedSourcePath != file)
                             {
                                 Log.Information(
-                                    "Skipping '{FilePath}' (duplicate of already-organized '{RecordedSourcePath}')",
+                                    "Skipping '{FilePath}' (duplicate of already organized '{RecordedSourcePath}')",
                                     file,
                                     recordedSourcePath
                                 );
@@ -119,7 +119,7 @@ internal sealed class OrganizeTask(
                         if (hash is not null)
                         {
                             Log.Debug("Recording organized file in database: '{FilePath}'", file);
-                            MediaFileRecord record = new(
+                            OrganizedFileRecord record = new(
                                 hash,
                                 file,
                                 Path.GetFileName(file),

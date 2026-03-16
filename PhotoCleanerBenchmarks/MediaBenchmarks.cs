@@ -54,7 +54,7 @@ public class MediaBenchmarks : IDisposable
         await _database.InitializeAsync();
 
         _preInsertedHash = await Database.ComputeHashAsync(_jpegPath);
-        MediaFileRecord seedRecord = new(
+        OrganizedFileRecord seedRecord = new(
             _preInsertedHash,
             _jpegPath,
             "sample.jpg",
@@ -112,7 +112,7 @@ public class MediaBenchmarks : IDisposable
     {
         int counter = Interlocked.Increment(ref _insertCounter);
         string hash = $"bench_{counter:D10}";
-        MediaFileRecord record = new(
+        OrganizedFileRecord record = new(
             hash,
             _jpegPath,
             "sample.jpg",

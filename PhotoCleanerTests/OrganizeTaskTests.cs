@@ -477,7 +477,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await using Database db = new(dbPath);
             await db.InitializeAsync();
             await db.InsertAsync(
-                new MediaFileRecord(
+                new OrganizedFileRecord(
                     hash,
                     jpg,
                     "photo.jpg",
@@ -541,7 +541,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await using Database db = new(dbPath);
             await db.InitializeAsync();
             await db.InsertAsync(
-                new MediaFileRecord(
+                new OrganizedFileRecord(
                     hash,
                     "/other/dir/photo.jpg",
                     "photo.jpg",
