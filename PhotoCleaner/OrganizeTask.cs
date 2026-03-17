@@ -78,7 +78,8 @@ internal sealed class OrganizeTask(
                     }
 
                     ExifToolJson? meta = await GetFileMetaAsync(file).ConfigureAwait(false);
-                    string finalDest = BuildDestinationPath(file, meta);
+                    string requestedDest = BuildDestinationPath(file, meta);
+                    string finalDest = ProcessTask.GetUniqueFileName(requestedDest);
 
                     Log.Information(
                         move
@@ -97,21 +98,22 @@ internal sealed class OrganizeTask(
                     {
                         FileInfo sourceInfo = new(file);
                         _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
-                        if (File.Exists(finalDest))
+                        if (finalDest != requestedDest)
                         {
                             Log.Warning(
-                                "Destination exists, overwriting '{DestinationPath}'",
+                                "Destination '{RequestedPath}' already exists, using '{FinalPath}'",
+                                requestedDest,
                                 finalDest
                             );
                         }
 
                         if (move)
                         {
-                            File.Move(file, finalDest, overwrite: true);
+                            File.Move(file, finalDest);
                         }
                         else
                         {
-                            File.Copy(file, finalDest, overwrite: true);
+                            File.Copy(file, finalDest);
                         }
 
                         File.SetLastWriteTimeUtc(finalDest, sourceInfo.LastWriteTimeUtc);

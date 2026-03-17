@@ -213,23 +213,24 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    // -- Same-name collision: second file overwrites the first -----------------
+    // -- Same-name collision: second file gets a unique name ------------------
 
     [Fact]
-    public async Task ExecuteOrganizeAsync_SameNameFilesInSameMonth_SecondOverwritesFirst()
+    public async Task ExecuteOrganizeAsync_SameNameFilesInSameMonth_SecondGetsUniqueName()
     {
         string srcDir1 = TempDir();
         string srcDir2 = TempDir();
         string outDir = TempDir();
         try
         {
-            // Two files named photo.jpg, both without EXIF date -> same destination
+            // Two files named photo.jpg, both without EXIF date -> same destination bucket
             string jpg1 = Path.Combine(srcDir1, "photo.jpg");
             string jpg2 = Path.Combine(srcDir2, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg1);
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg2);
             // Make jpg2 distinguishable by size
             await File.AppendAllTextAsync(jpg2, "extra", TestContext.Current.CancellationToken);
+            long jpg2Size = new FileInfo(jpg2).Length;
 
             OrganizeTask task = new(
                 dryRun: false,
@@ -259,10 +260,11 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             skippedDuplicate.Should().Be(0);
             failed.Should().Be(0);
             deletedDirs.Should().Be(0);
-            // Only one file at the destination (second overwrites first)
-            string dest = Path.Combine(outDir, "0001-01", "photo.jpg");
-            File.Exists(dest).Should().BeTrue();
-            File.Exists(Path.Combine(outDir, "0001-01", "photo_1.jpg")).Should().BeFalse();
+            // Both files exist: first at photo.jpg, second renamed to photo_1.jpg
+            File.Exists(Path.Combine(outDir, "0001-01", "photo.jpg")).Should().BeTrue();
+            string renamed = Path.Combine(outDir, "0001-01", "photo_1.jpg");
+            File.Exists(renamed).Should().BeTrue();
+            new FileInfo(renamed).Length.Should().Be(jpg2Size);
         }
         finally
         {
