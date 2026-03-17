@@ -16,6 +16,7 @@ internal sealed class Program(
     private int _deletedCount;
     private int _modifiedCount;
     private int _skippedCount;
+    private int _totalCount;
 
     internal CommandLine.Options GetCommandLineOptions() => commandLineOptions;
 
@@ -104,6 +105,7 @@ internal sealed class Program(
             return 1;
         }
         Log.Information("Processing complete");
+        Log.Information("Total: {TotalCount} files", _totalCount);
 
         if (!_unknownExtensions.IsEmpty)
         {
@@ -151,6 +153,7 @@ internal sealed class Program(
             return 1;
         }
         Log.Information("Undo complete");
+        Log.Information("Total: {TotalCount} files", _totalCount);
 
         if (_modifiedCount > 0)
         {
@@ -212,6 +215,7 @@ internal sealed class Program(
                         cancellationToken
                     )
                     .ConfigureAwait(false);
+                Log.Information("Total: {TotalCount} files", _totalCount);
                 if (organized > 0)
                 {
                     Log.Information("Organized {OrganizedCount} files", organized);
@@ -225,7 +229,7 @@ internal sealed class Program(
                 if (skippedSamePath > 0)
                 {
                     Log.Information(
-                        "Skipped {SkippedCount} already-organized files",
+                        "Skipped {SkippedCount} already organized files",
                         skippedSamePath
                     );
                 }
@@ -268,27 +272,37 @@ internal sealed class Program(
     internal async Task<int> CleanupCommandAsync()
     {
         Log.Information("Cleanup started");
+        int deleted;
+        int failed;
         try
         {
             GetFileList(commandLineOptions.Paths);
-            (int deleted, int failed) = new CleanupTask(commandLineOptions.DryRun).ExecuteCleanup([
+            (deleted, failed) = new CleanupTask(commandLineOptions.DryRun).ExecuteCleanup([
                 .. _fileNames,
             ]);
-            if (deleted > 0)
-            {
-                Log.Information("Deleted {DeletedCount} non-media files", deleted);
-            }
-
-            if (failed > 0)
-            {
-                Log.Warning("Failed to delete {FailedCount} files", failed);
-            }
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
         {
             return 1;
         }
         Log.Information("Cleanup complete");
+        int kept = _totalCount - deleted - failed;
+        Log.Information("Total: {TotalCount} files", _totalCount);
+        if (kept > 0)
+        {
+            Log.Information("Kept {KeptCount} media files", kept);
+        }
+
+        if (deleted > 0)
+        {
+            Log.Information("Deleted {DeletedCount} non-media files", deleted);
+        }
+
+        if (failed > 0)
+        {
+            Log.Warning("Failed to delete {FailedCount} files", failed);
+        }
+
         return 0;
     }
 
@@ -372,6 +386,7 @@ internal sealed class Program(
     private void GetFileList(List<DirectoryInfo> directoryList)
     {
         _fileNames = [];
+        _totalCount = 0;
         foreach (DirectoryInfo directoryInfo in directoryList)
         {
             Log.Information("Enumerating files in '{DirectoryPath}'", directoryInfo.FullName);
@@ -392,6 +407,7 @@ internal sealed class Program(
                 count,
                 directoryInfo.FullName
             );
+            _totalCount += count;
         }
     }
 

@@ -26,7 +26,7 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
   Falls back to a deterministic `0001-01` bucket when no date is found. Supports a custom
   `--format` string (default `yyyy-MM`) validated as a date-only pattern. Optional SQLite
-  deduplication via `--db` tracks source file hashes so re-runs skip already-organized files.
+  deduplication via `--db` tracks source file hashes so re-runs skip already organized files.
 - **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
   render correctly in older applications.
 
