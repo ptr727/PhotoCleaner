@@ -8,6 +8,8 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
 ## Architecture & Data Flow
 
 ### Project Structure
+- **Docker/**: Docker configuration
+  - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final); installs `exiftool` and `ffmpeg` in the final stage
 - **PhotoCleaner/**: Main console application
   - `Program.cs`: Entry point with logger setup
   - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `cleanup`, and `organize` subcommands)

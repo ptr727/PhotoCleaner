@@ -1,0 +1,30 @@
+# Build artifacts
+**/bin/
+**/obj/
+
+# Test and benchmark project source (not published, not needed in image)
+PhotoCleanerTests/
+PhotoCleanerBenchmarks/
+
+# IDE / editor state
+.vs/
+.idea/
+*.user
+.vscode/
+
+# Git and CI metadata
+.git/
+.github/
+.husky/
+
+# dotnet local tools (dev-only)
+.config/
+
+# Benchmark output
+BenchmarkDotNet.Artifacts/
+
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
+*.code-workspace

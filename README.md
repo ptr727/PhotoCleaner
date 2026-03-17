@@ -271,6 +271,51 @@ Run with `--dryrun` to preview the planned operations without touching the file 
 - **Images**: ARW, CR2, DNG, HEIC, HEIF, JPEG, JPG, NEF, ORF, PNG, PSD, RW2, TIF, TIFF
 - **Videos**: 3GP, AVI, GIF, M2TS, MKV, MOV, MP4, MTS, WMV
 
+## Docker
+
+Build the image from the project root:
+
+```bash
+docker build -f Docker/Dockerfile -t photocleaner:latest .
+```
+
+Mount host directories as volumes so the container can access media files.
+All `--path`, `--outpath`, and `--db` arguments refer to paths inside the container:
+
+```bash
+# Show help (default when no arguments are passed)
+docker run --rm photocleaner:latest
+
+# Process media files
+docker run --rm -v /host/photos:/data \
+    photocleaner:latest process --path /data
+
+# Dry run - preview without modifying files
+docker run --rm -v /host/photos:/data \
+    photocleaner:latest process --path /data --dryrun
+
+# Undo processing
+docker run --rm -v /host/photos:/data \
+    photocleaner:latest undo --path /data
+
+# Cleanup non-media files
+docker run --rm -v /host/photos:/data \
+    photocleaner:latest cleanup --path /data
+
+# Organize into date-based subdirectories (copy, source preserved)
+docker run --rm \
+    -v /host/photos:/source \
+    -v /host/organized:/organized \
+    photocleaner:latest organize --path /source --outpath /organized
+
+# Organize with deduplication DB (mount a persistent directory for the DB file)
+docker run --rm \
+    -v /host/photos:/source \
+    -v /host/organized:/organized \
+    -v /host/db:/db \
+    photocleaner:latest organize --path /source --outpath /organized --db /db/photos.db
+```
+
 ## Development Tooling
 
 ### Install
@@ -360,11 +405,15 @@ directory, without touching the icloudpd originals:
 
 set -Eeuo pipefail
 
-dotnet run --project ./PhotoCleaner/PhotoCleaner/PhotoCleaner.csproj -- \
+docker run --rm \
+    -v /data/media/icloud:/icloud \
+    -v /data/media/intermediate:/intermediate \
+    -v /data/media:/db \
+    photocleaner:latest \
     organize \
-    --path /data/media/icloud \
-    --outpath /data/media/intermediate \
-    --db /data/media/photos.db \
+    --path /icloud \
+    --outpath /intermediate \
+    --db /db/photos.db \
     --threads 4
 ```
 
@@ -375,9 +424,11 @@ dotnet run --project ./PhotoCleaner/PhotoCleaner/PhotoCleaner.csproj -- \
 
 set -Eeuo pipefail
 
-dotnet run --project ./PhotoCleaner/PhotoCleaner/PhotoCleaner.csproj -- \
+docker run --rm \
+    -v /data/media/intermediate:/intermediate \
+    photocleaner:latest \
     process \
-    --path /data/media/intermediate \
+    --path /intermediate \
     --threads 4
 ```
 
