@@ -46,21 +46,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([txt], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [txt],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(0);
             ignored.Should().Be(1);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             deletedDirs.Should().Be(0);
             File.Exists(txt).Should().BeTrue(); // not moved
@@ -92,21 +90,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             deletedDirs.Should().Be(0);
             File.Exists(jpg).Should().BeTrue(); // not moved in dry-run
@@ -139,21 +135,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             deletedDirs.Should().Be(0);
             File.Exists(jpg).Should().BeTrue(); // source retained (copy default)
@@ -186,21 +180,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             deletedDirs.Should().Be(0);
             File.Exists(jpg).Should().BeTrue(); // source retained (copy default)
@@ -239,25 +231,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync(
-                [jpg1, jpg2],
-                [],
-                TestContext.Current.CancellationToken
-            );
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg1, jpg2],
+                    new DirectoryInfo(srcDir1),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(2);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             deletedDirs.Should().Be(0);
             // Both files exist: first at photo.jpg, second renamed to photo_1.jpg
@@ -295,16 +281,15 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             string dest = Path.Combine(outDir, "0001-01", "photo.jpg");
@@ -340,21 +325,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: true,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             File.Exists(jpg).Should().BeFalse(); // source removed (move)
             File.Exists(Path.Combine(outDir, "2024-03", "photo.jpg")).Should().BeTrue();
@@ -386,16 +369,15 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             File.Exists(jpg).Should().BeTrue(); // source retained (copy)
@@ -432,20 +414,15 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: true,
                 move: true, // move so source dirs become empty
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync(
-                [jpg],
-                [new DirectoryInfo(srcDir)],
-                TestContext.Current.CancellationToken
-            );
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             failed.Should().Be(0);
@@ -478,17 +455,14 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string hash = await Database.ComputeHashAsync(jpg);
             await using Database db = new(dbPath);
             await db.InitializeAsync();
+            FileInfo info = new(jpg);
             await db.InsertAsync(
-                new OrganizedFileRecord(
+                new FileRecord(
+                    "/already/organized/photo.jpg",
                     hash,
-                    jpg,
-                    "photo.jpg",
-                    null,
-                    null,
-                    new FileInfo(jpg).Length,
-                    null,
-                    DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-                    "/already/organized/photo.jpg"
+                    info.Length,
+                    info.LastWriteTimeUtc.Ticks,
+                    false
                 )
             );
 
@@ -499,85 +473,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: db
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(0);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(1);
-            skippedDuplicate.Should().Be(0);
-            failed.Should().Be(0);
-            Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
-        }
-        finally
-        {
-            Directory.Delete(srcDir, recursive: true);
-            Directory.Delete(outDir, recursive: true);
-            File.Delete(dbPath);
-        }
-    }
-
-    // -- Database: different source path with same hash counted as skippedDuplicate --
-
-    [Fact]
-    public async Task ExecuteOrganizeAsync_WithDatabase_DifferentSourcePath_CountedSeparately()
-    {
-        string srcDir = TempDir();
-        string outDir = TempDir();
-        string dbPath = TempDb();
-        try
-        {
-            string jpg = Path.Combine(srcDir, "photo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
-
-            // Pre-record the same hash but from a different source path
-            string hash = await Database.ComputeHashAsync(jpg);
-            await using Database db = new(dbPath);
-            await db.InitializeAsync();
-            await db.InsertAsync(
-                new OrganizedFileRecord(
-                    hash,
-                    "/other/dir/photo.jpg",
-                    "photo.jpg",
-                    null,
-                    null,
-                    new FileInfo(jpg).Length,
-                    null,
-                    DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-                    "/already/organized/photo.jpg"
-                )
-            );
-
-            OrganizeTask task = new(
-                dryRun: false,
-                new DirectoryInfo(outDir),
-                "yyyy-MM",
-                threads: 1,
-                deleteEmpty: false,
-                move: false,
-                database: db
-            );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
-
-            organized.Should().Be(0);
-            ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(1);
+            skipped.Should().Be(1);
             failed.Should().Be(0);
             Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
         }
@@ -609,21 +517,19 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: null
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             File.Exists(Path.Combine(outDir, "2024", "06", "photo.jpg")).Should().BeTrue();
         }
@@ -659,24 +565,22 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 threads: 1,
                 deleteEmpty: false,
                 move: false,
+                rehash: false,
                 database: db
             );
-            (
-                int organized,
-                int ignored,
-                int skippedSamePath,
-                int skippedDuplicate,
-                int failed,
-                int deletedDirs
-            ) = await task.ExecuteOrganizeAsync([jpg], [], TestContext.Current.CancellationToken);
+            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                await task.ExecuteOrganizeAsync(
+                    [jpg],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
-            skippedSamePath.Should().Be(0);
-            skippedDuplicate.Should().Be(0);
+            skipped.Should().Be(0);
             failed.Should().Be(0);
             File.Exists(Path.Combine(outDir, "2024-06", "photo.jpg")).Should().BeTrue();
-            bool recorded = await db.ExistsAsync(hash);
+            bool recorded = await db.HashExistsAsync(hash);
             recorded.Should().BeTrue();
         }
         finally

@@ -24,9 +24,13 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   absent.
 - **Organizes into date folders** (via `organize` command): Copies (default) or moves supported
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
-  Falls back to a deterministic `0001-01` bucket when no date is found. Supports a custom
-  `--format` string (default `yyyy-MM`) validated as a date-only pattern. Optional SQLite
+  Falls back to a deterministic `0001/01` bucket when no date is found. Supports a custom
+  `--format` string (default `yyyy/MM`) validated as a date-only pattern. Optional SQLite
   deduplication via `--db` tracks source file hashes so re-runs skip already organized files.
+- **Deletes duplicates** (via `duplicates` command): Hashes all files in a source directory
+  and registers them in a SQLite DB, then deletes any file from the target directory whose
+  SHA-256 hash matches a source file. Source files are never touched. The DB persists across
+  runs, enabling incremental duplicate detection as the source collection grows.
 - **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
   render correctly in older applications.
 
@@ -48,10 +52,12 @@ Usage:
   PhotoCleaner [command] [options]
 
 Commands:
-  process   Process media files
-  undo      Undo media file processing
-  cleanup   Delete files not in the supported media list
-  organize  Move media files into date-based subdirectories
+  process     Process media files
+  undo        Undo media file processing
+  cleanup     Delete files not in the supported media list
+  organize    Organize media files into date-based subdirectories
+  duplicates  Delete files in --outpath whose content (SHA-256) matches a file in --path
+  index       Index files into the database for deduplication tracking
 
 Options:
   --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
@@ -67,11 +73,13 @@ Description:
   Process media files
 
 Options:
-  --path <path> (REQUIRED)      The directory path to process (repeatable)
+  --path <path> (REQUIRED)      The directory path to process
   --dryrun                      Perform a dry run without making changes
   --threads <threads>           Number of parallel threads [default: 4]
   --datefrompath                Set missing EXIF creation date from file path
   --skipbackup                  Skip creating backup files (disables undo)
+  --db <db>                     SQLite database file for deduplication tracking
+  --rehash                      Force rehashing of all files, ignoring size/mtime cache
 ```
 
 ```text
@@ -80,7 +88,7 @@ Description:
   Undo media file processing
 
 Options:
-  --path <path> (REQUIRED)      The directory path to process (repeatable)
+  --path <path> (REQUIRED)      The directory path to process
   --dryrun                      Perform a dry run without making changes
 ```
 
@@ -90,7 +98,7 @@ Description:
   Delete files not in the supported media list
 
 Options:
-  --path <path> (REQUIRED)      The directory path to process (repeatable)
+  --path <path> (REQUIRED)      The directory path to process
   --dryrun                      Perform a dry run without making changes
 ```
 
@@ -100,20 +108,47 @@ Description:
   Organize media files into date-based subdirectories
 
 Options:
-  --path <path> (REQUIRED)       The directory path to process (repeatable)
+  --path <path> (REQUIRED)       The directory path to process
   --dryrun                       Perform a dry run without making changes
   --threads <threads>            Number of parallel threads [default: 4]
   --outpath <outpath> (REQUIRED) Output directory for organized files
-  --format <format>              Date format for output subdirectory names [default: yyyy-MM]
+  --format <format>              Date format for output subdirectory names [default: yyyy/MM]
   --deleteempty                  Delete empty source subdirectories after organizing
   --move                         Move files instead of copying (default: copy)
   --db <db>                      SQLite database file for deduplication tracking
+  --rehash                       Force rehashing of all files, ignoring size/mtime cache
+```
+
+```text
+$> PhotoCleaner duplicates --help
+Description:
+  Delete files in --outpath whose content (SHA-256) matches a file in --path
+
+Options:
+  --path <path> (REQUIRED)       The directory path to process
+  --dryrun                       Perform a dry run without making changes
+  --threads <threads>            Number of parallel threads [default: 4]
+  --outpath <outpath> (REQUIRED) Target directory to scan for duplicates
+  --db <db> (REQUIRED)           SQLite database file for source file index
+  --rehash                       Force rehashing of all files, ignoring size/mtime cache
+```
+
+```text
+$> PhotoCleaner index --help
+Description:
+  Index files into the database for deduplication tracking
+
+Options:
+  --path <path> (REQUIRED)      The directory path to index
+  --threads <threads>           Number of parallel threads [default: 4]
+  --db <db> (REQUIRED)          SQLite database file for deduplication tracking
+  --rehash                      Force rehashing of all files, ignoring size/mtime cache
 ```
 
 **Option notes:**
 
-- `--path` - can be specified multiple times to process several directories in one run;
-  must point to an existing directory.
+- `--path` - must point to an existing directory; accepts exactly one directory per command
+  invocation.
 - `--threads` - defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
 - `--datefrompath` - opt-in; when absent, EXIF date inference from the file path is
   skipped entirely.
@@ -121,8 +156,8 @@ Options:
   command cannot reverse a run made with this flag.
 - `--outpath` - required for `organize`; target directory (created on demand).
 - `--format` - optional (`organize` only); a C# date format string used to name date
-  subdirectories (default `"yyyy-MM"`). Must be date-only - time components are rejected.
-  Files with no EXIF date land in a `"0001-01"` fallback bucket.
+  subdirectories (default `"yyyy/MM"`). Must be date-only - time components are rejected.
+  Files with no EXIF date land in a `"0001/01"` fallback bucket.
 - `--deleteempty` - optional (`organize` only); after all files are organized, deletes empty
   child subdirectories from each source `--path` (deepest first). The source root itself is
   never deleted. Useful for cleaning up directory trees left behind after organizing with
@@ -130,19 +165,23 @@ Options:
 - `--move` - optional (`organize` only); moves files instead of copying. Default behavior is
   to copy, which preserves the source files. Use `--move` when the source directory is
   temporary or when used alongside `--deleteempty` to clean up after organizing.
-- `--db <path>` - optional (`organize` only); path to a SQLite database file used for
-  deduplication. On each run, source files are SHA-256 hashed and checked against the DB.
-  Files whose hash is already recorded are skipped; new files are copied/moved and their hash
-  and EXIF metadata (including `ContentIdentifier`) are inserted. The DB file is created on
-  first use. Useful for `icloudpd` workflows where the source directory is continuously synced
-  and only new arrivals should be processed.
+- `--db <path>` - optional for `organize` and `process`, **required** for `duplicates` and
+  `index`; path to a SQLite database file. Uses a single `files` table (`path` PRIMARY KEY,
+  `hash`, `file_size`, `mtime_ticks`, `is_processed`). For `organize`: files are hashed,
+  checked against the DB by hash; new files are copied/moved and recorded by destination path.
+  For `process`: files are looked up by path and skipped when already processed; processes and
+  re-hashes when file content changes. For `duplicates` and `index`: source files are indexed;
+  target files whose hash is found in the DB are deleted (duplicates only). The DB file is
+  created automatically on first use. **Breaking change**: databases from earlier versions
+  (with `organized_files`, `processed_files`, or `source_files` tables) are incompatible;
+  delete the old file before first use.
+- `--rehash` - optional (`process`, `organize`, `duplicates`, `index`); forces SHA-256 recomputation
+  for every file, bypassing the size/mtime cache. Use when file content may have changed
+  without the modification timestamp being updated.
 
 ### Examples
 
 ```bash
-# Process multiple directories in one run
-PhotoCleaner process --path /home/user/Photos --path /mnt/backup/Photos
-
 # Preview what changes would be made without modifying files
 PhotoCleaner process --path /home/user/Photos --dryrun
 
@@ -181,6 +220,22 @@ PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --
 
 # Organize with deduplication: only copy files not already in the database
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Intermediate --db /data/photos.db
+
+# Delete files in /target that already exist (by content) in /source
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/dedup.db
+
+# Preview duplicate deletion without removing anything
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/dedup.db --dryrun
+
+# Incremental: index source once, then check multiple target directories over time
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import1 --db /data/dedup.db
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import2 --db /data/dedup.db
+
+# Index a directory into the database (stand-alone, without running duplicates)
+PhotoCleaner index --path /home/user/Source --db /data/dedup.db
+
+# Re-index forcing hash recomputation (useful after file content changes without mtime update)
+PhotoCleaner index --path /home/user/Source --db /data/dedup.db --rehash
 ```
 
 ## Processing Flow
@@ -245,15 +300,15 @@ The `organize` command copies (default) or moves every supported media file in t
 directories to `outpath/date/filename`:
 
 1. **Deduplication** (opt-in via `--db`): before any file operation, the source file is
-   SHA-256 hashed and checked against the SQLite database. If the hash is already present,
-   the file is skipped (counted as "skipped"). If not, the file is copied/moved and a record
-   is inserted containing the hash, source path, EXIF metadata, and destination path. The DB
-   file is created automatically on first use.
+   SHA-256 hashed and checked against the SQLite database via its hash index. If the hash is
+   already present (from any previous organize or duplicates run), the file is skipped
+   (counted as "skipped"). If not, the file is copied/moved and a record is inserted keyed
+   by the destination path. The DB file is created automatically on first use.
 2. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
    `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
-   is found - those files land in a `"0001-01"` bucket (with the default `yyyy-MM` format),
+   is found - those files land in a `"0001/01"` bucket (with the default `yyyy/MM` format),
    making undated files easy to locate and handle manually.
-3. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy-MM"`).
+3. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy/MM"`).
    The format is validated at startup - time components are rejected.
 4. **Copy or move**: by default files are copied and the source is preserved. Pass `--move`
    to remove the source file after a successful copy.
@@ -265,6 +320,24 @@ directories to `outpath/date/filename`:
    The source root itself is never deleted. Typically combined with `--move`.
 
 Run with `--dryrun` to preview the planned operations without touching the file system.
+
+## Duplicates Flow
+
+The `duplicates` command removes files from a target directory whose content already exists in
+a source directory, identified by SHA-256 hash. Source files are never modified.
+
+1. **Phase 1 - Index sources**: hashes every supported media file in `--path` and inserts
+   each record into the unified `files` table of the SQLite DB using `INSERT OR IGNORE` on
+   the path primary key. Re-indexing the same source is idempotent; new source files added
+   later are picked up on the next run. Size/mtime caching (bypassed by `--rehash`) avoids
+   recomputing SHA-256 for unchanged files.
+2. **Phase 2 - Scan target**: hashes every supported media file in `--outpath` and checks
+   each hash against the DB via the hash index. Files whose hash is found are deleted; files
+   with unique hashes are kept.
+3. **Unsupported files**: non-media files (by extension) are skipped in both phases and left
+   untouched.
+
+Run with `--dryrun` to report how many files would be deleted without removing any.
 
 ## Supported File Types
 
@@ -314,6 +387,19 @@ docker run --rm \
     -v /host/organized:/organized \
     -v /host/db:/db \
     photocleaner:latest organize --path /source --outpath /organized --db /db/photos.db
+
+# Delete duplicates: remove files from /target that already exist in /source
+docker run --rm \
+    -v /host/source:/source \
+    -v /host/target:/target \
+    -v /host/db:/db \
+    photocleaner:latest duplicates --path /source --outpath /target --db /db/dedup.db
+
+# Index a directory into the database
+docker run --rm \
+    -v /host/source:/source \
+    -v /host/db:/db \
+    photocleaner:latest index --path /source --db /db/dedup.db
 ```
 
 ## Development Tooling

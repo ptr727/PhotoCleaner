@@ -1070,7 +1070,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         string filePath,
         bool dryRun = false,
         bool dateFromPath = false,
-        bool skipBackup = false
+        bool skipBackup = false,
+        bool rehash = false
     ) =>
         new()
         {
@@ -1078,6 +1079,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             DryRun = dryRun,
             DateFromPath = dateFromPath,
             SkipBackup = skipBackup,
+            Rehash = rehash,
             ReProcessNames = [],
             UnknownExtensions = new ConcurrentDictionary<string, byte>(),
             Database = null,

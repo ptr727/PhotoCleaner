@@ -12,16 +12,18 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final); installs `exiftool` and `ffmpeg` in the final stage
 - **PhotoCleaner/**: Main console application
   - `Program.cs`: Entry point with logger setup
-  - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `cleanup`, and `organize` subcommands)
+  - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `cleanup`, `organize`, `duplicates`, and `index` subcommands)
   - `ProcessTask.cs`: Core file processing pipeline
   - `UndoTask.cs`: Undo logic - two-pass algorithm that restores `.bak` files
   - `CleanupTask.cs`: Cleanup logic - deletes files whose extensions are not in the supported list
   - `OrganizeTask.cs`: Organize logic - copies (default) or moves supported media files into date-based subdirectories; optional SQLite deduplication via `Database`
-  - `Database.cs`: SQLite wrapper for source file deduplication tracking (SHA-256 hash, EXIF metadata, ContentIdentifier)
+  - `DuplicatesTask.cs`: Duplicates logic - two-phase: indexes source files into DB via `IndexTask`, then deletes matching files from the target directory
+  - `IndexTask.cs`: Common DB upsert logic used by `process`, `duplicates`, and `index` commands; `IndexFileAsync` (single-file) returns `(IndexStatus, hash, wasProcessed)`; `ExecuteIndexAsync` (batch parallel) returns `(inserted, updated, unchanged, ignored, failed)`
+  - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `hash`, `file_size`, `mtime_ticks`, `is_processed`); non-unique hash index for dedup lookups; size/mtime caching via `ResolveHashAsync` to skip rehashing unchanged files
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
   - `Extensions.cs`: Extension methods for logging and error handling
-- **PhotoCleanerTests/**: Comprehensive test project with 199 tests
+- **PhotoCleanerTests/**: Comprehensive test project
   - `DateInferenceTests.cs`: Core date inference functionality tests (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Edge cases and comprehensive scenarios (19 tests)
   - `CommandLineTests.cs`: Command line parsing and validation tests (15 tests)
@@ -30,7 +32,9 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `CleanupTaskTests.cs`: Cleanup task tests (6 tests)
   - `ExifToolJsonTests.cs`: ExifToolJson unit tests (includes GetDate, IsDngVersionNewer) (33 tests)
   - `OrganizeTaskTests.cs`: Organize task tests (12 tests)
-  - `DatabaseTests.cs`: Database deduplication tests (8 tests)
+  - `DatabaseTests.cs`: Database tests (15 tests)
+  - `DuplicatesTaskTests.cs`: Duplicates task tests (6 tests)
+  - `IndexTaskTests.cs`: IndexTask tests (7 tests)
 
 ### Core Processing Pipeline
 
@@ -91,15 +95,17 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 
 ### Command Line Interface (CommandLine.cs)
 - **System.CommandLine Integration**: Uses modern .NET command line parsing
-- **Four subcommands**: `process`, `undo`, `cleanup`, `organize` - each with their own option set
-- **Required `--path` Parameter**: Accepts multiple directory paths using `Option<List<DirectoryInfo>>`. Each path is validated with `AcceptExistingOnly()`
-- **Multiple Path Support**: Can be specified multiple times (e.g., `--path /dir1 --path /dir2`) to process multiple directories in a single run
-- **Optional `--dryrun` Flag**: Non-destructive preview mode (all four commands)
-- **Optional `--threads` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()` (process and organize)
+- **Six subcommands**: `process`, `undo`, `cleanup`, `organize`, `duplicates`, `index` - each with their own option set
+- **Required `--path` Parameter**: Single directory path using `Option<DirectoryInfo>`. Validated with `AcceptExistingOnly()`
+- **Optional `--dryrun` Flag**: Non-destructive preview mode (process, undo, cleanup, organize, duplicates - not index)
+- **Optional `--threads` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()` (process, organize, duplicates, index)
 - **Optional `--datefrompath` Flag** (process only): Opt-in; when absent, `SetMissingCreateDateAsync` is skipped entirely - date inference from paths is a destructive write that cannot be undone
 - **Optional `--skipbackup` Flag** (process only): Skips all `.bak` file creation - originals are deleted/overwritten in-place. Logs a warning at startup. Disables undo.
 - **`cleanup` subcommand**: Deletes every file whose extension is not in `ProcessTask.SupportedExtensions`. Logs a warning for `.bak*` artefacts before deleting them. Supports `--dryrun` only (no `--threads` - pure I/O, no benefit).
-- **`organize` subcommand**: Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001-01"` bucket when absent). `--format` (default `"yyyy-MM"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from source paths after all files are organized (deepest first; source roots are never deleted). `--move` (default `false`) moves files instead of copying. `--db <sqlite-file>` (optional) enables SHA-256 deduplication: files whose hash is already in the DB are skipped; new files are copied/moved and recorded with EXIF metadata including `ContentIdentifier`.
+- **`organize` subcommand**: Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01"` bucket when absent). `--format` (default `"yyyy/MM"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from source paths after all files are organized (deepest first; source roots are never deleted). `--move` (default `false`) moves files instead of copying. `--db <sqlite-file>` (optional) enables SHA-256 deduplication: files whose hash is already in the DB are skipped; new files are copied/moved and recorded in the `files` table (dest path as PK). `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
+- **`duplicates` subcommand**: Deletes files from `--outpath` whose SHA-256 hash matches any file in `--path`. Two-phase: (1) hash all supported files in `--path` via `IndexTask.ExecuteIndexAsync` (idempotent upsert via path PK; size/mtime cache avoids rehashing); (2) hash all supported files in `--outpath` and delete those found in the DB via `HashExistsAsync`. `--db <sqlite-file>` is **required**. Source files are never touched. Supports `--dryrun`, `--threads`, and `--rehash`.
+- **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteIndexAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
+- **Optional `--rehash` Flag** (process, organize, duplicates, index): Forces recomputation of SHA-256 for every file, ignoring the size/mtime cache. Useful after filesystem operations that preserve mtime but change content.
 - **Program Construction**: Creates `Program` instance with primary constructor parameters passed via `CommandLine.Options`
 - **Built-in Help System**: Automatic help generation and validation
 
@@ -117,12 +123,12 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **xUnit**: Testing framework for PhotoCleanerTests project
 
 ### Test Architecture
-- **PhotoCleanerTests Project**: 201 comprehensive tests covering all functionality
+- **PhotoCleanerTests Project**: 210 comprehensive tests covering all functionality
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
 - **Test Categories**:
   - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation (16 tests)
+  - `CommandLineTests.cs`: Command line parsing and validation (18 tests)
   - `ProcessTaskTests.cs`: Process task tests (65 tests)
 - **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths, thread configuration and boundary validation), integration scenarios, process task execution, live photo detection (ContentIdentifier matching, `_hevc` suffix naming, mismatch/missing tag scenarios), metadata preservation through conversion
 
@@ -169,11 +175,8 @@ Supported: `.3gp`, `.arw`, `.avi`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.j
 
 ## Command Line Usage
 ```bash
-# Basic usage - single directory
+# Basic usage
 PhotoCleaner process --path /photos
-
-# Multiple directories
-PhotoCleaner process --path /photos --path /backup/photos --path /archive
 
 # Dry run mode
 PhotoCleaner process --path /photos --dryrun
@@ -183,9 +186,6 @@ PhotoCleaner process --path /photos --threads 8
 
 # Skip backup files (no .bak created, undo not possible)
 PhotoCleaner process --path /photos --skipbackup
-
-# All options combined
-PhotoCleaner process --path /photos --path /backup --dryrun --threads 12 --skipbackup
 
 # Undo last process run
 PhotoCleaner undo --path /photos
@@ -200,7 +200,7 @@ PhotoCleaner organize --path /photos --outpath /organized
 PhotoCleaner organize --path /photos --outpath /organized --format "yyyy/MM/dd"
 PhotoCleaner organize --path /photos --outpath /organized --dryrun
 
-# Organize with move (removes source files, old default behavior)
+# Organize with move (removes source files)
 PhotoCleaner organize --path /photos --outpath /organized --move
 
 # Organize with deduplication DB (skip files already organized)
@@ -212,10 +212,25 @@ PhotoCleaner process --path /intermediate
 # import /intermediate to Immich
 # subsequent runs: only new files from icloudpd are copied
 
+# Index: build/update the source file hash index for use with duplicates
+PhotoCleaner index --path /icloud/originals --db /data/photos.db
+PhotoCleaner index --path /icloud/originals --db /data/photos.db --rehash
+
+# Duplicates: delete files in /target whose content matches any file in /source
+PhotoCleaner duplicates --path /source --outpath /target --db /data/photos.db
+PhotoCleaner duplicates --path /source --outpath /target --db /data/photos.db --dryrun
+
+# Incremental deduplication: index source once, then check multiple targets over time
+PhotoCleaner index --path /icloud/originals --db /data/photos.db
+PhotoCleaner duplicates --path /icloud/originals --outpath /import1 --db /data/photos.db
+PhotoCleaner duplicates --path /icloud/originals --outpath /import2 --db /data/photos.db
+
 # Help
 PhotoCleaner --help
 PhotoCleaner process --help
 PhotoCleaner cleanup --help
+PhotoCleaner index --help
+PhotoCleaner duplicates --help
 ```
 
 ## JSON Source Generation

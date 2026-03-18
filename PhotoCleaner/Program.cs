@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 
 namespace PhotoCleaner;
 
@@ -82,7 +81,7 @@ internal sealed class Program(
                 bool foundConflicts = true;
                 while (foundConflicts)
                 {
-                    GetFileList(commandLineOptions.Paths);
+                    GetFileList(commandLineOptions.Path);
                     foundConflicts = FixCaseConflicts();
                 }
 
@@ -145,7 +144,7 @@ internal sealed class Program(
         Log.Information("Undo started");
         try
         {
-            GetFileList(commandLineOptions.Paths);
+            GetFileList(commandLineOptions.Path);
             await ExecuteUndoAsync().ConfigureAwait(false);
         }
         catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
@@ -178,7 +177,7 @@ internal sealed class Program(
         Log.Information("Organize started");
         try
         {
-            GetFileList(commandLineOptions.Paths);
+            GetFileList(commandLineOptions.Path);
 
             // CA2000 false positive: database is disposed in the finally block below
 #pragma warning disable CA2000
@@ -200,21 +199,16 @@ internal sealed class Program(
                     commandLineOptions.Threads,
                     commandLineOptions.DeleteEmpty,
                     commandLineOptions.Move,
+                    commandLineOptions.Rehash,
                     database
                 );
-                (
-                    int organized,
-                    int ignored,
-                    int skippedSamePath,
-                    int skippedDuplicate,
-                    int failed,
-                    int deletedDirs
-                ) = await task.ExecuteOrganizeAsync(
-                        [.. _fileNames],
-                        commandLineOptions.Paths,
-                        cancellationToken
-                    )
-                    .ConfigureAwait(false);
+                (int organized, int ignored, int skipped, int failed, int deletedDirs) =
+                    await task.ExecuteOrganizeAsync(
+                            [.. _fileNames],
+                            commandLineOptions.Path,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
                 Log.Information("Total: {TotalCount} files", _totalCount);
                 if (organized > 0)
                 {
@@ -226,20 +220,9 @@ internal sealed class Program(
                     Log.Information("Ignored {IgnoredCount} non-media files", ignored);
                 }
 
-                if (skippedSamePath > 0)
+                if (skipped > 0)
                 {
-                    Log.Information(
-                        "Skipped {SkippedCount} already organized files",
-                        skippedSamePath
-                    );
-                }
-
-                if (skippedDuplicate > 0)
-                {
-                    Log.Information(
-                        "Skipped {SkippedCount} files with duplicate content (different source path)",
-                        skippedDuplicate
-                    );
+                    Log.Information("Skipped {SkippedCount} files already in collection", skipped);
                 }
 
                 if (deletedDirs > 0)
@@ -269,6 +252,70 @@ internal sealed class Program(
         return 0;
     }
 
+    internal async Task<int> DuplicatesCommandAsync()
+    {
+        Log.Information("Duplicates started");
+        try
+        {
+            GetFileList(commandLineOptions.Path);
+            IReadOnlyList<string> sourceFiles = [.. _fileNames];
+
+            GetFileList(commandLineOptions.OutPath!);
+            IReadOnlyList<string> outFiles = [.. _fileNames];
+
+            // CA2000 false positive: database is disposed in the finally block below
+#pragma warning disable CA2000
+            Database database = new(commandLineOptions.DbPath!.FullName);
+#pragma warning restore CA2000
+            try
+            {
+                await database.InitializeAsync().ConfigureAwait(false);
+                DuplicatesTask task = new(
+                    commandLineOptions.DryRun,
+                    commandLineOptions.Threads,
+                    commandLineOptions.Rehash,
+                    database
+                );
+                (int indexed, int ignored, int deleted, int kept, int failed) =
+                    await task.ExecuteDuplicatesAsync(sourceFiles, outFiles, cancellationToken)
+                        .ConfigureAwait(false);
+
+                Log.Information("Total: {TotalCount} files", _totalCount);
+                Log.Information("Indexed {IndexedCount} source files", indexed);
+                if (ignored > 0)
+                {
+                    Log.Information("Ignored {IgnoredCount} non-media source files", ignored);
+                }
+
+                if (deleted > 0)
+                {
+                    Log.Information("Deleted {DeletedCount} duplicate files", deleted);
+                }
+
+                if (kept > 0)
+                {
+                    Log.Information("Kept {KeptCount} unique files", kept);
+                }
+
+                if (failed > 0)
+                {
+                    Log.Warning("Failed {FailedCount} files", failed);
+                }
+            }
+            finally
+            {
+                await database.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+
+        Log.Information("Duplicates complete");
+        return 0;
+    }
+
     internal async Task<int> CleanupCommandAsync()
     {
         Log.Information("Cleanup started");
@@ -276,7 +323,7 @@ internal sealed class Program(
         int failed;
         try
         {
-            GetFileList(commandLineOptions.Paths);
+            GetFileList(commandLineOptions.Path);
             (deleted, failed) = new CleanupTask(commandLineOptions.DryRun).ExecuteCleanup([
                 .. _fileNames,
             ]);
@@ -306,6 +353,68 @@ internal sealed class Program(
         return 0;
     }
 
+    internal async Task<int> IndexCommandAsync()
+    {
+        Log.Information("Index started");
+        try
+        {
+            GetFileList(commandLineOptions.Path);
+
+            // CA2000 false positive: database is disposed in the finally block below
+#pragma warning disable CA2000
+            Database database = new(commandLineOptions.DbPath!.FullName);
+#pragma warning restore CA2000
+            try
+            {
+                await database.InitializeAsync().ConfigureAwait(false);
+                IndexTask task = new(commandLineOptions.Rehash, database);
+                (int inserted, int updated, int unchanged, int ignored, int failed) =
+                    await task.ExecuteIndexAsync(
+                            [.. _fileNames],
+                            commandLineOptions.Threads,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                Log.Information("Total: {TotalCount} files", _totalCount);
+                if (inserted > 0)
+                {
+                    Log.Information("Inserted {InsertedCount} new files", inserted);
+                }
+
+                if (updated > 0)
+                {
+                    Log.Information("Updated {UpdatedCount} changed files", updated);
+                }
+
+                if (unchanged > 0)
+                {
+                    Log.Information("Unchanged {UnchangedCount} files", unchanged);
+                }
+
+                if (ignored > 0)
+                {
+                    Log.Information("Ignored {IgnoredCount} non-media files", ignored);
+                }
+
+                if (failed > 0)
+                {
+                    Log.Warning("Failed {FailedCount} files", failed);
+                }
+            }
+            finally
+            {
+                await database.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (Log.Logger.LogAndHandle(ex))
+        {
+            return 1;
+        }
+
+        Log.Information("Index complete");
+        return 0;
+    }
+
     private async Task ExecuteProcessAsync(Database? database)
     {
         // Process files in parallel
@@ -331,6 +440,7 @@ internal sealed class Program(
                                     DryRun = commandLineOptions.DryRun,
                                     DateFromPath = commandLineOptions.DateFromPath,
                                     SkipBackup = commandLineOptions.SkipBackup,
+                                    Rehash = commandLineOptions.Rehash,
                                     UnknownExtensions = _unknownExtensions,
                                     ReProcessNames = reProcessNames,
                                     Database = database,
@@ -383,32 +493,30 @@ internal sealed class Program(
         return Task.CompletedTask;
     }
 
-    private void GetFileList(List<DirectoryInfo> directoryList)
+    private void GetFileList(DirectoryInfo directoryInfo)
     {
         _fileNames = [];
         _totalCount = 0;
-        foreach (DirectoryInfo directoryInfo in directoryList)
-        {
-            Log.Information("Enumerating files in '{DirectoryPath}'", directoryInfo.FullName);
 
-            int count = 0;
-            directoryInfo
-                .EnumerateFiles("*", SearchOption.AllDirectories)
-                .AsParallel()
-                .WithDegreeOfParallelism(commandLineOptions.Threads)
-                .ForAll(file =>
-                {
-                    _fileNames.Add(file.FullName);
-                    _ = Interlocked.Increment(ref count);
-                });
+        Log.Information("Enumerating files in '{DirectoryPath}'", directoryInfo.FullName);
 
-            Log.Information(
-                "Found {FileCount} files in '{DirectoryPath}'",
-                count,
-                directoryInfo.FullName
-            );
-            _totalCount += count;
-        }
+        int count = 0;
+        directoryInfo
+            .EnumerateFiles("*", SearchOption.AllDirectories)
+            .AsParallel()
+            .WithDegreeOfParallelism(commandLineOptions.Threads)
+            .ForAll(file =>
+            {
+                _fileNames.Add(file.FullName);
+                _ = Interlocked.Increment(ref count);
+            });
+
+        Log.Information(
+            "Found {FileCount} files in '{DirectoryPath}'",
+            count,
+            directoryInfo.FullName
+        );
+        _totalCount = count;
     }
 
     private bool FixCaseConflicts()
@@ -451,7 +559,7 @@ internal sealed class Program(
         {
             string uniqueFileName = GetUniqueFileName(file, ref counter);
             Log.Warning("Renaming '{SourcePath}' to '{DestinationPath}'", file, uniqueFileName);
-            if (!IsDryRun())
+            if (!commandLineOptions.DryRun)
             {
                 File.Move(file, uniqueFileName, false);
             }
@@ -481,13 +589,4 @@ internal sealed class Program(
         int counter,
         string extension
     ) => Path.Combine(directory, $"{name}_{counter}{extension}");
-
-    private bool IsDryRun([CallerMemberName] string function = "unknown")
-    {
-        if (commandLineOptions.DryRun)
-        {
-            Log.Verbose("Dry run enabled, skipping action in {Function}", function);
-        }
-        return commandLineOptions.DryRun;
-    }
 }

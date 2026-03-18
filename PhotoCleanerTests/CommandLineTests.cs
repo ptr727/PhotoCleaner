@@ -125,7 +125,7 @@ public sealed class CommandLineTests
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
-        options.Format.Should().Be("yyyy-MM");
+        options.Format.Should().Be("yyyy/MM");
     }
 
     [Fact]
@@ -254,5 +254,24 @@ public sealed class CommandLineTests
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
         options.DbPath!.FullName.Should().Be(dbPath);
+    }
+
+    // -- index command --------------------------------------------------------
+
+    [Fact]
+    public void IndexCommand_Parses()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), "photos.db");
+        CommandLine cli = new(["index", "--path", ExistingDir, "--db", dbPath]);
+
+        cli.Result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void IndexCommand_MissingDb_ValidationError()
+    {
+        CommandLine cli = new(["index", "--path", ExistingDir]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
     }
 }

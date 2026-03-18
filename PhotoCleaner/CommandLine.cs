@@ -8,7 +8,7 @@ internal sealed class CommandLine
     private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
     private readonly Option<string> _logFileOption = CreateLogFileOption();
     private readonly Option<bool> _logFileClearOption = CreateLogFileClearOption();
-    private readonly Option<List<DirectoryInfo>> _pathOption = CreatePathOption();
+    private readonly Option<DirectoryInfo> _pathOption = CreatePathOption();
     private readonly Option<bool> _dryRunOption = CreateDryRunOption();
     private readonly Option<int> _threadsOption = CreateThreadsOption();
     private readonly Option<bool> _dateFromPathOption = CreateDateFromPathOption();
@@ -18,6 +18,7 @@ internal sealed class CommandLine
     private readonly Option<bool> _deleteEmptyOption = CreateDeleteEmptyOption();
     private readonly Option<bool> _moveOption = CreateMoveOption();
     private readonly Option<FileInfo?> _dbPathOption = CreateDbPathOption();
+    private readonly Option<bool> _rehashOption = CreateRehashOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -48,6 +49,8 @@ internal sealed class CommandLine
         command.Subcommands.Add(CreateUndoCommand());
         command.Subcommands.Add(CreateCleanupCommand());
         command.Subcommands.Add(CreateOrganizeCommand());
+        command.Subcommands.Add(CreateDuplicatesCommand());
+        command.Subcommands.Add(CreateIndexCommand());
 
         return command;
     }
@@ -62,6 +65,7 @@ internal sealed class CommandLine
             _dateFromPathOption,
             _skipBackupOption,
             _dbPathOption,
+            _rehashOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
@@ -104,12 +108,68 @@ internal sealed class CommandLine
             _deleteEmptyOption,
             _moveOption,
             _dbPathOption,
+            _rehashOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
             {
                 Program program = new(CreateOptions(parseResult), cancellationToken);
                 return program.OrganizeCommandAsync();
+            }
+        );
+        return command;
+    }
+
+    private Command CreateDuplicatesCommand()
+    {
+        Option<FileInfo?> requiredDbOption = CreateDbPathOption();
+        requiredDbOption.Required = true;
+
+        Command command = new(
+            "duplicates",
+            "Delete files in --outpath whose content (SHA-256) matches a file in --path"
+        )
+        {
+            _pathOption,
+            _dryRunOption,
+            _threadsOption,
+            _outPathOption,
+            requiredDbOption,
+            _rehashOption,
+        };
+        command.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(
+                    CreateOptions(parseResult, parseResult.GetValue(requiredDbOption)),
+                    cancellationToken
+                );
+                return program.DuplicatesCommandAsync();
+            }
+        );
+        return command;
+    }
+
+    private Command CreateIndexCommand()
+    {
+        Option<FileInfo?> requiredDbOption = CreateDbPathOption();
+        requiredDbOption.Required = true;
+
+        Command command = new("index", "Index files into the database for deduplication tracking")
+        {
+            _pathOption,
+            _threadsOption,
+            requiredDbOption,
+            _rehashOption,
+        };
+        command.SetAction(
+            (parseResult, cancellationToken) =>
+            {
+                Program program = new(
+                    CreateOptions(parseResult, parseResult.GetValue(requiredDbOption)),
+                    cancellationToken
+                );
+                return program.IndexCommandAsync();
             }
         );
         return command;
@@ -129,10 +189,10 @@ internal sealed class CommandLine
         return command;
     }
 
-    internal Options CreateOptions(ParseResult parseResult) =>
+    internal Options CreateOptions(ParseResult parseResult, FileInfo? dbPathOverride = null) =>
         new()
         {
-            Paths = parseResult.GetValue(_pathOption) ?? [],
+            Path = parseResult.GetValue(_pathOption)!,
             Threads = parseResult.GetValue(_threadsOption) is int t and > 0
                 ? t
                 : Math.Min(Environment.ProcessorCount, 4),
@@ -140,10 +200,11 @@ internal sealed class CommandLine
             DateFromPath = parseResult.GetValue(_dateFromPathOption),
             SkipBackup = parseResult.GetValue(_skipBackupOption),
             OutPath = parseResult.GetValue(_outPathOption),
-            Format = parseResult.GetValue(_formatOption) ?? "yyyy-MM",
+            Format = parseResult.GetValue(_formatOption) ?? "yyyy/MM",
             DeleteEmpty = parseResult.GetValue(_deleteEmptyOption),
             Move = parseResult.GetValue(_moveOption),
-            DbPath = parseResult.GetValue(_dbPathOption),
+            DbPath = dbPathOverride ?? parseResult.GetValue(_dbPathOption),
+            Rehash = parseResult.GetValue(_rehashOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -152,8 +213,8 @@ internal sealed class CommandLine
             },
         };
 
-    private static Option<List<DirectoryInfo>> CreatePathOption() =>
-        new Option<List<DirectoryInfo>>("--path")
+    private static Option<DirectoryInfo> CreatePathOption() =>
+        new Option<DirectoryInfo>("--path")
         {
             Description = "The directory path to process",
             Required = true,
@@ -206,6 +267,9 @@ internal sealed class CommandLine
     private static Option<FileInfo?> CreateDbPathOption() =>
         new("--db") { Description = "SQLite database file for deduplication tracking" };
 
+    private static Option<bool> CreateRehashOption() =>
+        new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
+
     private static Option<DirectoryInfo> CreateOutPathOption() =>
         new("--outpath") { Description = "Output directory for organized files", Required = true };
 
@@ -215,7 +279,7 @@ internal sealed class CommandLine
         {
             Description =
                 "Date format for output subdirectory names; use '/' to create nested subdirectories (e.g. yyyy/MM/dd)",
-            DefaultValueFactory = _ => "yyyy-MM",
+            DefaultValueFactory = _ => "yyyy/MM",
         };
         option.Validators.Add(result =>
         {
@@ -277,7 +341,7 @@ internal sealed class CommandLine
 
     internal sealed class Options
     {
-        public required List<DirectoryInfo> Paths { get; init; }
+        public required DirectoryInfo Path { get; init; }
         public required int Threads { get; init; }
         public required bool DryRun { get; init; }
         public required bool DateFromPath { get; init; }
@@ -287,6 +351,7 @@ internal sealed class CommandLine
         public required bool DeleteEmpty { get; init; }
         public required bool Move { get; init; }
         public required FileInfo? DbPath { get; init; }
+        public required bool Rehash { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

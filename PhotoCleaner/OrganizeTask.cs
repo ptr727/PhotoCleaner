@@ -7,26 +7,25 @@ internal sealed class OrganizeTask(
     int threads,
     bool deleteEmpty,
     bool move,
+    bool rehash,
     Database? database
 )
 {
     internal async Task<(
         int organized,
         int ignored,
-        int skippedSamePath,
-        int skippedDuplicate,
+        int skipped,
         int failed,
         int deletedDirs
     )> ExecuteOrganizeAsync(
         IReadOnlyCollection<string> allFiles,
-        IReadOnlyCollection<DirectoryInfo> sourceDirs,
+        DirectoryInfo sourceDir,
         CancellationToken cancellationToken = default
     )
     {
         int organized = 0,
             ignored = 0,
-            skippedSamePath = 0,
-            skippedDuplicate = 0,
+            skipped = 0,
             failed = 0;
         await Parallel
             .ForEachAsync(
@@ -47,32 +46,16 @@ internal sealed class OrganizeTask(
                     string? hash = null;
                     if (!dryRun && database is not null)
                     {
-                        hash = await Database.ComputeHashAsync(file).ConfigureAwait(false);
-                        string? recordedSourcePath = await database
-                            .GetSourcePathAsync(hash)
+                        Log.Information("Indexing '{FilePath}'", file);
+                        hash = await Database
+                            .ResolveHashAsync(file, null, rehash)
                             .ConfigureAwait(false);
-                        Log.Debug(
-                            "File '{FilePath}' has hash '{Hash}' (exists in database: {Exists})",
-                            file,
-                            hash,
-                            recordedSourcePath is not null
-                        );
-                        if (recordedSourcePath is not null)
+                        Log.Debug("File '{FilePath}' has hash '{Hash}'", file, hash);
+                        bool exists = await database.HashExistsAsync(hash).ConfigureAwait(false);
+                        if (exists)
                         {
-                            if (recordedSourcePath != file)
-                            {
-                                Log.Information(
-                                    "Skipping '{FilePath}' (duplicate of already organized '{RecordedSourcePath}')",
-                                    file,
-                                    recordedSourcePath
-                                );
-                                _ = Interlocked.Increment(ref skippedDuplicate);
-                            }
-                            else
-                            {
-                                Log.Information("Skipping '{FilePath}' (already organized)", file);
-                                _ = Interlocked.Increment(ref skippedSamePath);
-                            }
+                            Log.Information("Skipping '{FilePath}' (already in collection)", file);
+                            _ = Interlocked.Increment(ref skipped);
                             return;
                         }
                     }
@@ -120,19 +103,19 @@ internal sealed class OrganizeTask(
 
                         if (hash is not null)
                         {
-                            Log.Debug("Recording organized file in database: '{FilePath}'", file);
-                            OrganizedFileRecord record = new(
-                                hash,
-                                file,
-                                Path.GetFileName(file),
-                                meta?.ContentIdentifier,
-                                meta?.GetDateString(),
-                                sourceInfo.Length,
-                                meta?.MIMEType,
-                                DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-                                finalDest
-                            );
-                            await database!.InsertAsync(record).ConfigureAwait(false);
+                            Log.Debug("Inserting '{FilePath}' with hash {Hash}", finalDest, hash);
+                            FileInfo destInfo = new(finalDest);
+                            await database!
+                                .InsertAsync(
+                                    new FileRecord(
+                                        finalDest,
+                                        hash,
+                                        destInfo.Length,
+                                        destInfo.LastWriteTimeUtc.Ticks,
+                                        false
+                                    )
+                                )
+                                .ConfigureAwait(false);
                         }
 
                         _ = Interlocked.Increment(ref organized);
@@ -153,14 +136,13 @@ internal sealed class OrganizeTask(
             )
             .ConfigureAwait(false);
 
-        int deletedDirs = deleteEmpty ? DeleteEmptyDirectories(sourceDirs) : 0;
-        return (organized, ignored, skippedSamePath, skippedDuplicate, failed, deletedDirs);
+        int deletedDirs = deleteEmpty ? DeleteEmptyDirectories(sourceDir) : 0;
+        return (organized, ignored, skipped, failed, deletedDirs);
     }
 
-    private int DeleteEmptyDirectories(IReadOnlyCollection<DirectoryInfo> sourceDirs)
+    private int DeleteEmptyDirectories(DirectoryInfo sourceDir)
     {
         int count = 0;
-        foreach (DirectoryInfo sourceDir in sourceDirs)
         {
             // Order deepest-first so children are removed before their parents
             List<string> subdirs =

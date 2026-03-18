@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
@@ -16,6 +15,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         public required bool DryRun { get; init; }
         public required bool DateFromPath { get; init; }
         public required bool SkipBackup { get; init; }
+        public required bool Rehash { get; init; }
         public required Database? Database { get; init; }
     }
 
@@ -149,18 +149,17 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         string? preProcessHash = null;
         if (processContext.Database is not null)
         {
-            preProcessHash = await Database
-                .ComputeHashAsync(processContext.FileInfo.FullName)
+            IndexTask indexTask = new(processContext.Rehash, processContext.Database);
+            (IndexStatus status, string hash, bool wasProcessed) = await indexTask
+                .IndexFileAsync(processContext.FileInfo.FullName)
                 .ConfigureAwait(false);
+            preProcessHash = hash;
             Log.Debug(
                 "File '{FilePath}' has pre-process hash '{Hash}'",
                 processContext.FileInfo.FullName,
                 preProcessHash
             );
-            string? processedPath = await processContext
-                .Database.GetProcessedSourcePathAsync(preProcessHash)
-                .ConfigureAwait(false);
-            if (processedPath is not null)
+            if (status == IndexStatus.Unchanged && wasProcessed)
             {
                 Log.Information(
                     "Skipping '{FilePath}' (already processed)",
@@ -200,14 +199,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
                 preProcessHash
             );
             await processContext
-                .Database!.InsertProcessedAsync(
-                    new ProcessedFileRecord(
-                        preProcessHash,
-                        processContext.FileInfo.FullName,
-                        DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-                        result.ToString()
-                    )
-                )
+                .Database!.SetProcessedAsync(processContext.FileInfo.FullName)
                 .ConfigureAwait(false);
         }
 
@@ -226,7 +218,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             processContext.FileInfo.Extension,
             processContext.FileInfo.FullName
         );
-        if (IsDryRun())
+        if (processContext.DryRun)
         {
             return false;
         }
@@ -289,7 +281,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             expectedExtension,
             processContext.FileInfo.FullName
         );
-        if (IsDryRun())
+        if (processContext.DryRun)
         {
             return false;
         }
@@ -368,7 +360,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
                 duration,
                 processContext.FileInfo.FullName
             );
-            if (IsDryRun())
+            if (processContext.DryRun)
             {
                 return false;
             }
@@ -440,7 +432,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         }
 
         // Delete live video with confirmed matching image
-        if (IsDryRun())
+        if (processContext.DryRun)
         {
             return false;
         }
@@ -559,7 +551,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             // Nothing to do
             return true;
         }
-        if (IsDryRun())
+        if (processContext.DryRun)
         {
             return false;
         }
@@ -654,7 +646,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             createdDate,
             processContext.FileInfo.FullName
         );
-        if (IsDryRun())
+        if (processContext.DryRun)
         {
             return false;
         }
@@ -986,14 +978,5 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
             ? baseFileName
             : Path.Combine(directory, baseFileName);
         mediaExtension = string.Join("", mediaExtensions);
-    }
-
-    private bool IsDryRun([CallerMemberName] string function = "unknown")
-    {
-        if (processContext.DryRun)
-        {
-            Log.Verbose("Dry run enabled, skipping action in {Function}", function);
-        }
-        return processContext.DryRun;
     }
 }
