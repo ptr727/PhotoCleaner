@@ -28,6 +28,66 @@ public sealed class CommandLineTests
         options.SkipBackup.Should().BeTrue();
     }
 
+    // -- Duration option ------------------------------------------------------
+
+    [Fact]
+    public void DurationOption_DefaultIsShortVideoDuration()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.ShortVideoDuration.Should().Be(ProcessTask.ShortVideoDuration);
+    }
+
+    [Fact]
+    public void DurationOption_CustomValue_Parsed()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir, "--duration", "2.5"]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.ShortVideoDuration.Should().Be(2.5);
+    }
+
+    [Fact]
+    public void DurationOption_ZeroValue_FailsValidation()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir, "--duration", "0"]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void DurationOption_NegativeValue_FailsValidation()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir, "--duration", "-1"]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    // -- Reprocess option -----------------------------------------------------
+
+    [Fact]
+    public void ReprocessOption_DefaultFalse()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.Reprocess.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ReprocessOption_Flag_ParsedTrue()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir, "--reprocess"]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.Reprocess.Should().BeTrue();
+    }
+
     // -- Cleanup command ------------------------------------------------------
 
     [Fact]

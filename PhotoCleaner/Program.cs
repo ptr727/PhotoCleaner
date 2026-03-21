@@ -441,6 +441,8 @@ internal sealed class Program(
                                     DateFromPath = commandLineOptions.DateFromPath,
                                     SkipBackup = commandLineOptions.SkipBackup,
                                     Rehash = commandLineOptions.Rehash,
+                                    ShortVideoDuration = commandLineOptions.ShortVideoDuration,
+                                    Reprocess = commandLineOptions.Reprocess,
                                     UnknownExtensions = _unknownExtensions,
                                     ReProcessNames = reProcessNames,
                                     Database = database,

@@ -1080,6 +1080,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             DateFromPath = dateFromPath,
             SkipBackup = skipBackup,
             Rehash = rehash,
+            ShortVideoDuration = ProcessTask.ShortVideoDuration,
+            Reprocess = false,
             ReProcessNames = [],
             UnknownExtensions = new ConcurrentDictionary<string, byte>(),
             Database = null,

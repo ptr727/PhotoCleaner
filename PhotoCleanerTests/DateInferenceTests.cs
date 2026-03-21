@@ -39,7 +39,7 @@ public sealed class DateInferenceTests
 
         // Assert
         result.Should().NotBeNull();
-        string actualDateString = result!.Value.ToString(
+        string actualDateString = result.Value.ToString(
             "yyyy:MM:dd HH:mm:ss",
             CultureInfo.InvariantCulture
         );
@@ -78,7 +78,7 @@ public sealed class DateInferenceTests
 
         // Assert
         result.Should().NotBeNull();
-        string actualDateString = result!.Value.ToString(
+        string actualDateString = result.Value.ToString(
             "yyyy:MM:dd HH:mm:ss",
             CultureInfo.InvariantCulture
         );
@@ -115,7 +115,7 @@ public sealed class DateInferenceTests
 
         // Assert
         result.Should().NotBeNull();
-        string actualDateString = result!.Value.ToString(
+        string actualDateString = result.Value.ToString(
             "yyyy:MM:dd HH:mm:ss",
             CultureInfo.InvariantCulture
         );

@@ -109,7 +109,7 @@ public sealed class DatabaseTests
             // First insert wins due to INSERT OR IGNORE
             FileRecord? record = await db.GetByPathAsync(path);
             record.Should().NotBeNull();
-            record!.Hash.Should().Be("hash1");
+            record.Hash.Should().Be("hash1");
         }
         finally
         {
@@ -151,7 +151,7 @@ public sealed class DatabaseTests
 
             FileRecord? record = await db.GetByPathAsync(path);
             record.Should().NotBeNull();
-            record!.Path.Should().Be(path);
+            record.Path.Should().Be(path);
             record.Hash.Should().Be(hash);
             record.FileSize.Should().Be(fileSize);
             record.MtimeTicks.Should().Be(mtimeTicks);
@@ -181,7 +181,7 @@ public sealed class DatabaseTests
 
             FileRecord? record = await db.GetByPathAsync(path);
             record.Should().NotBeNull();
-            record!.Hash.Should().Be("newhash");
+            record.Hash.Should().Be("newhash");
             record.FileSize.Should().Be(newSize);
             record.MtimeTicks.Should().Be(newTicks);
             record.IsProcessed.Should().BeFalse(); // reset by UpdateHashAsync
@@ -207,7 +207,7 @@ public sealed class DatabaseTests
 
             FileRecord? record = await db.GetByPathAsync(path);
             record.Should().NotBeNull();
-            record!.IsProcessed.Should().BeTrue();
+            record.IsProcessed.Should().BeTrue();
         }
         finally
         {

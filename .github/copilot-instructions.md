@@ -106,6 +106,8 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **`duplicates` subcommand**: Deletes files from `--outpath` whose SHA-256 hash matches any file in `--path`. Two-phase: (1) hash all supported files in `--path` via `IndexTask.ExecuteIndexAsync` (idempotent upsert via path PK; size/mtime cache avoids rehashing); (2) hash all supported files in `--outpath` and delete those found in the DB via `HashExistsAsync`. `--db <sqlite-file>` is **required**. Source files are never touched. Supports `--dryrun`, `--threads`, and `--rehash`.
 - **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteIndexAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
 - **Optional `--rehash` Flag** (process, organize, duplicates, index): Forces recomputation of SHA-256 for every file, ignoring the size/mtime cache. Useful after filesystem operations that preserve mtime but change content.
+- **Optional `--duration` Flag** (process only): Overrides `ShortVideoDuration` (default `1.0`s). Videos in a live-photo-compatible format whose duration is <= this value are always deleted. Must be `> 0`. Stored in `ProcessTask.Context.ShortVideoDuration` and read by `DeleteLivePhotosAsync`.
+- **Optional `--reprocess` Flag** (process only): When set, ignores `is_processed` in the DB and forces every file to be processed again. Stored in `ProcessTask.Context.Reprocess`; disables the `IndexStatus.Unchanged && wasProcessed` early-return in `ExecuteAsync`.
 - **Program Construction**: Creates `Program` instance with primary constructor parameters passed via `CommandLine.Options`
 - **Built-in Help System**: Automatic help generation and validation
 
@@ -128,7 +130,7 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **Test Categories**:
   - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
   - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation (18 tests)
+  - `CommandLineTests.cs`: Command line parsing and validation (24 tests)
   - `ProcessTaskTests.cs`: Process task tests (65 tests)
 - **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths, thread configuration and boundary validation), integration scenarios, process task execution, live photo detection (ContentIdentifier matching, `_hevc` suffix naming, mismatch/missing tag scenarios), metadata preservation through conversion
 
@@ -141,7 +143,7 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
 ### Live Photo Detection
-- **Short videos** (<= `ShortVideoDuration` = 1.0s): always deleted regardless of companion file
+- **Short videos** (duration <= `processContext.ShortVideoDuration`, default `1.0s`; overridable via `--duration`): always deleted regardless of companion file
 - **Companion file search** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file by:
   1. Direct basename match (`IMG_1234.mov` -> `IMG_1234.heic`)
   2. Basename minus `_hevc` suffix (`IMG_1234_HEVC.mov` -> `IMG_1234.heic`) - new iPhone naming

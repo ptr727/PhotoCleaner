@@ -17,6 +17,8 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
         public required bool SkipBackup { get; init; }
         public required bool Rehash { get; init; }
         public required Database? Database { get; init; }
+        public required double ShortVideoDuration { get; init; }
+        public required bool Reprocess { get; init; }
     }
 
     public enum ProcessResult
@@ -159,7 +161,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
                 processContext.FileInfo.FullName,
                 preProcessHash
             );
-            if (status == IndexStatus.Unchanged && wasProcessed)
+            if (status == IndexStatus.Unchanged && wasProcessed && !processContext.Reprocess)
             {
                 Log.Information(
                     "Skipping '{FilePath}' (already processed)",
@@ -353,7 +355,7 @@ internal sealed class ProcessTask(ProcessTask.Context processContext)
 
         // Short videos, always delete
         float duration = await GetDurationAsync().ConfigureAwait(false);
-        if (duration <= ShortVideoDuration)
+        if (duration <= processContext.ShortVideoDuration)
         {
             Log.Warning(
                 "Deleting {Duration}s short video clip: '{FilePath}'",

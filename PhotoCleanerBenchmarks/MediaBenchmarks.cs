@@ -9,7 +9,7 @@ public class MediaBenchmarks : IDisposable
     private Database _database = null!;
     private string _preInsertedHash = string.Empty;
     private long _jpegFileSize;
-    private string _organizedTo = string.Empty;
+    private long _jpegMtimeTicks;
     private int _insertCounter;
 
     [GlobalSetup]
@@ -46,24 +46,21 @@ public class MediaBenchmarks : IDisposable
             .WithStandardErrorPipe(PipeTarget.Null)
             .ExecuteAsync();
 
-        _jpegFileSize = new FileInfo(_jpegPath).Length;
-        _organizedTo = Path.Combine(_tempDir, "organized", "sample.jpg");
+        FileInfo jpegInfo = new(_jpegPath);
+        _jpegFileSize = jpegInfo.Length;
+        _jpegMtimeTicks = jpegInfo.LastWriteTimeUtc.Ticks;
 
         string dbPath = Path.Combine(_tempDir, "bench.db");
         _database = new Database(dbPath);
         await _database.InitializeAsync();
 
         _preInsertedHash = await Database.ComputeHashAsync(_jpegPath);
-        OrganizedFileRecord seedRecord = new(
-            _preInsertedHash,
+        FileRecord seedRecord = new(
             _jpegPath,
-            "sample.jpg",
-            null,
-            null,
+            _preInsertedHash,
             _jpegFileSize,
-            "image/jpeg",
-            DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-            _organizedTo
+            _jpegMtimeTicks,
+            false
         );
         await _database.InsertAsync(seedRecord);
     }
@@ -111,21 +108,17 @@ public class MediaBenchmarks : IDisposable
     public async Task DbInsert()
     {
         int counter = Interlocked.Increment(ref _insertCounter);
-        string hash = $"bench_{counter:D10}";
-        OrganizedFileRecord record = new(
-            hash,
-            _jpegPath,
-            "sample.jpg",
-            null,
-            null,
+        string path = Path.Combine(_tempDir, $"bench_{counter:D10}.jpg");
+        FileRecord record = new(
+            path,
+            $"bench_{counter:D10}",
             _jpegFileSize,
-            "image/jpeg",
-            DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-            _organizedTo
+            _jpegMtimeTicks,
+            false
         );
         await _database.InsertAsync(record);
     }
 
     [Benchmark]
-    public async Task<string?> DbRead() => await _database.GetSourcePathAsync(_preInsertedHash);
+    public async Task<bool> DbRead() => await _database.HashExistsAsync(_preInsertedHash);
 }

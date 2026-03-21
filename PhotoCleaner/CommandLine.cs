@@ -19,6 +19,8 @@ internal sealed class CommandLine
     private readonly Option<bool> _moveOption = CreateMoveOption();
     private readonly Option<FileInfo?> _dbPathOption = CreateDbPathOption();
     private readonly Option<bool> _rehashOption = CreateRehashOption();
+    private readonly Option<double> _durationOption = CreateDurationOption();
+    private readonly Option<bool> _reprocessOption = CreateReprocessOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -66,6 +68,8 @@ internal sealed class CommandLine
             _skipBackupOption,
             _dbPathOption,
             _rehashOption,
+            _durationOption,
+            _reprocessOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
@@ -205,6 +209,8 @@ internal sealed class CommandLine
             Move = parseResult.GetValue(_moveOption),
             DbPath = dbPathOverride ?? parseResult.GetValue(_dbPathOption),
             Rehash = parseResult.GetValue(_rehashOption),
+            ShortVideoDuration = parseResult.GetValue(_durationOption),
+            Reprocess = parseResult.GetValue(_reprocessOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -269,6 +275,31 @@ internal sealed class CommandLine
 
     private static Option<bool> CreateRehashOption() =>
         new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
+
+    private static Option<bool> CreateReprocessOption() =>
+        new("--reprocess")
+        {
+            Description = "Re-process files even if already marked as processed in the database",
+        };
+
+    private static Option<double> CreateDurationOption()
+    {
+        Option<double> option = new("--duration")
+        {
+            Description =
+                "Maximum duration in seconds below which a video is considered a short clip and deleted",
+            DefaultValueFactory = _ => ProcessTask.ShortVideoDuration,
+        };
+        option.Validators.Add(result =>
+        {
+            double value = result.GetValue(option);
+            if (value <= 0.0)
+            {
+                result.AddError("Duration must be greater than 0");
+            }
+        });
+        return option;
+    }
 
     private static Option<DirectoryInfo> CreateOutPathOption() =>
         new("--outpath") { Description = "Output directory for organized files", Required = true };
@@ -352,6 +383,8 @@ internal sealed class CommandLine
         public required bool Move { get; init; }
         public required FileInfo? DbPath { get; init; }
         public required bool Rehash { get; init; }
+        public required double ShortVideoDuration { get; init; }
+        public required bool Reprocess { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

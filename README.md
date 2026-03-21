@@ -80,6 +80,8 @@ Options:
   --skipbackup                  Skip creating backup files (disables undo)
   --db <db>                     SQLite database file for deduplication tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
+  --duration <duration>         Maximum duration in seconds below which a video is considered a short clip and deleted [default: 1]
+  --reprocess                   Re-process files even if already marked as processed in the database
 ```
 
 ```text
@@ -178,6 +180,12 @@ Options:
 - `--rehash` - optional (`process`, `organize`, `duplicates`, `index`); forces SHA-256 recomputation
   for every file, bypassing the size/mtime cache. Use when file content may have changed
   without the modification timestamp being updated.
+- `--duration` - optional (`process` only); overrides the short-video deletion threshold
+  (default `1.0` seconds). Videos in a live-photo-compatible format whose duration is <= this
+  value are always deleted. Must be `> 0`.
+- `--reprocess` - optional (`process` only); when set, ignores the `is_processed` flag in
+  the database and processes every file regardless of prior run history. Useful after changing
+  pipeline settings (e.g. `--duration`) without wiping the database.
 
 ### Examples
 
