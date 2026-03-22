@@ -18,6 +18,13 @@ internal sealed partial class UndoTask(bool dryRun)
     internal static string GetBackupBase(string path) =>
         BackupPattern().Replace(path, string.Empty);
 
+    internal static int GetBackupSortKey(string path)
+    {
+        // .bak -> 0 (sort first), .bak1 -> 1, .bak2 -> 2, ...
+        Match m = NumberedPattern().Match(path);
+        return m.Success ? int.Parse(m.Value[4..], CultureInfo.InvariantCulture) : 0;
+    }
+
     internal (int restored, int deleted, int failed) ExecuteUndo(
         IReadOnlyCollection<string> allFiles
     )
@@ -127,10 +134,32 @@ internal sealed partial class UndoTask(bool dryRun)
             else
             {
                 // Non-derived: restore original from primary backup (.bak)
-                string primaryBackup =
-                    backups.FirstOrDefault(b =>
-                        b.EndsWith(".bak", StringComparison.OrdinalIgnoreCase)
-                    ) ?? backups[0];
+                // Select the first non-empty backup in natural order (.bak, .bak1, .bak2, ...)
+                string? primaryBackup = null;
+                foreach (string candidate in backups.OrderBy(GetBackupSortKey))
+                {
+                    if (new FileInfo(candidate).Length == 0)
+                    {
+                        Log.Warning(
+                            "Backup '{BackupPath}' is empty (0 bytes), skipping",
+                            candidate
+                        );
+                        continue;
+                    }
+
+                    primaryBackup = candidate;
+                    break;
+                }
+
+                if (primaryBackup is null)
+                {
+                    Log.Warning(
+                        "No usable backup found for '{BasePath}' - all backups are empty, leaving file unchanged",
+                        basePath
+                    );
+                    failed++;
+                    continue;
+                }
 
                 // Delete the current file if it exists (date-from-path wrote it in-place)
                 if (File.Exists(basePath))
