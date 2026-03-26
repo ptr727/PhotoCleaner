@@ -45,7 +45,7 @@ public sealed class DatabaseTests
             await db1.InitializeAsync();
 
             await using Database db2 = new(dbPath);
-            Func<Task> act = db2.InitializeAsync;
+            Func<Task> act = () => db2.InitializeAsync();
             await act.Should().NotThrowAsync();
         }
         finally

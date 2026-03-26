@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace PhotoCleaner;
 
-internal sealed partial class UndoTask(bool dryRun)
+internal sealed partial class UndoTask(CommandLine.Options options)
 {
     [GeneratedRegex(@"\.bak\d*$")]
     private static partial Regex BackupPattern();
@@ -25,8 +25,9 @@ internal sealed partial class UndoTask(bool dryRun)
         return m.Success ? int.Parse(m.Value[4..], CultureInfo.InvariantCulture) : 0;
     }
 
-    internal (int restored, int deleted, int failed) ExecuteUndo(
-        IReadOnlyCollection<string> allFiles
+    internal (int restored, int deleted, int failed) Execute(
+        IReadOnlyCollection<string> allFiles,
+        CancellationToken cancellationToken = default
     )
     {
         // Collect only backup files and group them by base path
@@ -101,6 +102,8 @@ internal sealed partial class UndoTask(bool dryRun)
 
         foreach (KeyValuePair<string, List<string>> kvp in groups)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             string basePath = kvp.Key;
             List<string> backups = kvp.Value;
 
@@ -243,7 +246,7 @@ internal sealed partial class UndoTask(bool dryRun)
                 else if (
                     !string.Equals(
                         Path.GetExtension(basePath),
-                        ProcessTask.VideoOutputExtension,
+                        MediaUtilities.VideoOutputExtension,
                         StringComparison.OrdinalIgnoreCase
                     )
                 )
@@ -256,7 +259,7 @@ internal sealed partial class UndoTask(bool dryRun)
                     string? dir = Path.GetDirectoryName(basePath);
                     string derivedOutput = Path.Combine(
                         dir ?? string.Empty,
-                        stem + ProcessTask.VideoOutputExtension
+                        stem + MediaUtilities.VideoOutputExtension
                     );
 
                     if (File.Exists(derivedOutput) && !groups.ContainsKey(derivedOutput))
@@ -283,12 +286,12 @@ internal sealed partial class UndoTask(bool dryRun)
 
     private bool IsDryRun([CallerMemberName] string function = "unknown")
     {
-        if (dryRun)
+        if (options.DryRun)
         {
             Log.Verbose("Dry run enabled, skipping action in {Function}", function);
         }
 
-        return dryRun;
+        return options.DryRun;
     }
 
     private bool TryDelete(string path)

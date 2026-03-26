@@ -1,15 +1,20 @@
 namespace PhotoCleaner;
 
-internal sealed class CleanupTask(bool dryRun)
+internal sealed class CleanupTask(CommandLine.Options options)
 {
-    internal (int deleted, int failed) ExecuteCleanup(IReadOnlyCollection<string> allFiles)
+    internal (int deleted, int failed) Execute(
+        IReadOnlyCollection<string> allFiles,
+        CancellationToken cancellationToken = default
+    )
     {
         int deleted = 0;
         int failed = 0;
 
         foreach (string file in allFiles)
         {
-            if (ProcessTask.SupportedExtensions.Contains(Path.GetExtension(file)))
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
             {
                 continue;
             }
@@ -23,7 +28,7 @@ internal sealed class CleanupTask(bool dryRun)
                 Log.Information("Deleting non-media file: '{FilePath}'", file);
             }
 
-            if (dryRun)
+            if (options.DryRun)
             {
                 deleted++;
                 continue;

@@ -19,14 +19,16 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   GIF to MP4 (H.264/AAC); re-encodes PCM audio to AAC in MOV and MP4 files while preserving
   the video stream. All source metadata (including `ContentIdentifier` and other QuickTime tags)
   is copied to the converted file using `exiftool -TagsFromFile`.
-- **Sets missing creation dates** (opt-in via `--datefrompath`): Infers and writes
-  EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
-  absent.
 - **Organizes into date folders** (via `organize` command): Copies (default) or moves supported
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
   Falls back to a deterministic `0001/01` bucket when no date is found. Supports a custom
   `--format` string (default `yyyy/MM`) validated as a date-only pattern. Optional SQLite
   deduplication via `--db` tracks source file hashes so re-runs skip already organized files.
+  `--tagpath` writes the source sub-directory path components as `XMP:Subject` tags on the
+  destination file. `--tags` applies explicit comma-separated `XMP:Subject` tags to every
+  organized file. `--datepath` infers and writes EXIF/QuickTime creation dates from filenames
+  or directory path structures when metadata is absent (opt-in, applied before the file is moved
+  to a date-based directory so the source path is still available).
 - **Deletes duplicates** (via `duplicates` command): Hashes all files in a source directory
   and registers them in a SQLite DB, then deletes any file from the target directory whose
   SHA-256 hash matches a source file. Source files are never touched. The DB persists across
@@ -76,7 +78,6 @@ Options:
   --path <path> (REQUIRED)      The directory path to process
   --dryrun                      Perform a dry run without making changes
   --threads <threads>           Number of parallel threads [default: 4]
-  --datefrompath                Set missing EXIF creation date from file path
   --skipbackup                  Skip creating backup files (disables undo)
   --db <db>                     SQLite database file for deduplication tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
@@ -117,6 +118,9 @@ Options:
   --format <format>              Date format for output subdirectory names [default: yyyy/MM]
   --deleteempty                  Delete empty source subdirectories after organizing
   --move                         Move files instead of copying (default: copy)
+  --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
+  --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
+  --datepath                     Set missing EXIF creation date from file path
   --db <db>                      SQLite database file for deduplication tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
 ```
@@ -152,8 +156,6 @@ Options:
 - `--path` - must point to an existing directory; accepts exactly one directory per command
   invocation.
 - `--threads` - defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
-- `--datefrompath` - opt-in; when absent, EXIF date inference from the file path is
-  skipped entirely.
 - `--skipbackup` - opt-in (`process` only); skips all `.bak` file creation. The `undo`
   command cannot reverse a run made with this flag.
 - `--outpath` - required for `organize`; target directory (created on demand).
@@ -167,6 +169,20 @@ Options:
 - `--move` - optional (`organize` only); moves files instead of copying. Default behavior is
   to copy, which preserves the source files. Use `--move` when the source directory is
   temporary or when used alongside `--deleteempty` to clean up after organizing.
+- `--tagpath` - optional (`organize` only); splits the source sub-directory path relative to
+  `--path` into tokens and writes each token as an `XMP:Subject` tag on the destination file
+  using exiftool. Files at the root of `--path` receive no tags. Tags are applied with a
+  remove-then-add pattern (`-XMP:Subject-= / -XMP:Subject+=`) so existing tags are preserved
+  and duplicates are not created. Only file types that support XMP writes are tagged.
+- `--tags` - optional (`organize` only); a comma-separated list of `XMP:Subject` tags applied to
+  every organized file (e.g. `--tags "vacation,family trip,2018"`). Tags are applied using the
+  same remove-then-add pattern as `--tagpath`. Can be combined with `--tagpath` - both sets of
+  tags are merged. Only file types that support XMP writes are tagged.
+- `--datepath` - optional (`organize` only); when a file has no embedded creation date, infers
+  one from the filename or directory path structure (via `DateFromPath`) and writes it to the
+  destination file before restoring mtime. Opt-in because writing to files is destructive and
+  the source path context is only available during `organize` (before files move to date-based
+  directories).
 - `--db <path>` - optional for `organize` and `process`, **required** for `duplicates` and
   `index`; path to a SQLite database file. Uses a single `files` table (`path` PRIMARY KEY,
   `hash`, `file_size`, `mtime_ticks`, `is_processed`). For `organize`: files are hashed,
@@ -193,8 +209,8 @@ Options:
 # Preview what changes would be made without modifying files
 PhotoCleaner process --path /home/user/Photos --dryrun
 
-# Process with 8 parallel threads, log to file, infer missing created date from the path
-PhotoCleaner process --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log --datefrompath
+# Process with 8 parallel threads and log to file
+PhotoCleaner process --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log
 
 # Process without creating backup files (faster, but undo is not possible)
 PhotoCleaner process --path /home/user/Photos --skipbackup
@@ -225,6 +241,18 @@ PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --
 
 # Organize and remove empty source subdirectories afterward (use with --move)
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --move --deleteempty
+
+# Organize with path-based XMP:Subject tagging (sub-directory names become tags)
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --tagpath
+
+# Organize inferring missing EXIF dates from the source path
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --datepath
+
+# Organize with explicit XMP:Subject tags applied to every file
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --tags "vacation,family trip"
+
+# Organize with both path tagging, explicit tags, and date inference
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --tagpath --tags "2018" --datepath
 
 # Organize with deduplication: only copy files not already in the database
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Intermediate --db /data/photos.db
@@ -262,9 +290,7 @@ PhotoCleaner index --path /home/user/Source --db /data/dedup.db --rehash
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k)
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
-   5. Set missing EXIF/QuickTime creation date inferred from filename or directory path
-      (only when `--datefrompath` is specified).
-   6. Warn on DNG version > v1.4.
+   5. Warn on DNG version > v1.4.
 4. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
 5. **Results summary**: Reports counts of failed, modified, and successfully processed files;
    lists any unrecognized file extensions.
@@ -307,23 +333,32 @@ Run `cleanup` after verifying `process` results, or use `process --skipbackup` f
 The `organize` command copies (default) or moves every supported media file in the source
 directories to `outpath/date/filename`:
 
-1. **Deduplication** (opt-in via `--db`): before any file operation, the source file is
+1. **Date inference** (opt-in via `--datepath`): when no embedded creation date is found,
+   infers one from the source file path using `DateFromPath` (filename patterns like
+   `20210502_200152.jpg` or directory structures like `2021/05/02/`). The inferred date is
+   written to the destination file (for supported types) and used for subdirectory placement.
+   Applied before the file is moved so the original path is still available.
+2. **Deduplication** (opt-in via `--db`): before any file operation, the source file is
    SHA-256 hashed and checked against the SQLite database via its hash index. If the hash is
    already present (from any previous organize or duplicates run), the file is skipped
    (counted as "skipped"). If not, the file is copied/moved and a record is inserted keyed
    by the destination path. The DB file is created automatically on first use.
-2. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
+3. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
    `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
    is found - those files land in a `"0001/01"` bucket (with the default `yyyy/MM` format),
    making undated files easy to locate and handle manually.
-3. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy/MM"`).
+4. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy/MM"`).
    The format is validated at startup - time components are rejected.
-4. **Copy or move**: by default files are copied and the source is preserved. Pass `--move`
+5. **Copy or move**: by default files are copied and the source is preserved. Pass `--move`
    to remove the source file after a successful copy.
-5. **Collision handling**: if a file with the same name already exists in the destination,
+6. **Tagging**: `--tagpath` splits the source sub-directory path relative to `--path` into
+   tokens and writes each as an `XMP:Subject` tag. `--tags` applies explicit comma-separated
+   tags to every file. Both can be combined - tags are merged and deduplicated. Applied after
+   copy/move, before mtime restore. Files at the root of `--path` receive no path tags.
+7. **Collision handling**: if a file with the same name already exists in the destination,
    `_1`, `_2`, ... suffixes are appended (e.g. `photo_1.jpg`). A warning is logged.
-6. **Unsupported files**: non-media files are counted as ignored and left in place.
-7. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are organized,
+8. **Unsupported files**: non-media files are counted as ignored and left in place.
+9. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are organized,
    iterates each source directory and deletes empty child subdirectories deepest-first.
    The source root itself is never deleted. Typically combined with `--move`.
 

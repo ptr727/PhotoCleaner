@@ -16,11 +16,11 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
 
-    internal async Task InitializeAsync()
+    internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         Log.Debug("Initializing database at '{DbPath}'", dbPath);
         _connection = new SqliteConnection($"Data Source={dbPath}");
-        await _connection.OpenAsync().ConfigureAwait(false);
+        await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -33,98 +33,120 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
             );
             CREATE INDEX IF NOT EXISTS idx_files_hash ON files (hash)
             """;
-        _ = await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+        _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    internal async Task<FileRecord?> GetByPathAsync(string path)
-    {
-        await _semaphore.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            SqliteCommand cmd = _connection!.CreateCommand();
-            cmd.CommandText =
-                "SELECT path, hash, file_size, mtime_ticks, is_processed FROM files WHERE path = @path LIMIT 1";
-            _ = cmd.Parameters.AddWithValue("@path", path);
-            SqliteDataReader reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
-            try
+    internal Task<FileRecord?> GetByPathAsync(
+        string path,
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
             {
-                return !await reader.ReadAsync().ConfigureAwait(false)
-                    ? null
-                    : new FileRecord(
-                        reader.GetString(0),
-                        reader.GetString(1),
-                        reader.GetInt64(2),
-                        reader.GetInt64(3),
-                        reader.GetInt64(4) != 0
-                    );
-            }
-            finally
+                cmd.CommandText =
+                    "SELECT path, hash, file_size, mtime_ticks, is_processed FROM files WHERE path = @path LIMIT 1";
+                _ = cmd.Parameters.AddWithValue("@path", path);
+                SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                try
+                {
+                    return !await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                        ? null
+                        : new FileRecord(
+                            reader.GetString(0),
+                            reader.GetString(1),
+                            reader.GetInt64(2),
+                            reader.GetInt64(3),
+                            reader.GetInt64(4) != 0
+                        );
+                }
+                finally
+                {
+                    await reader.DisposeAsync().ConfigureAwait(false);
+                }
+            },
+            cancellationToken
+        );
+
+    internal Task<bool> HashExistsAsync(
+        string hash,
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
             {
-                await reader.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            _ = _semaphore.Release();
-        }
-    }
+                cmd.CommandText = "SELECT COUNT(*) FROM files WHERE hash = @hash";
+                _ = cmd.Parameters.AddWithValue("@hash", hash);
+                object? result = await cmd.ExecuteScalarAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return result is long count && count > 0;
+            },
+            cancellationToken
+        );
 
-    internal async Task<bool> HashExistsAsync(string hash)
-    {
-        await _semaphore.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            SqliteCommand cmd = _connection!.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM files WHERE hash = @hash";
-            _ = cmd.Parameters.AddWithValue("@hash", hash);
-            object? result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
-            return result is long count && count > 0;
-        }
-        finally
-        {
-            _ = _semaphore.Release();
-        }
-    }
-
-    internal async Task InsertAsync(FileRecord record)
-    {
-        await _semaphore.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            SqliteCommand cmd = _connection!.CreateCommand();
-            cmd.CommandText = """
+    internal Task InsertAsync(FileRecord record, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = """
                 INSERT OR IGNORE INTO files (path, hash, file_size, mtime_ticks, is_processed)
                 VALUES (@path, @hash, @fileSize, @mtimeTicks, @isProcessed)
                 """;
-            _ = cmd.Parameters.AddWithValue("@path", record.Path);
-            _ = cmd.Parameters.AddWithValue("@hash", record.Hash);
-            _ = cmd.Parameters.AddWithValue("@fileSize", record.FileSize);
-            _ = cmd.Parameters.AddWithValue("@mtimeTicks", record.MtimeTicks);
-            _ = cmd.Parameters.AddWithValue("@isProcessed", record.IsProcessed ? 1 : 0);
-            _ = await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            _ = _semaphore.Release();
-        }
-    }
+                _ = cmd.Parameters.AddWithValue("@path", record.Path);
+                _ = cmd.Parameters.AddWithValue("@hash", record.Hash);
+                _ = cmd.Parameters.AddWithValue("@fileSize", record.FileSize);
+                _ = cmd.Parameters.AddWithValue("@mtimeTicks", record.MtimeTicks);
+                _ = cmd.Parameters.AddWithValue("@isProcessed", record.IsProcessed ? 1 : 0);
+                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken
+        );
 
-    internal async Task UpdateHashAsync(string path, string hash, long fileSize, long mtimeTicks)
-    {
-        await _semaphore.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            SqliteCommand cmd = _connection!.CreateCommand();
-            cmd.CommandText = """
+    internal Task UpdateHashAsync(
+        string path,
+        string hash,
+        long fileSize,
+        long mtimeTicks,
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = """
                 UPDATE files
                 SET hash = @hash, file_size = @fileSize, mtime_ticks = @mtimeTicks, is_processed = 0
                 WHERE path = @path
                 """;
-            _ = cmd.Parameters.AddWithValue("@path", path);
-            _ = cmd.Parameters.AddWithValue("@hash", hash);
-            _ = cmd.Parameters.AddWithValue("@fileSize", fileSize);
-            _ = cmd.Parameters.AddWithValue("@mtimeTicks", mtimeTicks);
-            _ = await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+                _ = cmd.Parameters.AddWithValue("@path", path);
+                _ = cmd.Parameters.AddWithValue("@hash", hash);
+                _ = cmd.Parameters.AddWithValue("@fileSize", fileSize);
+                _ = cmd.Parameters.AddWithValue("@mtimeTicks", mtimeTicks);
+                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken
+        );
+
+    internal Task SetProcessedAsync(string path, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "UPDATE files SET is_processed = 1 WHERE path = @path";
+                _ = cmd.Parameters.AddWithValue("@path", path);
+                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken
+        );
+
+    private async Task<T> ExecuteAsync<T>(
+        Func<SqliteCommand, Task<T>> operation,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            SqliteCommand cmd = _connection!.CreateCommand();
+            return await operation(cmd).ConfigureAwait(false);
         }
         finally
         {
@@ -132,26 +154,25 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
         }
     }
 
-    internal async Task SetProcessedAsync(string path)
-    {
-        await _semaphore.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            SqliteCommand cmd = _connection!.CreateCommand();
-            cmd.CommandText = "UPDATE files SET is_processed = 1 WHERE path = @path";
-            _ = cmd.Parameters.AddWithValue("@path", path);
-            _ = await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            _ = _semaphore.Release();
-        }
-    }
+    private async Task ExecuteAsync(
+        Func<SqliteCommand, Task> operation,
+        CancellationToken cancellationToken = default
+    ) =>
+        await ExecuteAsync<object?>(
+                async cmd =>
+                {
+                    await operation(cmd).ConfigureAwait(false);
+                    return null;
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
 
     internal static async Task<string> ResolveHashAsync(
         string filePath,
         FileRecord? cached,
-        bool rehash
+        bool rehash,
+        CancellationToken cancellationToken = default
     )
     {
         if (!rehash && cached is not null)
@@ -163,13 +184,16 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
             }
         }
 
-        return await ComputeHashAsync(filePath).ConfigureAwait(false);
+        return await ComputeHashAsync(filePath, cancellationToken).ConfigureAwait(false);
     }
 
-    internal static async Task<string> ComputeHashAsync(string filePath)
+    internal static async Task<string> ComputeHashAsync(
+        string filePath,
+        CancellationToken cancellationToken = default
+    )
     {
         using FileStream fs = File.OpenRead(filePath);
-        byte[] hashBytes = await SHA256.HashDataAsync(fs).ConfigureAwait(false);
+        byte[] hashBytes = await SHA256.HashDataAsync(fs, cancellationToken).ConfigureAwait(false);
         return Convert.ToHexStringLower(hashBytes);
     }
 

@@ -32,9 +32,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.WriteAllBytes(filePath, []);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.UnknownExtension);
@@ -56,9 +54,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -83,9 +79,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -110,9 +104,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -137,9 +129,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -165,9 +155,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.ShortVideoFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
@@ -196,9 +184,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             await SetContentIdentifierAsync(imagePath, "test-uuid-livephoto");
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(videoPath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
@@ -227,9 +213,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             await SetContentIdentifierAsync(imagePath, "test-uuid-hevc");
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(videoPath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
@@ -258,9 +242,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             await SetContentIdentifierAsync(imagePath, "uuid-image-BBB");
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(videoPath);
 
             // Assert - mismatch means not a live pair, video kept
             result.Should().Be(ProcessTask.ProcessResult.Success);
@@ -286,9 +268,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), imagePath);
 
             // Act - no ContentIdentifier set on either file
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(videoPath);
 
             // Assert - cannot confirm pair without ContentIdentifier, video kept
             result.Should().Be(ProcessTask.ProcessResult.Success);
@@ -316,9 +296,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             await SetContentIdentifierAsync(imagePath, "test-uuid-long");
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(videoPath);
 
             // Assert - long video is always kept regardless of ContentIdentifier match
             result.Should().Be(ProcessTask.ProcessResult.Success);
@@ -341,9 +319,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(videoPath);
 
             // Assert - no matching image candidate, so video is kept
             result.Should().Be(ProcessTask.ProcessResult.Success);
@@ -369,9 +345,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
 
             // Act - first pass: exiftool returns "m2t" for MPEG-TS, so .mts is renamed to .m2t
             // and queued for reprocess; remux to .mp4 happens on the second pass
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -396,9 +370,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
 
             // Act - first pass: exiftool returns "m2t" for MPEG-TS, so .m2ts is renamed to .m2t
             // and queued for reprocess; remux to .mp4 happens on the second pass
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -422,9 +394,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.MkvFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -450,9 +420,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.AviFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -476,9 +444,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.WmvFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -502,9 +468,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.ThreeGpFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -528,9 +492,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.GifFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -558,9 +520,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.WriteAllBytes(canonicalMp4, []);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(gifPath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(gifPath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -599,9 +559,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.GifFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath, skipBackup: true)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath, skipBackup: true);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -629,9 +587,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert - exiftool returns "mov" for QuickTime, which matches the extension, so no
             // rename occurs; PCM audio is detected and re-encoded directly in the first pass
@@ -657,9 +613,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.AacMovFile), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert - exiftool returns "mov" for QuickTime, which matches the extension, so no
             // rename occurs; AAC audio requires no conversion, file is left as-is
@@ -685,9 +639,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMp4File), filePath);
 
             // Act - second pass: .mp4 with PCM audio triggers audio reencode
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert - original backed up, re-encoded output has same path
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -711,9 +663,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.AacMp4File), filePath);
 
             // Act - second pass: .mp4 with AAC audio requires no conversion
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Success);
@@ -740,9 +690,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             await SetContentIdentifierAsync(videoPath, "test-uuid-pcm-preserved");
 
             // Act - first pass: no companion yet -> PCM audio re-encoded, .mp4 queued for reprocess
-            ProcessTask.ProcessResult firstResult = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult firstResult = await CreateContext(videoPath);
 
             // Assert - first pass queues for reprocess; original backed up
             firstResult.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -754,9 +702,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             await SetContentIdentifierAsync(imagePath, "test-uuid-pcm-preserved");
 
             // Act - second pass: live photo detection on the re-encoded .mp4
-            ProcessTask.ProcessResult secondResult = await ProcessTask.ExecuteAsync(
-                CreateContext(videoPath)
-            );
+            ProcessTask.ProcessResult secondResult = await CreateContext(videoPath);
 
             // Assert - ContentIdentifier was preserved through PCM re-encoding, video is deleted
             secondResult.Should().Be(ProcessTask.ProcessResult.Deleted);
@@ -790,9 +736,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV14File), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Success);
@@ -827,9 +771,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV15File), filePath);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
             result.Should().Be(ProcessTask.ProcessResult.Success);
@@ -848,120 +790,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    // -- Date inference -------------------------------------------------------
-
-    [Fact]
-    public async Task ExecuteAsync_JpegMissingDateInPath_SetsDate()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        try
-        {
-            // Create dated directory structure that DateFromPath can extract
-            string datedDir = Path.Combine(workDir, "2024", "01", "15");
-            Directory.CreateDirectory(datedDir);
-            string filePath = Path.Combine(datedDir, "photo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-
-            // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath, dateFromPath: true)
-            );
-
-            // Assert - date was inferred from path, file was modified and queued for reprocess
-            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
-            File.Exists(filePath + ".bak").Should().BeTrue();
-        }
-        finally
-        {
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_JpegMissingDateNoPath_ReturnsSuccess()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        try
-        {
-            string filePath = Path.Combine(workDir, "photo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-
-            // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
-
-            // Assert - no date in path, warning logged but no modification
-            result.Should().Be(ProcessTask.ProcessResult.Success);
-            File.Exists(filePath + ".bak").Should().BeFalse();
-        }
-        finally
-        {
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_JpegMissingDateInPath_DateFromPathDisabled_ReturnsSuccess()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        try
-        {
-            string datedDir = Path.Combine(workDir, "2024", "01", "15");
-            Directory.CreateDirectory(datedDir);
-            string filePath = Path.Combine(datedDir, "photo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-
-            // Act - dateFromPath defaults to false
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
-
-            // Assert - date inference skipped, file unmodified
-            result.Should().Be(ProcessTask.ProcessResult.Success);
-            File.Exists(filePath + ".bak").Should().BeFalse();
-        }
-        finally
-        {
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
     // -- Timestamp preservation -----------------------------------------------
-
-    [Fact]
-    public async Task ExecuteAsync_JpegMissingDateInPath_PreservesLastWriteTime()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        try
-        {
-            string datedDir = Path.Combine(workDir, "2024", "01", "15");
-            Directory.CreateDirectory(datedDir);
-            string filePath = Path.Combine(datedDir, "photo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-            DateTime originalMtime = new(2020, 3, 10, 8, 0, 0, DateTimeKind.Utc);
-            File.SetLastWriteTimeUtc(filePath, originalMtime);
-
-            // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath, dateFromPath: true)
-            );
-
-            // Assert - exiftool rewrites the file; original mtime must be restored
-            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
-            File.GetLastWriteTimeUtc(filePath)
-                .Should()
-                .BeCloseTo(originalMtime, TimeSpan.FromSeconds(1));
-        }
-        finally
-        {
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
 
     [Fact]
     public async Task ExecuteAsync_MkvFile_ConversionPreservesLastWriteTime()
@@ -976,9 +805,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.SetLastWriteTimeUtc(filePath, originalMtime);
 
             // Act
-            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
-                CreateContext(filePath)
-            );
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert - ffmpeg and exiftool both reset mtime; original must be restored on output
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
@@ -1004,7 +831,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         {
             string filePath = Path.Combine(workDir, "output.mp4");
 
-            string result = ProcessTask.GetUniqueFileName(filePath);
+            string result = MediaUtilities.GetUniqueFileName(filePath);
 
             result.Should().Be(filePath);
         }
@@ -1023,7 +850,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             string filePath = Path.Combine(workDir, "output.mp4");
             File.WriteAllBytes(filePath, []);
 
-            string result = ProcessTask.GetUniqueFileName(filePath);
+            string result = MediaUtilities.GetUniqueFileName(filePath);
 
             result.Should().Be(Path.Combine(workDir, "output_1.mp4"));
         }
@@ -1043,7 +870,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.WriteAllBytes(filePath, []);
             File.WriteAllBytes(Path.Combine(workDir, "output_1.mp4"), []);
 
-            string result = ProcessTask.GetUniqueFileName(filePath);
+            string result = MediaUtilities.GetUniqueFileName(filePath);
 
             result.Should().Be(Path.Combine(workDir, "output_2.mp4"));
         }
@@ -1066,24 +893,48 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             .WithValidation(CommandResultValidation.None)
             .ExecuteAsync();
 
-    private static ProcessTask.Context CreateContext(
-        string filePath,
+    private static CommandLine.Options CreateOptions(
         bool dryRun = false,
-        bool dateFromPath = false,
         bool skipBackup = false,
         bool rehash = false
     ) =>
         new()
         {
-            FileInfo = new FileInfo(filePath),
+            Path = new DirectoryInfo(Path.GetTempPath()),
+            Threads = 1,
             DryRun = dryRun,
-            DateFromPath = dateFromPath,
+            DatePath = false,
             SkipBackup = skipBackup,
+            OutPath = null,
+            Format = "yyyy/MM",
+            DeleteEmpty = false,
+            Move = false,
+            TagPath = false,
+            Tags = null,
+            DbFile = null,
             Rehash = rehash,
-            ShortVideoDuration = ProcessTask.ShortVideoDuration,
+            ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
-            ReProcessNames = [],
-            UnknownExtensions = new ConcurrentDictionary<string, byte>(),
-            Database = null,
+            LogOptions = new LoggerFactory.Options
+            {
+                Level = LogEventLevel.Information,
+                File = null,
+                FileClear = false,
+            },
         };
+
+    private static Task<ProcessTask.ProcessResult> CreateContext(
+        string filePath,
+        bool dryRun = false,
+        bool skipBackup = false,
+        bool rehash = false
+    ) =>
+        ProcessTask.ExecuteAsync(
+            CreateOptions(dryRun: dryRun, skipBackup: skipBackup, rehash: rehash),
+            new FileInfo(filePath),
+            null,
+            [],
+            new ConcurrentDictionary<string, byte>(),
+            default
+        );
 }

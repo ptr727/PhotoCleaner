@@ -33,14 +33,14 @@ internal static class LoggerFactory
             );
 
         // Log to file
-        if (!string.IsNullOrEmpty(options?.File))
+        if (options?.File != null)
         {
-            if (options.FileClear && File.Exists(options.File))
+            if (options.FileClear && options.File.Exists)
             {
-                File.Delete(options.File);
+                options.File.Delete();
             }
             _ = loggerConfiguration.WriteTo.File(
-                options.File,
+                options.File.FullName,
                 formatProvider: CultureInfo.InvariantCulture,
                 outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [t:{ThreadId}{ThreadName}] {Message:lj}{NewLine}{Exception}"
             );
@@ -58,7 +58,7 @@ internal static class LoggerFactory
     internal sealed class Options
     {
         internal required LogEventLevel Level { get; init; }
-        internal required string File { get; init; }
+        internal required FileInfo? File { get; init; }
         internal required bool FileClear { get; init; }
     }
 }

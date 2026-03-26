@@ -1,81 +1,98 @@
 namespace PhotoCleaner;
 
-internal sealed class DuplicatesTask(bool dryRun, int threads, bool rehash, Database database)
+internal sealed class DuplicatesTask(CommandLine.Options options, Database database)
 {
-    internal async Task<(
-        int indexed,
-        int ignored,
-        int deleted,
-        int kept,
-        int failed
-    )> ExecuteDuplicatesAsync(
+    private enum DuplicateCheckResult
+    {
+        Ignored,
+        Kept,
+        Deleted,
+        Failed,
+    }
+
+    internal async Task<(int indexed, int ignored, int deleted, int kept, int failed)> ExecuteAsync(
         IReadOnlyCollection<string> sourceFiles,
         IReadOnlyCollection<string> outFiles,
         CancellationToken cancellationToken = default
     )
     {
-        ParallelOptions parallelOptions = new()
-        {
-            MaxDegreeOfParallelism = threads,
-            CancellationToken = cancellationToken,
-        };
-
         // Phase 1: hash source files and register them in the database
-        Log.Information("Indexing {Count} source files", sourceFiles.Count);
-        IndexTask indexTask = new(rehash, database);
+        Log.Information("Indexing {FileCount} source files", sourceFiles.Count);
+        IndexTask indexTask = new(options, database);
         (int inserted, int updated, int unchanged, int ignoredSrc, int indexFailed) =
-            await indexTask
-                .ExecuteIndexAsync(sourceFiles, threads, cancellationToken)
-                .ConfigureAwait(false);
+            await indexTask.ExecuteAsync(sourceFiles, cancellationToken).ConfigureAwait(false);
         int indexed = inserted + updated + unchanged;
-        Log.Information("Indexed {Count} source files", indexed);
+        Log.Information("Indexed {FileCount} source files", indexed);
 
         // Phase 2: scan outpath files and delete those whose hash is in the source index
         int deleted = 0,
             kept = 0,
+            ignored = 0,
             deleteFailed = 0;
-        Log.Information("Scanning {Count} target files for duplicates", outFiles.Count);
+        Log.Information("Scanning {FileCount} target files for duplicates", outFiles.Count);
         await Parallel
             .ForEachAsync(
                 outFiles,
-                parallelOptions,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = options.Threads,
+                    CancellationToken = cancellationToken,
+                },
                 async (file, ct) =>
                 {
-                    if (!ProcessTask.SupportedExtensions.Contains(Path.GetExtension(file)))
+                    _ = await CheckDuplicateFileAsync(file, ct).ConfigureAwait(false) switch
                     {
-                        return;
-                    }
-
-                    Log.Information("Indexing '{FilePath}'", file);
-                    string hash = await Database.ComputeHashAsync(file).ConfigureAwait(false);
-                    bool isDuplicate = await database.HashExistsAsync(hash).ConfigureAwait(false);
-                    if (!isDuplicate)
-                    {
-                        _ = Interlocked.Increment(ref kept);
-                        return;
-                    }
-
-                    Log.Information("Deleting duplicate '{FilePath}'", file);
-                    if (dryRun)
-                    {
-                        _ = Interlocked.Increment(ref deleted);
-                        return;
-                    }
-
-                    try
-                    {
-                        File.Delete(file);
-                        _ = Interlocked.Increment(ref deleted);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        Log.Error(ex, "Failed to delete duplicate '{FilePath}'", file);
-                        _ = Interlocked.Increment(ref deleteFailed);
-                    }
+                        DuplicateCheckResult.Ignored => Interlocked.Increment(ref ignored),
+                        DuplicateCheckResult.Kept => Interlocked.Increment(ref kept),
+                        DuplicateCheckResult.Deleted => Interlocked.Increment(ref deleted),
+                        DuplicateCheckResult.Failed => Interlocked.Increment(ref deleteFailed),
+                        _ => throw new NotImplementedException(),
+                    };
                 }
             )
             .ConfigureAwait(false);
 
-        return (indexed, ignoredSrc, deleted, kept, indexFailed + deleteFailed);
+        return (indexed, ignoredSrc + ignored, deleted, kept, indexFailed + deleteFailed);
+    }
+
+    private async Task<DuplicateCheckResult> CheckDuplicateFileAsync(
+        string file,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
+        {
+            Log.Warning("Skipping non-media file: '{FilePath}'", file);
+            return DuplicateCheckResult.Ignored;
+        }
+
+        Log.Information("Indexing '{FilePath}'", file);
+        string hash = await Database
+            .ComputeHashAsync(file, cancellationToken)
+            .ConfigureAwait(false);
+        bool isDuplicate = await database
+            .HashExistsAsync(hash, cancellationToken)
+            .ConfigureAwait(false);
+        if (!isDuplicate)
+        {
+            return DuplicateCheckResult.Kept;
+        }
+
+        Log.Information("Deleting duplicate '{FilePath}'", file);
+        if (options.DryRun)
+        {
+            return DuplicateCheckResult.Deleted;
+        }
+
+        try
+        {
+            File.Delete(file);
+            return DuplicateCheckResult.Deleted;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error(ex, "Failed to delete duplicate '{FilePath}'", file);
+            return DuplicateCheckResult.Failed;
+        }
     }
 }

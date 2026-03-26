@@ -1,10 +1,37 @@
 using System.Text;
 using PhotoCleaner;
+using Serilog.Events;
 
 namespace PhotoCleanerTests;
 
 public sealed class IndexTaskTests
 {
+    private static CommandLine.Options CreateOptions(bool rehash = false) =>
+        new()
+        {
+            Path = new DirectoryInfo(Path.GetTempPath()),
+            Threads = 1,
+            DryRun = false,
+            DatePath = false,
+            SkipBackup = false,
+            OutPath = null,
+            Format = "yyyy/MM",
+            DeleteEmpty = false,
+            Move = false,
+            TagPath = false,
+            Tags = null,
+            DbFile = null,
+            Rehash = rehash,
+            ShortVideoDuration = MediaUtilities.ShortVideoDuration,
+            Reprocess = false,
+            LogOptions = new LoggerFactory.Options
+            {
+                Level = LogEventLevel.Information,
+                File = null,
+                FileClear = false,
+            },
+        };
+
     private static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"db_{Path.GetRandomFileName()}.db");
 
@@ -24,7 +51,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(rehash: false, db);
+            IndexTask task = new(CreateOptions(), db);
 
             (IndexStatus status, string hash, bool wasProcessed) = await task.IndexFileAsync(
                 filePath
@@ -53,7 +80,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(rehash: false, db);
+            IndexTask task = new(CreateOptions(), db);
 
             // First call inserts
             await task.IndexFileAsync(filePath);
@@ -83,7 +110,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(rehash: false, db);
+            IndexTask task = new(CreateOptions(), db);
 
             // Insert and mark as processed
             await task.IndexFileAsync(filePath);
@@ -120,7 +147,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(rehash: false, db);
+            IndexTask task = new(CreateOptions(), db);
 
             await task.IndexFileAsync(filePath);
             await db.SetProcessedAsync(filePath);
@@ -148,12 +175,12 @@ public sealed class IndexTaskTests
             await db.InitializeAsync();
 
             // Insert with no-rehash first
-            IndexTask noRehashTask = new(rehash: false, db);
+            IndexTask noRehashTask = new(CreateOptions(), db);
             (_, string firstHash, _) = await noRehashTask.IndexFileAsync(filePath);
 
             // Rehash task forces recomputation - result should be same hash (file unchanged)
             // but the code path goes through ComputeHashAsync
-            IndexTask rehashTask = new(rehash: true, db);
+            IndexTask rehashTask = new(CreateOptions(rehash: true), db);
             (IndexStatus status, string rehashResult, _) = await rehashTask.IndexFileAsync(
                 filePath
             );
@@ -169,7 +196,7 @@ public sealed class IndexTaskTests
     }
 
     [Fact]
-    public async Task ExecuteIndexAsync_NonMediaFile_CountedAsIgnored()
+    public async Task ExecuteAsync_NonMediaFile_CountedAsIgnored()
     {
         string dbPath = TempDb();
         string mediaFile = TempFile(ext: ".jpg");
@@ -178,10 +205,10 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(rehash: false, db);
+            IndexTask task = new(CreateOptions(), db);
 
             (int inserted, int updated, int unchanged, int ignored, int failed) =
-                await task.ExecuteIndexAsync([mediaFile, nonMediaFile], threads: 1);
+                await task.ExecuteAsync([mediaFile, nonMediaFile]);
 
             inserted.Should().Be(1);
             updated.Should().Be(0);
@@ -198,7 +225,7 @@ public sealed class IndexTaskTests
     }
 
     [Fact]
-    public async Task ExecuteIndexAsync_MultipleFiles_CountsAllStatuses()
+    public async Task ExecuteAsync_MultipleFiles_CountsAllStatuses()
     {
         string dbPath = TempDb();
         string newFile = TempFile("new content");
@@ -208,7 +235,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(rehash: false, db);
+            IndexTask task = new(CreateOptions(), db);
 
             // Pre-insert changedFile and unchangedFile
             await task.IndexFileAsync(changedFile);
@@ -219,7 +246,7 @@ public sealed class IndexTaskTests
             File.SetLastWriteTimeUtc(changedFile, DateTime.UtcNow.AddSeconds(1));
 
             (int inserted, int updated, int unchanged, int ignored, int failed) =
-                await task.ExecuteIndexAsync([newFile, changedFile, unchangedFile], threads: 1);
+                await task.ExecuteAsync([newFile, changedFile, unchangedFile]);
 
             inserted.Should().Be(1); // newFile
             updated.Should().Be(1); // changedFile

@@ -6,9 +6,9 @@ namespace PhotoCleanerTests;
 public sealed class TempDirectoryFixture : IAsyncLifetime
 {
     // Test duration constants - expressed as offsets from ProcessTask thresholds
-    internal const double TooShortDuration = ProcessTask.ShortVideoDuration - 0.5;
-    internal const double LiveDuration = ProcessTask.LiveVideoDuration - 1.0;
-    internal const double LongDuration = ProcessTask.LiveVideoDuration + 6.0;
+    internal const double TooShortDuration = MediaUtilities.ShortVideoDuration - 0.5;
+    internal const double LiveDuration = MediaUtilities.LiveVideoDuration - 1.0;
+    internal const double LongDuration = MediaUtilities.LiveVideoDuration + 6.0;
 
     // DNG version strings
     internal const string DngVersion14 = "1.4.0.0";

@@ -1,6 +1,62 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace PhotoCleaner;
+
+// Handles exiftool outputting a single XMP:Subject value as a bare string rather than ["string"]
+internal sealed class StringOrStringArrayConverter : JsonConverter<string[]?>
+{
+    public override string[]? Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    )
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return null;
+        }
+
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            return [reader.GetString()!];
+        }
+
+        if (reader.TokenType == JsonTokenType.StartArray)
+        {
+            List<string> list = [];
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+            {
+                list.Add(reader.GetString()!);
+            }
+
+            return [.. list];
+        }
+
+        throw new JsonException($"Unexpected token {reader.TokenType} for XMP:Subject");
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer,
+        string[]? value,
+        JsonSerializerOptions options
+    )
+    {
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartArray();
+        foreach (string s in value)
+        {
+            writer.WriteStringValue(s);
+        }
+
+        writer.WriteEndArray();
+    }
+}
 
 public sealed class ExifToolJson
 {
@@ -48,6 +104,12 @@ public sealed class ExifToolJson
 
     [JsonPropertyName("XMP:CreateDate")]
     public string? XMPCreateDate { get; set; }
+
+#pragma warning disable CA1819 // JSON deserialization requires array type
+    [JsonConverter(typeof(StringOrStringArrayConverter))]
+    [JsonPropertyName("XMP:Subject")]
+    public string[]? XMPSubject { get; set; }
+#pragma warning restore CA1819
 
     [JsonPropertyName("XMP:DateCreated")]
     public string? XMPDateCreated { get; set; }

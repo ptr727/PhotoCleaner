@@ -37,7 +37,7 @@ public sealed class CommandLineTests
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
-        options.ShortVideoDuration.Should().Be(ProcessTask.ShortVideoDuration);
+        options.ShortVideoDuration.Should().Be(MediaUtilities.ShortVideoDuration);
     }
 
     [Fact]
@@ -288,17 +288,17 @@ public sealed class CommandLineTests
     // -- --db option -----------------------------------------------------------
 
     [Fact]
-    public void DbPathOption_DefaultNull()
+    public void DbFileOption_DefaultNull()
     {
         CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
-        options.DbPath.Should().BeNull();
+        options.DbFile.Should().BeNull();
     }
 
     [Fact]
-    public void DbPathOption_Path_ParsedCorrectly()
+    public void DbFileOption_Path_ParsedCorrectly()
     {
         string dbPath = Path.Combine(Path.GetTempPath(), "photos.db");
         CommandLine cli = new([
@@ -313,7 +313,7 @@ public sealed class CommandLineTests
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
-        options.DbPath!.FullName.Should().Be(dbPath);
+        options.DbFile!.FullName.Should().Be(dbPath);
     }
 
     // -- index command --------------------------------------------------------

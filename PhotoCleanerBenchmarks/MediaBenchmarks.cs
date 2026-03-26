@@ -83,7 +83,7 @@ public class MediaBenchmarks : IDisposable
 
     [Benchmark]
     public async Task<ExifToolJson?> ExifToolLoad() =>
-        await ProcessTask.GetExifToolJsonAsync(_jpegPath);
+        await MediaUtilities.GetExifToolJsonAsync(_jpegPath);
 
     [Benchmark]
     public async Task<float> FfprobeGetDuration()

@@ -21,7 +21,10 @@ public sealed class DateInferenceTests
     [InlineData("VID-20231225-WA0001.mp4", "2023:12:25 00:00:00")]
     [InlineData("Screenshot_2024-03-15-10-30-45.png", "2024:03:15 10:30:45")]
     [InlineData("2024_01_15_photo.jpg", "2024:01:15 00:00:00")]
-    [InlineData("Screenshot 2023-12-25 at 10.30.15 AM.png", "2023:12:25 00:00:00")]
+    [InlineData("Screenshot 2023-12-25 at 10.30.15 AM.png", "2023:12:25 10:30:15")]
+    [InlineData("WhatsApp Image 2018-09-22 at 7.48.17 PM-253.jpg", "2018:09:22 19:48:17")]
+    [InlineData("WhatsApp Image 2024-06-30 at 12.00.00 AM.jpg", "2024:06:30 00:00:00")]
+    [InlineData("WhatsApp Image 2024-06-30 at 12.30.00 PM.jpg", "2024:06:30 12:30:00")]
     [InlineData("IMG_2023-01-01_New_Year.jpg", "2023:01:01 00:00:00")]
     [InlineData("Video_2022-06-15_12-30-45_HD.mp4", "2022:06:15 00:00:00")] // _12 is only 2 digits
     [InlineData("Backup_2021-03-20_evening.jpg", "2021:03:20 00:00:00")]

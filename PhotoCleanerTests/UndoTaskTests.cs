@@ -1,10 +1,37 @@
 using PhotoCleaner;
+using Serilog.Events;
 
 namespace PhotoCleanerTests;
 
 public sealed class UndoTaskTests
 {
     // -- Helper utilities -----------------------------------------------------
+
+    private static CommandLine.Options CreateOptions(bool dryRun = false) =>
+        new()
+        {
+            Path = new DirectoryInfo(Path.GetTempPath()),
+            Threads = 1,
+            DryRun = dryRun,
+            DatePath = false,
+            SkipBackup = false,
+            OutPath = null,
+            Format = "yyyy/MM",
+            DeleteEmpty = false,
+            Move = false,
+            TagPath = false,
+            Tags = null,
+            DbFile = null,
+            Rehash = false,
+            ShortVideoDuration = MediaUtilities.ShortVideoDuration,
+            Reprocess = false,
+            LogOptions = new LoggerFactory.Options
+            {
+                Level = LogEventLevel.Information,
+                File = null,
+                FileClear = false,
+            },
+        };
 
     private static string TempDir()
     {
@@ -48,10 +75,10 @@ public sealed class UndoTaskTests
     public void GetBackupBase_VariousPaths_ReturnsBase(string path, string expected) =>
         UndoTask.GetBackupBase(path).Should().Be(expected);
 
-    // -- ExecuteUndo: no backups -----------------------------------------------
+    // -- Execute: no backups -----------------------------------------------
 
     [Fact]
-    public void ExecuteUndo_NoBackupFiles_ReturnsZeros()
+    public void Execute_NoBackupFiles_ReturnsZeros()
     {
         string dir = TempDir();
         try
@@ -59,9 +86,7 @@ public sealed class UndoTaskTests
             Touch(Path.Combine(dir, "photo.jpg"));
             string[] files = Directory.GetFiles(dir);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo(
-                files
-            );
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(files);
 
             restored.Should().Be(0);
             deleted.Should().Be(0);
@@ -76,7 +101,7 @@ public sealed class UndoTaskTests
     // -- Scenario 1: deleted live photo / short video (only .bak exists) ------
 
     [Fact]
-    public void ExecuteUndo_SingleBackupNoCurrentFile_RestoresOriginal()
+    public void Execute_SingleBackupNoCurrentFile_RestoresOriginal()
     {
         string dir = TempDir();
         try
@@ -85,7 +110,7 @@ public sealed class UndoTaskTests
             string bakPath = Path.Combine(dir, "img.mp4.bak");
             WriteContent(bakPath);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 bakPath,
             ]);
 
@@ -104,7 +129,7 @@ public sealed class UndoTaskTests
     // -- Scenario 2: date-from-path (current file AND .bak both exist) --------
 
     [Fact]
-    public void ExecuteUndo_BackupAndCurrentFileExist_DeletesCurrentAndRestoresBackup()
+    public void Execute_BackupAndCurrentFileExist_DeletesCurrentAndRestoresBackup()
     {
         string dir = TempDir();
         try
@@ -114,7 +139,7 @@ public sealed class UndoTaskTests
             Touch(filePath);
             WriteContent(bakPath);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 bakPath,
             ]);
 
@@ -133,7 +158,7 @@ public sealed class UndoTaskTests
     // -- Scenario 3: single-run video conversion (img.mov.bak + img.mp4) ------
 
     [Fact]
-    public void ExecuteUndo_SingleRunConversion_RestoresMovAndDeletesMp4()
+    public void Execute_SingleRunConversion_RestoresMovAndDeletesMp4()
     {
         string dir = TempDir();
         try
@@ -143,7 +168,7 @@ public sealed class UndoTaskTests
             Touch(mp4Path);
             WriteContent(movBak);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 movBak,
             ]);
 
@@ -164,7 +189,7 @@ public sealed class UndoTaskTests
     // Files: img.mov.bak  img.mp4.bak  img.mp4
 
     [Fact]
-    public void ExecuteUndo_TwoRunConversion_DeletesDerivedMp4AndRestoresMov()
+    public void Execute_TwoRunConversion_DeletesDerivedMp4AndRestoresMov()
     {
         string dir = TempDir();
         try
@@ -176,7 +201,7 @@ public sealed class UndoTaskTests
             WriteContent(mp4Bak);
             WriteContent(movBak);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 mp4Bak,
                 movBak,
             ]);
@@ -199,7 +224,7 @@ public sealed class UndoTaskTests
     // Files: img.mov.bak  img.mp4.bak  img.mp4.bak1  img.mp4
 
     [Fact]
-    public void ExecuteUndo_ThreeRunConversion_DeletesAllDerivedAndRestoresMov()
+    public void Execute_ThreeRunConversion_DeletesAllDerivedAndRestoresMov()
     {
         string dir = TempDir();
         try
@@ -213,7 +238,7 @@ public sealed class UndoTaskTests
             WriteContent(mp4Bak1);
             WriteContent(movBak);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 mp4Bak,
                 mp4Bak1,
                 movBak,
@@ -237,7 +262,7 @@ public sealed class UndoTaskTests
     // -- Scenario 6: dry run - no file changes --------------------------------
 
     [Fact]
-    public void ExecuteUndo_DryRun_ReturnsCountsButDoesNotChangeFiles()
+    public void Execute_DryRun_ReturnsCountsButDoesNotChangeFiles()
     {
         string dir = TempDir();
         try
@@ -247,9 +272,9 @@ public sealed class UndoTaskTests
             Touch(mp4Path);
             WriteContent(movBak);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: true).ExecuteUndo([
-                movBak,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(
+                CreateOptions(dryRun: true)
+            ).Execute([movBak]);
 
             // Counts are still reported
             restored.Should().Be(1);
@@ -270,7 +295,7 @@ public sealed class UndoTaskTests
     // -- Scenario: in-place double modification (regression: numbered backup != derived) ----
 
     [Fact]
-    public void ExecuteUndo_InPlaceDoubleModification_RestoresOriginalAndDeletesAllBackups()
+    public void Execute_InPlaceDoubleModification_RestoresOriginalAndDeletesAllBackups()
     {
         string dir = TempDir();
         try
@@ -284,7 +309,7 @@ public sealed class UndoTaskTests
             WriteContent(bakPath);
             WriteContent(bak1Path);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 bakPath,
                 bak1Path,
             ]);
@@ -304,7 +329,7 @@ public sealed class UndoTaskTests
     // -- Companion image not touched -------------------------------------------
 
     [Fact]
-    public void ExecuteUndo_CompanionImageWithNoBackup_IsNotTouched()
+    public void Execute_CompanionImageWithNoBackup_IsNotTouched()
     {
         string dir = TempDir();
         try
@@ -315,7 +340,7 @@ public sealed class UndoTaskTests
             Touch(heicPath);
             WriteContent(movBak);
 
-            _ = new UndoTask(dryRun: false).ExecuteUndo([movBak]);
+            _ = new UndoTask(CreateOptions()).Execute([movBak]);
 
             File.Exists(heicPath).Should().BeTrue();
         }
@@ -329,7 +354,7 @@ public sealed class UndoTaskTests
     // img.mp4 pre-existed; process wrote img_1.mp4 + img.gif.bak + img.gif.bak.out
 
     [Fact]
-    public void ExecuteUndo_CompanionOutFile_DeletesUniquifiedOutputAndLeavesPreExistingMp4()
+    public void Execute_CompanionOutFile_DeletesUniquifiedOutputAndLeavesPreExistingMp4()
     {
         string dir = TempDir();
         try
@@ -343,7 +368,7 @@ public sealed class UndoTaskTests
             WriteContent(gifBak);
             File.WriteAllText(companionPath, uniquifiedMp4);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 gifBak,
             ]);
 
@@ -363,7 +388,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void ExecuteUndo_CompanionOutFile_DryRun_ReportsCountsButLeavesFilesIntact()
+    public void Execute_CompanionOutFile_DryRun_ReportsCountsButLeavesFilesIntact()
     {
         string dir = TempDir();
         try
@@ -377,9 +402,9 @@ public sealed class UndoTaskTests
             WriteContent(gifBak);
             File.WriteAllText(companionPath, uniquifiedMp4);
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: true).ExecuteUndo([
-                gifBak,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(
+                CreateOptions(dryRun: true)
+            ).Execute([gifBak]);
 
             restored.Should().Be(1);
             deleted.Should().Be(2);
@@ -398,7 +423,7 @@ public sealed class UndoTaskTests
     // -- 0-byte backup handling -----------------------------------------------
 
     [Fact]
-    public void ExecuteUndo_ZeroByteBackup_FallsBackToNextBackup()
+    public void Execute_ZeroByteBackup_FallsBackToNextBackup()
     {
         string dir = TempDir();
         try
@@ -410,7 +435,7 @@ public sealed class UndoTaskTests
             Touch(bakPath); // 0 bytes - corrupted
             WriteContent(bak1Path); // valid content
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 bakPath,
                 bak1Path,
             ]);
@@ -428,7 +453,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void ExecuteUndo_ZeroByteBackupNoAlternative_SkipsRestoreAndIncreasesFailed()
+    public void Execute_ZeroByteBackupNoAlternative_SkipsRestoreAndIncreasesFailed()
     {
         string dir = TempDir();
         try
@@ -438,7 +463,7 @@ public sealed class UndoTaskTests
             Touch(filePath); // original still intact
             Touch(bakPath); // 0 bytes - corrupted, no alternative
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 bakPath,
             ]);
 
@@ -454,7 +479,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void ExecuteUndo_AllBackupsZeroBytes_SkipsRestoreAndIncreasesFailed()
+    public void Execute_AllBackupsZeroBytes_SkipsRestoreAndIncreasesFailed()
     {
         string dir = TempDir();
         try
@@ -466,7 +491,7 @@ public sealed class UndoTaskTests
             Touch(bakPath); // 0 bytes
             Touch(bak1Path); // 0 bytes
 
-            (int restored, int deleted, int failed) = new UndoTask(dryRun: false).ExecuteUndo([
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
                 bakPath,
                 bak1Path,
             ]);

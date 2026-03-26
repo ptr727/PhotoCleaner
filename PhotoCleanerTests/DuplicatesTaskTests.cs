@@ -1,10 +1,37 @@
 using PhotoCleaner;
+using Serilog.Events;
 
 namespace PhotoCleanerTests;
 
 public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
     : IClassFixture<TempDirectoryFixture>
 {
+    private static CommandLine.Options CreateOptions(bool dryRun = false) =>
+        new()
+        {
+            Path = new DirectoryInfo(Path.GetTempPath()),
+            Threads = 1,
+            DryRun = dryRun,
+            DatePath = false,
+            SkipBackup = false,
+            OutPath = null,
+            Format = "yyyy/MM",
+            DeleteEmpty = false,
+            Move = false,
+            TagPath = false,
+            Tags = null,
+            DbFile = null,
+            Rehash = false,
+            ShortVideoDuration = MediaUtilities.ShortVideoDuration,
+            Reprocess = false,
+            LogOptions = new LoggerFactory.Options
+            {
+                Level = LogEventLevel.Information,
+                File = null,
+                FileClear = false,
+            },
+        };
+
     private static string TempDir()
     {
         string dir = Path.Combine(
@@ -28,7 +55,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
     // -- UnsupportedExtension: ignored in both phases -------------------------
 
     [Fact]
-    public async Task ExecuteDuplicatesAsync_UnsupportedExtension_Ignored()
+    public async Task ExecuteAsync_UnsupportedExtension_Ignored()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -41,16 +68,15 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             File.Copy(srcTxt, outTxt);
 
             await using Database db = await OpenDbAsync(dbPath);
-            DuplicatesTask task = new(dryRun: false, threads: 1, rehash: false, db);
-            (int indexed, int ignored, int deleted, int kept, int failed) =
-                await task.ExecuteDuplicatesAsync(
-                    [srcTxt],
-                    [outTxt],
-                    TestContext.Current.CancellationToken
-                );
+            DuplicatesTask task = new(CreateOptions(), db);
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [srcTxt],
+                [outTxt],
+                TestContext.Current.CancellationToken
+            );
 
             indexed.Should().Be(0);
-            ignored.Should().Be(1); // .txt not a supported media extension
+            ignored.Should().Be(2); // .txt not a supported media extension (source + target)
             deleted.Should().Be(0);
             kept.Should().Be(0);
             failed.Should().Be(0);
@@ -67,7 +93,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
     // -- NoDuplicates: unique outpath files are kept --------------------------
 
     [Fact]
-    public async Task ExecuteDuplicatesAsync_NoDuplicates_NoFilesDeleted()
+    public async Task ExecuteAsync_NoDuplicates_NoFilesDeleted()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -80,13 +106,12 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), outJpg);
 
             await using Database db = await OpenDbAsync(dbPath);
-            DuplicatesTask task = new(dryRun: false, threads: 1, rehash: false, db);
-            (int indexed, int ignored, int deleted, int kept, int failed) =
-                await task.ExecuteDuplicatesAsync(
-                    [srcJpg],
-                    [outJpg],
-                    TestContext.Current.CancellationToken
-                );
+            DuplicatesTask task = new(CreateOptions(), db);
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [srcJpg],
+                [outJpg],
+                TestContext.Current.CancellationToken
+            );
 
             indexed.Should().Be(1);
             ignored.Should().Be(0);
@@ -106,7 +131,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
     // -- DuplicateFound: matching outpath file is deleted ---------------------
 
     [Fact]
-    public async Task ExecuteDuplicatesAsync_DuplicateFound_FileDeleted()
+    public async Task ExecuteAsync_DuplicateFound_FileDeleted()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -119,13 +144,12 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             File.Copy(srcJpg, outJpg); // identical content
 
             await using Database db = await OpenDbAsync(dbPath);
-            DuplicatesTask task = new(dryRun: false, threads: 1, rehash: false, db);
-            (int indexed, int ignored, int deleted, int kept, int failed) =
-                await task.ExecuteDuplicatesAsync(
-                    [srcJpg],
-                    [outJpg],
-                    TestContext.Current.CancellationToken
-                );
+            DuplicatesTask task = new(CreateOptions(), db);
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [srcJpg],
+                [outJpg],
+                TestContext.Current.CancellationToken
+            );
 
             indexed.Should().Be(1);
             ignored.Should().Be(0);
@@ -146,7 +170,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
     // -- DryRun: duplicate reported but not deleted ---------------------------
 
     [Fact]
-    public async Task ExecuteDuplicatesAsync_DryRun_ReportsCountButLeavesFiles()
+    public async Task ExecuteAsync_DryRun_ReportsCountButLeavesFiles()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -159,13 +183,12 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             File.Copy(srcJpg, outJpg);
 
             await using Database db = await OpenDbAsync(dbPath);
-            DuplicatesTask task = new(dryRun: true, threads: 1, rehash: false, db);
-            (int indexed, int ignored, int deleted, int kept, int failed) =
-                await task.ExecuteDuplicatesAsync(
-                    [srcJpg],
-                    [outJpg],
-                    TestContext.Current.CancellationToken
-                );
+            DuplicatesTask task = new(CreateOptions(dryRun: true), db);
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [srcJpg],
+                [outJpg],
+                TestContext.Current.CancellationToken
+            );
 
             indexed.Should().Be(1);
             ignored.Should().Be(0);
@@ -185,7 +208,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
     // -- MultipleSourceFiles: all indexed, only duplicates deleted -------------
 
     [Fact]
-    public async Task ExecuteDuplicatesAsync_MultipleSourceFiles_AllIndexed()
+    public async Task ExecuteAsync_MultipleSourceFiles_AllIndexed()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -206,13 +229,12 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             await File.WriteAllBytesAsync(outUniqueJpg, uniqueBytes);
 
             await using Database db = await OpenDbAsync(dbPath);
-            DuplicatesTask task = new(dryRun: false, threads: 1, rehash: false, db);
-            (int indexed, int ignored, int deleted, int kept, int failed) =
-                await task.ExecuteDuplicatesAsync(
-                    [srcJpg, srcPng],
-                    [outDupJpg, outUniqueJpg],
-                    TestContext.Current.CancellationToken
-                );
+            DuplicatesTask task = new(CreateOptions(), db);
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [srcJpg, srcPng],
+                [outDupJpg, outUniqueJpg],
+                TestContext.Current.CancellationToken
+            );
 
             indexed.Should().Be(2);
             ignored.Should().Be(0);
@@ -233,7 +255,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
     // -- Incremental: second run reuses existing source index -----------------
 
     [Fact]
-    public async Task ExecuteDuplicatesAsync_IncrementalRun_ReusesExistingSourceIndex()
+    public async Task ExecuteAsync_IncrementalRun_ReusesExistingSourceIndex()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -245,20 +267,19 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             // Run 1: index source, nothing in outpath
             await using Database db = await OpenDbAsync(dbPath);
-            DuplicatesTask task = new(dryRun: false, threads: 1, rehash: false, db);
-            await task.ExecuteDuplicatesAsync([srcJpg], [], TestContext.Current.CancellationToken);
+            DuplicatesTask task = new(CreateOptions(), db);
+            await task.ExecuteAsync([srcJpg], [], TestContext.Current.CancellationToken);
 
             // Run 2: source dir is empty but DB still holds the hash;
             //        a duplicate placed in outpath should still be deleted
             string outJpg = Path.Combine(outDir, "photo_copy.jpg");
             File.Copy(srcJpg, outJpg);
 
-            (int indexed, int ignored, int deleted, int kept, int failed) =
-                await task.ExecuteDuplicatesAsync(
-                    [], // no new source files - relies on DB from run 1
-                    [outJpg],
-                    TestContext.Current.CancellationToken
-                );
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [], // no new source files - relies on DB from run 1
+                [outJpg],
+                TestContext.Current.CancellationToken
+            );
 
             indexed.Should().Be(0);
             ignored.Should().Be(0);

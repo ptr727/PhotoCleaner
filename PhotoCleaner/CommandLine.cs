@@ -6,18 +6,20 @@ namespace PhotoCleaner;
 internal sealed class CommandLine
 {
     private readonly Option<LogEventLevel> _logLevelOption = CreateLogLevelOption();
-    private readonly Option<string> _logFileOption = CreateLogFileOption();
+    private readonly Option<FileInfo?> _logFileOption = CreateLogFileOption();
     private readonly Option<bool> _logFileClearOption = CreateLogFileClearOption();
     private readonly Option<DirectoryInfo> _pathOption = CreatePathOption();
     private readonly Option<bool> _dryRunOption = CreateDryRunOption();
     private readonly Option<int> _threadsOption = CreateThreadsOption();
-    private readonly Option<bool> _dateFromPathOption = CreateDateFromPathOption();
+    private readonly Option<bool> _datePathOption = CreateDatePathOption();
     private readonly Option<bool> _skipBackupOption = CreateSkipBackupOption();
     private readonly Option<DirectoryInfo> _outPathOption = CreateOutPathOption();
     private readonly Option<string> _formatOption = CreateFormatOption();
     private readonly Option<bool> _deleteEmptyOption = CreateDeleteEmptyOption();
     private readonly Option<bool> _moveOption = CreateMoveOption();
-    private readonly Option<FileInfo?> _dbPathOption = CreateDbPathOption();
+    private readonly Option<bool> _tagPathOption = CreateTagPathOption();
+    private readonly Option<string?> _tagsOption = CreateTagsOption();
+    private readonly Option<FileInfo?> _dbFileOption = CreateDbFileOption();
     private readonly Option<bool> _rehashOption = CreateRehashOption();
     private readonly Option<double> _durationOption = CreateDurationOption();
     private readonly Option<bool> _reprocessOption = CreateReprocessOption();
@@ -64,19 +66,15 @@ internal sealed class CommandLine
             _pathOption,
             _dryRunOption,
             _threadsOption,
-            _dateFromPathOption,
             _skipBackupOption,
-            _dbPathOption,
+            _dbFileOption,
             _rehashOption,
             _durationOption,
             _reprocessOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
-            {
-                Program program = new(CreateOptions(parseResult), cancellationToken);
-                return program.ProcessCommandAsync();
-            }
+                new ProcessCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
         );
 
         return command;
@@ -91,10 +89,7 @@ internal sealed class CommandLine
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
-            {
-                Program program = new(CreateOptions(parseResult), cancellationToken);
-                return program.CleanupCommandAsync();
-            }
+                new CleanupCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
         );
 
         return command;
@@ -111,22 +106,22 @@ internal sealed class CommandLine
             _formatOption,
             _deleteEmptyOption,
             _moveOption,
-            _dbPathOption,
+            _tagPathOption,
+            _tagsOption,
+            _datePathOption,
+            _dbFileOption,
             _rehashOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
-            {
-                Program program = new(CreateOptions(parseResult), cancellationToken);
-                return program.OrganizeCommandAsync();
-            }
+                new OrganizeCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
         );
         return command;
     }
 
     private Command CreateDuplicatesCommand()
     {
-        Option<FileInfo?> requiredDbOption = CreateDbPathOption();
+        Option<FileInfo?> requiredDbOption = CreateDbFileOption();
         requiredDbOption.Required = true;
 
         Command command = new(
@@ -143,20 +138,17 @@ internal sealed class CommandLine
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
-            {
-                Program program = new(
+                new DuplicatesCommand(
                     CreateOptions(parseResult, parseResult.GetValue(requiredDbOption)),
                     cancellationToken
-                );
-                return program.DuplicatesCommandAsync();
-            }
+                ).ExecuteAsync()
         );
         return command;
     }
 
     private Command CreateIndexCommand()
     {
-        Option<FileInfo?> requiredDbOption = CreateDbPathOption();
+        Option<FileInfo?> requiredDbOption = CreateDbFileOption();
         requiredDbOption.Required = true;
 
         Command command = new("index", "Index files into the database for deduplication tracking")
@@ -168,13 +160,10 @@ internal sealed class CommandLine
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
-            {
-                Program program = new(
+                new IndexCommand(
                     CreateOptions(parseResult, parseResult.GetValue(requiredDbOption)),
                     cancellationToken
-                );
-                return program.IndexCommandAsync();
-            }
+                ).ExecuteAsync()
         );
         return command;
     }
@@ -184,10 +173,7 @@ internal sealed class CommandLine
         Command command = new("undo", "Undo media file processing") { _pathOption, _dryRunOption };
         command.SetAction(
             (parseResult, cancellationToken) =>
-            {
-                Program program = new(CreateOptions(parseResult), cancellationToken);
-                return program.UndoCommandAsync();
-            }
+                new UndoCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
         );
 
         return command;
@@ -201,20 +187,22 @@ internal sealed class CommandLine
                 ? t
                 : Math.Min(Environment.ProcessorCount, 4),
             DryRun = parseResult.GetValue(_dryRunOption),
-            DateFromPath = parseResult.GetValue(_dateFromPathOption),
+            DatePath = parseResult.GetValue(_datePathOption),
             SkipBackup = parseResult.GetValue(_skipBackupOption),
             OutPath = parseResult.GetValue(_outPathOption),
             Format = parseResult.GetValue(_formatOption) ?? "yyyy/MM",
             DeleteEmpty = parseResult.GetValue(_deleteEmptyOption),
             Move = parseResult.GetValue(_moveOption),
-            DbPath = dbPathOverride ?? parseResult.GetValue(_dbPathOption),
+            TagPath = parseResult.GetValue(_tagPathOption),
+            Tags = parseResult.GetValue(_tagsOption),
+            DbFile = dbPathOverride ?? parseResult.GetValue(_dbFileOption),
             Rehash = parseResult.GetValue(_rehashOption),
             ShortVideoDuration = parseResult.GetValue(_durationOption),
             Reprocess = parseResult.GetValue(_reprocessOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
-                File = parseResult.GetValue(_logFileOption) ?? string.Empty,
+                File = parseResult.GetValue(_logFileOption),
                 FileClear = parseResult.GetValue(_logFileClearOption),
             },
         };
@@ -229,8 +217,8 @@ internal sealed class CommandLine
     private static Option<bool> CreateDryRunOption() =>
         new("--dryrun") { Description = "Perform a dry run without making changes" };
 
-    private static Option<bool> CreateDateFromPathOption() =>
-        new("--datefrompath") { Description = "Set missing EXIF creation date from file path" };
+    private static Option<bool> CreateDatePathOption() =>
+        new("--datepath") { Description = "Set missing EXIF creation date from file path" };
 
     private static Option<bool> CreateSkipBackupOption() =>
         new("--skipbackup") { Description = "Skip creating backup files (disables undo)" };
@@ -270,7 +258,21 @@ internal sealed class CommandLine
     private static Option<bool> CreateMoveOption() =>
         new("--move") { Description = "Move files instead of copying (default: copy)" };
 
-    private static Option<FileInfo?> CreateDbPathOption() =>
+    private static Option<bool> CreateTagPathOption() =>
+        new("--tagpath")
+        {
+            Description =
+                "Apply path sub-directory components as XMP Subject tags to the organized file",
+        };
+
+    private static Option<string?> CreateTagsOption() =>
+        new("--tags")
+        {
+            Description =
+                "Comma-separated XMP Subject tags to apply to every organized file (e.g. \"vacation,family\")",
+        };
+
+    private static Option<FileInfo?> CreateDbFileOption() =>
         new("--db") { Description = "SQLite database file for deduplication tracking" };
 
     private static Option<bool> CreateRehashOption() =>
@@ -288,7 +290,7 @@ internal sealed class CommandLine
         {
             Description =
                 "Maximum duration in seconds below which a video is considered a short clip and deleted",
-            DefaultValueFactory = _ => ProcessTask.ShortVideoDuration,
+            DefaultValueFactory = _ => MediaUtilities.ShortVideoDuration,
         };
         option.Validators.Add(result =>
         {
@@ -353,15 +355,8 @@ internal sealed class CommandLine
             Recursive = true,
         };
 
-    private static Option<string> CreateLogFileOption()
-    {
-        Option<string> option = new("--logfile")
-        {
-            Description = "Write logs to the specified file",
-            Recursive = true,
-        };
-        return option.AcceptLegalFileNamesOnly();
-    }
+    private static Option<FileInfo?> CreateLogFileOption() =>
+        new("--logfile") { Description = "Write logs to the specified file", Recursive = true };
 
     internal static bool BypassStartup(ParseResult parseResult) =>
         parseResult.Errors.Count > 0
@@ -375,13 +370,15 @@ internal sealed class CommandLine
         public required DirectoryInfo Path { get; init; }
         public required int Threads { get; init; }
         public required bool DryRun { get; init; }
-        public required bool DateFromPath { get; init; }
+        public required bool DatePath { get; init; }
         public required bool SkipBackup { get; init; }
         public required DirectoryInfo? OutPath { get; init; }
         public required string Format { get; init; }
         public required bool DeleteEmpty { get; init; }
         public required bool Move { get; init; }
-        public required FileInfo? DbPath { get; init; }
+        public required bool TagPath { get; init; }
+        public required string? Tags { get; init; }
+        public required FileInfo? DbFile { get; init; }
         public required bool Rehash { get; init; }
         public required double ShortVideoDuration { get; init; }
         public required bool Reprocess { get; init; }

@@ -7,24 +7,28 @@ internal enum IndexStatus
     Unchanged,
 }
 
-internal sealed class IndexTask(bool rehash, Database database)
+internal sealed class IndexTask(CommandLine.Options options, Database database)
 {
     internal async Task<(IndexStatus status, string hash, bool wasProcessed)> IndexFileAsync(
-        string filePath
+        string filePath,
+        CancellationToken cancellationToken = default
     )
     {
         Log.Information("Indexing '{FilePath}'", filePath);
         FileInfo info = new(filePath);
-        FileRecord? cached = await database.GetByPathAsync(filePath).ConfigureAwait(false);
+        FileRecord? cached = await database
+            .GetByPathAsync(filePath, cancellationToken)
+            .ConfigureAwait(false);
         string hash = await Database
-            .ResolveHashAsync(filePath, cached, rehash)
+            .ResolveHashAsync(filePath, cached, options.Rehash, cancellationToken)
             .ConfigureAwait(false);
         if (cached is null)
         {
-            Log.Debug("Inserting '{FilePath}' with hash {Hash}", filePath, hash);
+            Log.Debug("Inserting '{FilePath}' with hash '{Hash}'", filePath, hash);
             await database
                 .InsertAsync(
-                    new FileRecord(filePath, hash, info.Length, info.LastWriteTimeUtc.Ticks, false)
+                    new FileRecord(filePath, hash, info.Length, info.LastWriteTimeUtc.Ticks, false),
+                    cancellationToken
                 )
                 .ConfigureAwait(false);
             return (IndexStatus.Inserted, hash, false);
@@ -32,9 +36,15 @@ internal sealed class IndexTask(bool rehash, Database database)
 
         if (hash != cached.Hash)
         {
-            Log.Debug("Updating '{FilePath}' with new hash {Hash}", filePath, hash);
+            Log.Debug("Updating '{FilePath}' with new hash '{Hash}'", filePath, hash);
             await database
-                .UpdateHashAsync(filePath, hash, info.Length, info.LastWriteTimeUtc.Ticks)
+                .UpdateHashAsync(
+                    filePath,
+                    hash,
+                    info.Length,
+                    info.LastWriteTimeUtc.Ticks,
+                    cancellationToken
+                )
                 .ConfigureAwait(false);
             return (IndexStatus.Updated, hash, false);
         }
@@ -48,10 +58,9 @@ internal sealed class IndexTask(bool rehash, Database database)
         int unchanged,
         int ignored,
         int failed
-    )> ExecuteIndexAsync(
+    )> ExecuteAsync(
         IReadOnlyCollection<string> files,
-        int threads,
-        CancellationToken ct = default
+        CancellationToken cancellationToken = default
     )
     {
         int inserted = 0,
@@ -62,18 +71,23 @@ internal sealed class IndexTask(bool rehash, Database database)
         await Parallel
             .ForEachAsync(
                 files,
-                new ParallelOptions { MaxDegreeOfParallelism = threads, CancellationToken = ct },
-                async (file, fileCt) =>
+                new ParallelOptions
                 {
-                    if (!ProcessTask.SupportedExtensions.Contains(Path.GetExtension(file)))
+                    MaxDegreeOfParallelism = options.Threads,
+                    CancellationToken = cancellationToken,
+                },
+                async (file, ct) =>
+                {
+                    if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
                     {
+                        Log.Warning("Skipping non-media file: '{FilePath}'", file);
                         _ = Interlocked.Increment(ref ignored);
                         return;
                     }
 
                     try
                     {
-                        (IndexStatus status, _, _) = await IndexFileAsync(file)
+                        (IndexStatus status, _, _) = await IndexFileAsync(file, ct)
                             .ConfigureAwait(false);
                         _ = status switch
                         {

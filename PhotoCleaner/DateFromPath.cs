@@ -114,6 +114,30 @@ internal static partial class DateFromPath
                         : hyphenDate;
                 }
 
+                if (hyphenMatch.Groups[8].Success)
+                {
+                    // Dotted 12-hour time: " at H.MM.SS AM/PM"
+                    if (
+                        int.TryParse(hyphenMatch.Groups[8].Value, out int hours12)
+                        && int.TryParse(hyphenMatch.Groups[9].Value, out int mins)
+                        && int.TryParse(hyphenMatch.Groups[10].Value, out int secs)
+                        && hours12 >= 1
+                        && hours12 <= 12
+                        && mins <= 59
+                        && secs <= 59
+                    )
+                    {
+                        bool isPm = hyphenMatch
+                            .Groups[11]
+                            .Value.Equals("PM", StringComparison.OrdinalIgnoreCase);
+                        int hours24 =
+                            hours12 == 12 ? (isPm ? 12 : 0) : (isPm ? hours12 + 12 : hours12);
+                        return hyphenDate.Date.Add(new TimeSpan(hours24, mins, secs));
+                    }
+
+                    return hyphenDate;
+                }
+
                 return hyphenDate;
             }
         }
@@ -229,8 +253,11 @@ internal static partial class DateFromPath
     [GeneratedRegex(@"(\d{8})(?:_(\d{6,9}))?")]
     private static partial Regex FilenameCompactDateTimeRegex();
 
-    // Filename: YYYY-MM-DD with optional _HHMMSS or -HH-MM-SS
-    [GeneratedRegex(@"(\d{4})-(\d{2})-(\d{2})(?:_(\d{6,9})|-(\d{2})-(\d{2})-(\d{2}))?")]
+    // Filename: YYYY-MM-DD with optional _HHMMSS, -HH-MM-SS, or " at H.MM.SS AM/PM"
+    [GeneratedRegex(
+        @"(\d{4})-(\d{2})-(\d{2})(?:_(\d{6,9})|-(\d{2})-(\d{2})-(\d{2})|\s+at\s+(\d{1,2})\.(\d{2})\.(\d{2})\s*(AM|PM))?",
+        RegexOptions.IgnoreCase
+    )]
     private static partial Regex FilenameHyphenDateRegex();
 
     // Filename: YYYY_MM_DD with optional _HHMMSS (6-9 digits)
