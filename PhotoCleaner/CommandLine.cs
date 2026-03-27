@@ -124,6 +124,9 @@ internal sealed class CommandLine
         Option<FileInfo?> requiredDbOption = CreateDbFileOption();
         requiredDbOption.Required = true;
 
+        Option<FileInfo?> requiredOutDbOption = CreateOutDbFileOption();
+        requiredOutDbOption.Required = true;
+
         Command command = new(
             "duplicates",
             "Delete files in --outpath whose content (SHA-256) matches a file in --path"
@@ -134,12 +137,17 @@ internal sealed class CommandLine
             _threadsOption,
             _outPathOption,
             requiredDbOption,
+            requiredOutDbOption,
             _rehashOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
                 new DuplicatesCommand(
-                    CreateOptions(parseResult, parseResult.GetValue(requiredDbOption)),
+                    CreateOptions(
+                        parseResult,
+                        parseResult.GetValue(requiredDbOption),
+                        parseResult.GetValue(requiredOutDbOption)
+                    ),
                     cancellationToken
                 ).ExecuteAsync()
         );
@@ -179,7 +187,11 @@ internal sealed class CommandLine
         return command;
     }
 
-    internal Options CreateOptions(ParseResult parseResult, FileInfo? dbPathOverride = null) =>
+    internal Options CreateOptions(
+        ParseResult parseResult,
+        FileInfo? dbPathOverride = null,
+        FileInfo? outDbPathOverride = null
+    ) =>
         new()
         {
             Path = parseResult.GetValue(_pathOption)!,
@@ -196,6 +208,7 @@ internal sealed class CommandLine
             TagPath = parseResult.GetValue(_tagPathOption),
             Tags = parseResult.GetValue(_tagsOption),
             DbFile = dbPathOverride ?? parseResult.GetValue(_dbFileOption),
+            OutDbFile = outDbPathOverride,
             Rehash = parseResult.GetValue(_rehashOption),
             ShortVideoDuration = parseResult.GetValue(_durationOption),
             Reprocess = parseResult.GetValue(_reprocessOption),
@@ -274,6 +287,9 @@ internal sealed class CommandLine
 
     private static Option<FileInfo?> CreateDbFileOption() =>
         new("--db") { Description = "SQLite database file for deduplication tracking" };
+
+    private static Option<FileInfo?> CreateOutDbFileOption() =>
+        new("--outdb") { Description = "SQLite database file for target file hash caching" };
 
     private static Option<bool> CreateRehashOption() =>
         new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
@@ -379,6 +395,7 @@ internal sealed class CommandLine
         public required bool TagPath { get; init; }
         public required string? Tags { get; init; }
         public required FileInfo? DbFile { get; init; }
+        public required FileInfo? OutDbFile { get; init; }
         public required bool Rehash { get; init; }
         public required double ShortVideoDuration { get; init; }
         public required bool Reprocess { get; init; }

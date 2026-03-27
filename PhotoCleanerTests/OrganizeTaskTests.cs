@@ -33,6 +33,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             TagPath = tagPath,
             Tags = null,
             DbFile = null,
+            OutDbFile = null,
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,

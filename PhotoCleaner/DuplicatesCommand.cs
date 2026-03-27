@@ -30,19 +30,27 @@ internal sealed class DuplicatesCommand(
                             .RunAsync(
                                 options.DbFile,
                                 async database =>
-                                {
-                                    DuplicatesTask task = new(
-                                        options,
-                                        database!,
-                                        _skippedExtensions
-                                    );
-                                    return await task.ExecuteAsync(
-                                            sourceFiles,
-                                            outFiles,
+                                    await DatabaseScope
+                                        .RunAsync(
+                                            options.OutDbFile,
+                                            async outDatabase =>
+                                            {
+                                                DuplicatesTask task = new(
+                                                    options,
+                                                    database!,
+                                                    outDatabase!,
+                                                    _skippedExtensions
+                                                );
+                                                return await task.ExecuteAsync(
+                                                        sourceFiles,
+                                                        outFiles,
+                                                        cancellationToken
+                                                    )
+                                                    .ConfigureAwait(false);
+                                            },
                                             cancellationToken
                                         )
-                                        .ConfigureAwait(false);
-                                },
+                                        .ConfigureAwait(false),
                                 cancellationToken
                             )
                             .ConfigureAwait(false);

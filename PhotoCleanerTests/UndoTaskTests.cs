@@ -22,6 +22,7 @@ public sealed class UndoTaskTests
             TagPath = false,
             Tags = null,
             DbFile = null,
+            OutDbFile = null,
             Rehash = false,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,

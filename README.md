@@ -136,6 +136,7 @@ Options:
   --threads <threads>            Number of parallel threads [default: 4]
   --outpath <outpath> (REQUIRED) Target directory to scan for duplicates
   --db <db> (REQUIRED)           SQLite database file for source file index
+  --outdb <outdb> (REQUIRED)     SQLite database file for target file hash caching
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
 ```
 
@@ -193,6 +194,11 @@ Options:
   created automatically on first use. **Breaking change**: databases from earlier versions
   (with `organized_files`, `processed_files`, or `source_files` tables) are incompatible;
   delete the old file before first use.
+- `--outdb <path>` - **required** for `duplicates`; path to a SQLite database file for
+  caching target file hashes. Uses the same schema and size/mtime caching as `--db` so
+  unchanged target files skip SHA-256 recomputation on re-runs. The outdb from a duplicates
+  run can be reused as the `--db` for a subsequent `process` run on the same directory,
+  avoiding redundant hashing across workflow steps. Created automatically on first use.
 - `--rehash` - optional (`process`, `organize`, `duplicates`, `index`); forces SHA-256 recomputation
   for every file, bypassing the size/mtime cache. Use when file content may have changed
   without the modification timestamp being updated.
@@ -258,14 +264,14 @@ PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Intermediate --db /data/photos.db
 
 # Delete files in /target that already exist (by content) in /source
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/dedup.db
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/source.db --outdb /data/target.db
 
 # Preview duplicate deletion without removing anything
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/dedup.db --dryrun
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/source.db --outdb /data/target.db --dryrun
 
 # Incremental: index source once, then check multiple target directories over time
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import1 --db /data/dedup.db
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import2 --db /data/dedup.db
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import1 --db /data/source.db --outdb /data/import1.db
+PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import2 --db /data/source.db --outdb /data/import2.db
 
 # Index a directory into the database (stand-alone, without running duplicates)
 PhotoCleaner index --path /home/user/Source --db /data/dedup.db
@@ -374,9 +380,11 @@ a source directory, identified by SHA-256 hash. Source files are never modified.
    the path primary key. Re-indexing the same source is idempotent; new source files added
    later are picked up on the next run. Size/mtime caching (bypassed by `--rehash`) avoids
    recomputing SHA-256 for unchanged files.
-2. **Phase 2 - Scan target**: hashes every supported media file in `--outpath` and checks
-   each hash against the DB via the hash index. Files whose hash is found are deleted; files
-   with unique hashes are kept.
+2. **Phase 2 - Scan target**: hashes every supported media file in `--outpath` using
+   size/mtime caching from `--outdb` (unchanged files skip rehashing), upserts each record
+   into the outdb, and checks each hash against the source DB via the hash index. Files whose
+   hash is found are deleted; files with unique hashes are kept. The outdb can be reused as
+   `--db` for a subsequent `process` run on the same directory.
 3. **Unsupported files**: non-media files (by extension) are skipped in both phases and left
    untouched.
 
@@ -396,7 +404,7 @@ docker build -f Docker/Dockerfile -t photocleaner:latest .
 ```
 
 Mount host directories as volumes so the container can access media files.
-All `--path`, `--outpath`, and `--db` arguments refer to paths inside the container:
+All `--path`, `--outpath`, `--db`, and `--outdb` arguments refer to paths inside the container:
 
 ```bash
 # Show help (default when no arguments are passed)
@@ -436,7 +444,7 @@ docker run --rm \
     -v /host/source:/source \
     -v /host/target:/target \
     -v /host/db:/db \
-    photocleaner:latest duplicates --path /source --outpath /target --db /db/dedup.db
+    photocleaner:latest duplicates --path /source --outpath /target --db /db/source.db --outdb /db/target.db
 
 # Index a directory into the database
 docker run --rm \

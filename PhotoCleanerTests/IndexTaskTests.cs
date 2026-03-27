@@ -21,6 +21,7 @@ public sealed class IndexTaskTests
             TagPath = false,
             Tags = null,
             DbFile = null,
+            OutDbFile = null,
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,

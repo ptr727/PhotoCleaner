@@ -316,6 +316,55 @@ public sealed class CommandLineTests
         options.DbFile!.FullName.Should().Be(dbPath);
     }
 
+    // -- --outdb option -------------------------------------------------------
+
+    [Fact]
+    public void OutDbFileOption_DefaultNull()
+    {
+        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        options.OutDbFile.Should().BeNull();
+    }
+
+    [Fact]
+    public void DuplicatesCommand_WithOutDb_Parses()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), "source.db");
+        string outDbPath = Path.Combine(Path.GetTempPath(), "target.db");
+        CommandLine cli = new([
+            "duplicates",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--db",
+            dbPath,
+            "--outdb",
+            outDbPath,
+        ]);
+
+        cli.Result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void DuplicatesCommand_MissingOutDb_ValidationError()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), "source.db");
+        CommandLine cli = new([
+            "duplicates",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--db",
+            dbPath,
+        ]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
     // -- index command --------------------------------------------------------
 
     [Fact]

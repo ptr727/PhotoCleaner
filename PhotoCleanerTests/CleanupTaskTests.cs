@@ -20,6 +20,7 @@ public sealed class CleanupTaskTests
             TagPath = false,
             Tags = null,
             DbFile = null,
+            OutDbFile = null,
             Rehash = false,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,

@@ -3,6 +3,7 @@ namespace PhotoCleaner;
 internal sealed class DuplicatesTask(
     CommandLine.Options options,
     Database database,
+    Database outDatabase,
     SkippedExtensionTracker skippedExtensions
 )
 {
@@ -72,9 +73,37 @@ internal sealed class DuplicatesTask(
         }
 
         Log.Information("Indexing '{FilePath}'", file);
-        string hash = await Database
-            .ComputeHashAsync(file, cancellationToken)
+        FileRecord? cached = await outDatabase
+            .GetByPathAsync(file, cancellationToken)
             .ConfigureAwait(false);
+        string hash = await Database
+            .ResolveHashAsync(file, cached, options.Rehash, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Upsert into outdb for future cache hits
+        FileInfo info = new(file);
+        if (cached is null)
+        {
+            await outDatabase
+                .InsertAsync(
+                    new FileRecord(file, hash, info.Length, info.LastWriteTimeUtc.Ticks, false),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+        else if (hash != cached.Hash)
+        {
+            await outDatabase
+                .UpdateHashAsync(
+                    file,
+                    hash,
+                    info.Length,
+                    info.LastWriteTimeUtc.Ticks,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+
         bool isDuplicate = await database
             .HashExistsAsync(hash, cancellationToken)
             .ConfigureAwait(false);
