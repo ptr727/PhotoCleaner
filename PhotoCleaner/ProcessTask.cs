@@ -376,6 +376,11 @@ internal sealed class ProcessTask(
         }
 
         // Delete live video with confirmed matching image
+        Log.Warning(
+            "Deleting {Duration}s live photo video with matching image file: '{FilePath}'",
+            duration,
+            fileInfo.FullName
+        );
         if (options.DryRun)
         {
             return false;
@@ -383,11 +388,6 @@ internal sealed class ProcessTask(
 
         _modified = true;
         _deleted = true;
-        Log.Warning(
-            "Deleting {Duration}s live photo video with matching image file: '{FilePath}'",
-            duration,
-            fileInfo.FullName
-        );
         if (options.SkipBackup)
         {
             File.Delete(fileInfo.FullName);
