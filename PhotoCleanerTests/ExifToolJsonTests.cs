@@ -1,9 +1,63 @@
+using System.Text.Json;
 using PhotoCleaner;
 
 namespace PhotoCleanerTests;
 
 public sealed class ExifToolJsonTests
 {
+    // -- StringOrStringArrayConverter -----------------------------------------
+
+    private static ExifToolJson Deserialize(string json) =>
+        JsonSerializer.Deserialize(json, SourceGenerationContext.Default.ExifToolJson)!;
+
+    [Fact]
+    public void XMPSubject_StringArray_DeserializesCorrectly()
+    {
+        ExifToolJson result = Deserialize("""{"XMP:Subject": ["tag1", "tag2"]}""");
+
+        result.XMPSubject.Should().BeEquivalentTo(["tag1", "tag2"]);
+    }
+
+    [Fact]
+    public void XMPSubject_BareString_DeserializesAsSingleElementArray()
+    {
+        ExifToolJson result = Deserialize("""{"XMP:Subject": "solo"}""");
+
+        result.XMPSubject.Should().BeEquivalentTo(["solo"]);
+    }
+
+    [Fact]
+    public void XMPSubject_BareNumber_DeserializesAsStringArray()
+    {
+        ExifToolJson result = Deserialize("""{"XMP:Subject": 2009}""");
+
+        result.XMPSubject.Should().BeEquivalentTo(["2009"]);
+    }
+
+    [Fact]
+    public void XMPSubject_MixedArray_DeserializesAllAsStrings()
+    {
+        ExifToolJson result = Deserialize("""{"XMP:Subject": ["tag1", 2009, "tag2"]}""");
+
+        result.XMPSubject.Should().BeEquivalentTo(["tag1", "2009", "tag2"]);
+    }
+
+    [Fact]
+    public void XMPSubject_Null_DeserializesAsNull()
+    {
+        ExifToolJson result = Deserialize("""{"XMP:Subject": null}""");
+
+        result.XMPSubject.Should().BeNull();
+    }
+
+    [Fact]
+    public void XMPSubject_Missing_DeserializesAsNull()
+    {
+        ExifToolJson result = Deserialize("""{}""");
+
+        result.XMPSubject.Should().BeNull();
+    }
+
     public static TheoryData<ExifToolJson> IsDateSet_ValidDates =>
         [
             new ExifToolJson { EXIFDateTimeOriginal = "2024:01:15 12:30:45" },

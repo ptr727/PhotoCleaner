@@ -39,6 +39,11 @@ internal sealed class OrganizeTask(
         Failed,
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Per-file catch-all logs the file path and continues processing remaining files"
+    )]
     internal async Task<(
         int organized,
         int ignored,
@@ -65,14 +70,27 @@ internal sealed class OrganizeTask(
                 },
                 async (file, ct) =>
                 {
-                    _ = await OrganizeFileAsync(file, sourceDir, ct).ConfigureAwait(false) switch
+                    try
                     {
-                        OrganizeResult.Organized => Interlocked.Increment(ref organized),
-                        OrganizeResult.Ignored => Interlocked.Increment(ref ignored),
-                        OrganizeResult.Skipped => Interlocked.Increment(ref skipped),
-                        OrganizeResult.Failed => Interlocked.Increment(ref failed),
-                        _ => throw new NotImplementedException(),
-                    };
+                        _ = await OrganizeFileAsync(file, sourceDir, ct)
+                            .ConfigureAwait(false) switch
+                        {
+                            OrganizeResult.Organized => Interlocked.Increment(ref organized),
+                            OrganizeResult.Ignored => Interlocked.Increment(ref ignored),
+                            OrganizeResult.Skipped => Interlocked.Increment(ref skipped),
+                            OrganizeResult.Failed => Interlocked.Increment(ref failed),
+                            _ => throw new NotImplementedException(),
+                        };
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "Failed to organize '{FilePath}'", file);
+                        _ = Interlocked.Increment(ref failed);
+                    }
                 }
             )
             .ConfigureAwait(false);

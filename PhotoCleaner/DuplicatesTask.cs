@@ -15,6 +15,11 @@ internal sealed class DuplicatesTask(
         Failed,
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Per-file catch-all logs the file path and continues processing remaining files"
+    )]
     internal async Task<(int indexed, int ignored, int deleted, int kept, int failed)> ExecuteAsync(
         IReadOnlyCollection<string> sourceFiles,
         IReadOnlyCollection<string> outFiles,
@@ -45,14 +50,26 @@ internal sealed class DuplicatesTask(
                 },
                 async (file, ct) =>
                 {
-                    _ = await CheckDuplicateFileAsync(file, ct).ConfigureAwait(false) switch
+                    try
                     {
-                        DuplicateCheckResult.Ignored => Interlocked.Increment(ref ignored),
-                        DuplicateCheckResult.Kept => Interlocked.Increment(ref kept),
-                        DuplicateCheckResult.Deleted => Interlocked.Increment(ref deleted),
-                        DuplicateCheckResult.Failed => Interlocked.Increment(ref deleteFailed),
-                        _ => throw new NotImplementedException(),
-                    };
+                        _ = await CheckDuplicateFileAsync(file, ct).ConfigureAwait(false) switch
+                        {
+                            DuplicateCheckResult.Ignored => Interlocked.Increment(ref ignored),
+                            DuplicateCheckResult.Kept => Interlocked.Increment(ref kept),
+                            DuplicateCheckResult.Deleted => Interlocked.Increment(ref deleted),
+                            DuplicateCheckResult.Failed => Interlocked.Increment(ref deleteFailed),
+                            _ => throw new NotImplementedException(),
+                        };
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "Failed to check duplicate '{FilePath}'", file);
+                        _ = Interlocked.Increment(ref deleteFailed);
+                    }
                 }
             )
             .ConfigureAwait(false);

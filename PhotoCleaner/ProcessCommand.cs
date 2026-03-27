@@ -80,6 +80,11 @@ internal sealed class ProcessCommand(
             )
             .ConfigureAwait(false);
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Per-file catch-all logs the file path and continues processing remaining files"
+    )]
     private async Task ExecuteProcessAsync(Database? database)
     {
         ConcurrentBag<string> reProcessNames = [];
@@ -95,36 +100,48 @@ internal sealed class ProcessCommand(
                 async (fileName, ct) =>
                 {
                     Log.Debug("Processing '{FilePath}'", fileName);
-                    switch (
-                        await ProcessTask
-                            .ExecuteAsync(
-                                options,
-                                new FileInfo(fileName),
-                                database,
-                                reProcessNames,
-                                _skippedExtensions,
-                                ct
-                            )
-                            .ConfigureAwait(false)
-                    )
+                    try
                     {
-                        case ProcessTask.ProcessResult.Failure:
-                            _ = Interlocked.Increment(ref _failedCount);
-                            break;
-                        case ProcessTask.ProcessResult.Deleted:
-                            _ = Interlocked.Increment(ref _deletedCount);
-                            break;
-                        case ProcessTask.ProcessResult.Modified:
-                        case ProcessTask.ProcessResult.Reprocess:
-                            _ = Interlocked.Increment(ref _modifiedCount);
-                            break;
-                        case ProcessTask.ProcessResult.Skipped:
-                            _ = Interlocked.Increment(ref _skippedCount);
-                            break;
-                        case ProcessTask.ProcessResult.UnknownExtension:
-                        case ProcessTask.ProcessResult.Success:
-                        default:
-                            break;
+                        switch (
+                            await ProcessTask
+                                .ExecuteAsync(
+                                    options,
+                                    new FileInfo(fileName),
+                                    database,
+                                    reProcessNames,
+                                    _skippedExtensions,
+                                    ct
+                                )
+                                .ConfigureAwait(false)
+                        )
+                        {
+                            case ProcessTask.ProcessResult.Failure:
+                                _ = Interlocked.Increment(ref _failedCount);
+                                break;
+                            case ProcessTask.ProcessResult.Deleted:
+                                _ = Interlocked.Increment(ref _deletedCount);
+                                break;
+                            case ProcessTask.ProcessResult.Modified:
+                            case ProcessTask.ProcessResult.Reprocess:
+                                _ = Interlocked.Increment(ref _modifiedCount);
+                                break;
+                            case ProcessTask.ProcessResult.Skipped:
+                                _ = Interlocked.Increment(ref _skippedCount);
+                                break;
+                            case ProcessTask.ProcessResult.UnknownExtension:
+                            case ProcessTask.ProcessResult.Success:
+                            default:
+                                break;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "Failed to process '{FilePath}'", fileName);
+                        _ = Interlocked.Increment(ref _failedCount);
                     }
                 }
             )

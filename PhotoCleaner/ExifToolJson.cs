@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace PhotoCleaner;
 
-// Handles exiftool outputting a single XMP:Subject value as a bare string rather than ["string"]
+// Handles exiftool outputting XMP:Subject as a bare string, bare number, or mixed array
 internal sealed class StringOrStringArrayConverter : JsonConverter<string[]?>
 {
     public override string[]? Read(
@@ -22,12 +22,21 @@ internal sealed class StringOrStringArrayConverter : JsonConverter<string[]?>
             return [reader.GetString()!];
         }
 
+        if (reader.TokenType == JsonTokenType.Number)
+        {
+            return [ReadNumberAsString(ref reader)];
+        }
+
         if (reader.TokenType == JsonTokenType.StartArray)
         {
             List<string> list = [];
             while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
             {
-                list.Add(reader.GetString()!);
+                list.Add(
+                    reader.TokenType == JsonTokenType.String
+                        ? reader.GetString()!
+                        : ReadNumberAsString(ref reader)
+                );
             }
 
             return [.. list];
@@ -35,6 +44,11 @@ internal sealed class StringOrStringArrayConverter : JsonConverter<string[]?>
 
         throw new JsonException($"Unexpected token {reader.TokenType} for XMP:Subject");
     }
+
+    private static string ReadNumberAsString(ref Utf8JsonReader reader) =>
+        reader.TryGetInt64(out long l)
+            ? l.ToString(CultureInfo.InvariantCulture)
+            : reader.GetDouble().ToString(CultureInfo.InvariantCulture);
 
     public override void Write(
         Utf8JsonWriter writer,

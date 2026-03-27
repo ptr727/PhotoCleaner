@@ -56,6 +56,11 @@ internal sealed class IndexTask(
         return (IndexStatus.Unchanged, hash, cached.IsProcessed);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Per-file catch-all logs the file path and continues processing remaining files"
+    )]
     internal async Task<(
         int inserted,
         int updated,
@@ -102,7 +107,11 @@ internal sealed class IndexTask(
                             _ => throw new NotImplementedException(),
                         };
                     }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
                     {
                         Log.Error(ex, "Failed to index '{FilePath}'", file);
                         _ = Interlocked.Increment(ref failed);

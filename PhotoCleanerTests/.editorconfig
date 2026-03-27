@@ -26,3 +26,6 @@ dotnet_diagnostic.CA1305.severity = none
 
 # xUnit MemberData parameters are never null at runtime
 dotnet_diagnostic.CA1062.severity = none
+
+# Raw string literals containing JSON are intentional in tests
+dotnet_diagnostic.JSON002.severity = none
