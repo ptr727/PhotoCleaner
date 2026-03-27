@@ -905,7 +905,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             DatePath = false,
             SkipBackup = skipBackup,
             OutPath = null,
-            Format = "yyyy/MM",
+            Format = "yyyy/MM/dd",
             DeleteEmpty = false,
             Move = false,
             TagPath = false,

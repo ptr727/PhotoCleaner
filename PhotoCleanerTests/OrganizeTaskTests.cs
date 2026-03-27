@@ -450,7 +450,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    // -- SubdirectoryFormat: nested directories created from yyyy/MM format ---
+    // -- SubdirectoryFormat: nested directories created from custom format ---
 
     [Fact]
     public async Task ExecuteAsync_SubdirectoryFormat_CreatesNestedDirs()

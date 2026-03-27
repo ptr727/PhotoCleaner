@@ -202,7 +202,7 @@ internal sealed class CommandLine
             DatePath = parseResult.GetValue(_datePathOption),
             SkipBackup = parseResult.GetValue(_skipBackupOption),
             OutPath = parseResult.GetValue(_outPathOption),
-            Format = parseResult.GetValue(_formatOption) ?? "yyyy/MM",
+            Format = parseResult.GetValue(_formatOption) ?? "yyyy/MM/dd",
             DeleteEmpty = parseResult.GetValue(_deleteEmptyOption),
             Move = parseResult.GetValue(_moveOption),
             TagPath = parseResult.GetValue(_tagPathOption),
@@ -328,7 +328,7 @@ internal sealed class CommandLine
         {
             Description =
                 "Date format for output subdirectory names; use '/' to create nested subdirectories (e.g. yyyy/MM/dd)",
-            DefaultValueFactory = _ => "yyyy/MM",
+            DefaultValueFactory = _ => "yyyy/MM/dd",
         };
         option.Validators.Add(result =>
         {

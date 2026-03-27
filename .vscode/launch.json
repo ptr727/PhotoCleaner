@@ -75,7 +75,7 @@
                 "--outpath=/data/media/Temp/Organized",
                 "--deleteempty=true",
                 "--move=false",
-                "--format=yyyy/MM",
+                "--format=yyyy/MM/yyyy-MM-dd",
                 "--datepath=true",
                 "--tagpath=true",
                 "--tags=space in name, nospace",

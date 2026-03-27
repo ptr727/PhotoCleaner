@@ -22,7 +22,7 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
 - **Organizes into date folders** (via `organize` command): Copies (default) or moves supported
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
   Falls back to a deterministic `0001/01` bucket when no date is found. Supports a custom
-  `--format` string (default `yyyy/MM`) validated as a date-only pattern. Optional SQLite
+  `--format` string (default `yyyy/MM/dd`) validated as a date-only pattern. Optional SQLite
   deduplication via `--db` tracks source file hashes so re-runs skip already organized files.
   `--tagpath` writes the source sub-directory path components as `XMP:Subject` tags on the
   destination file. `--tags` applies explicit comma-separated `XMP:Subject` tags to every
@@ -115,7 +115,7 @@ Options:
   --dryrun                       Perform a dry run without making changes
   --threads <threads>            Number of parallel threads [default: 4]
   --outpath <outpath> (REQUIRED) Output directory for organized files
-  --format <format>              Date format for output subdirectory names [default: yyyy/MM]
+  --format <format>              Date format for output subdirectory names [default: yyyy/MM/dd]
   --deleteempty                  Delete empty source subdirectories after organizing
   --move                         Move files instead of copying (default: copy)
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
@@ -161,8 +161,8 @@ Options:
   command cannot reverse a run made with this flag.
 - `--outpath` - required for `organize`; target directory (created on demand).
 - `--format` - optional (`organize` only); a C# date format string used to name date
-  subdirectories (default `"yyyy/MM"`). Must be date-only - time components are rejected.
-  Files with no EXIF date land in a `"0001/01"` fallback bucket.
+  subdirectories (default `"yyyy/MM/dd"`). Must be date-only - time components are rejected.
+  Files with no EXIF date land in a `"0001/01/01"` fallback bucket.
 - `--deleteempty` - optional (`organize` only); after all files are organized, deletes empty
   child subdirectories from each source `--path` (deepest first). The source root itself is
   never deleted. Useful for cleaning up directory trees left behind after organizing with
@@ -236,8 +236,8 @@ PhotoCleaner cleanup --path /home/user/Photos --dryrun
 # Organize (copy) media into date-based subdirectories - source files are kept
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized
 
-# Organize with a custom date format (creates e.g. 2024/06/15/ subdirectories)
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/dd"
+# Organize with a custom date format (creates e.g. 2024/06/2024-06-15/ subdirectories)
+PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/yyyy-MM-dd"
 
 # Preview what organize would do without changing anything
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --dryrun
@@ -351,9 +351,9 @@ directories to `outpath/date/filename`:
    by the destination path. The DB file is created automatically on first use.
 3. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
    `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
-   is found - those files land in a `"0001/01"` bucket (with the default `yyyy/MM` format),
+   is found - those files land in a `"0001/01/01"` bucket (with the default `yyyy/MM/dd` format),
    making undated files easy to locate and handle manually.
-4. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy/MM"`).
+4. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy/MM/dd"`).
    The format is validated at startup - time components are rejected.
 5. **Copy or move**: by default files are copied and the source is preserved. Pass `--move`
    to remove the source file after a successful copy.

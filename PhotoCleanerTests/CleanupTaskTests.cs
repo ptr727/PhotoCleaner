@@ -14,7 +14,7 @@ public sealed class CleanupTaskTests
             DatePath = false,
             SkipBackup = false,
             OutPath = null,
-            Format = "yyyy/MM",
+            Format = "yyyy/MM/dd",
             DeleteEmpty = false,
             Move = false,
             TagPath = false,

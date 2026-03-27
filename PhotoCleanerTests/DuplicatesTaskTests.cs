@@ -15,7 +15,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             DatePath = false,
             SkipBackup = false,
             OutPath = null,
-            Format = "yyyy/MM",
+            Format = "yyyy/MM/dd",
             DeleteEmpty = false,
             Move = false,
             TagPath = false,

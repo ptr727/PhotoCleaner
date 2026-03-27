@@ -185,7 +185,7 @@ public sealed class CommandLineTests
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
-        options.Format.Should().Be("yyyy/MM");
+        options.Format.Should().Be("yyyy/MM/dd");
     }
 
     [Fact]
@@ -198,12 +198,12 @@ public sealed class CommandLineTests
             "--outpath",
             ExistingDir,
             "--format",
-            "yyyy/MM/dd",
+            "yyyy/MM",
         ]);
 
         cli.Result.Errors.Should().BeEmpty();
         CommandLine.Options options = cli.CreateOptions(cli.Result);
-        options.Format.Should().Be("yyyy/MM/dd");
+        options.Format.Should().Be("yyyy/MM");
     }
 
     [Fact]
