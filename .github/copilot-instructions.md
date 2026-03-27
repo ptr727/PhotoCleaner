@@ -32,6 +32,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `hash`, `file_size`, `mtime_ticks`, `is_processed`); non-unique hash index for dedup lookups; size/mtime caching via `ResolveHashAsync` to skip rehashing unchanged files
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
+  - `SkippedExtensionTracker.cs`: Thread-safe tracker for unknown file extensions skipped during processing; used by all commands that filter by `MediaUtilities.SupportedExtensions` (`process`, `organize`, `duplicates`, `index`)
   - `Extensions.cs`: Extension methods for logging and error handling
 - **PhotoCleanerTests/**: Comprehensive test project
   - `DateInferenceTests.cs`: Core date inference functionality tests (33 tests)
@@ -85,6 +86,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Case-Insensitive Matching**: Use FrozenSet `.Contains()` directly without `.ToLower()` - comparer handles case-insensitivity
 - **File Type Categorization**: Group operations by file type requirements (remux vs re-encode vs audio-only)
 - **Single-Pass Optimizations**: Prefer single-loop iterations with early exit over multiple LINQ passes
+- **Skipped Extension Tracking**: Commands that filter files by `MediaUtilities.SupportedExtensions` pass a shared `SkippedExtensionTracker` instance to their task classes. The tracker collects unknown extensions (thread-safe via `Track()`), and the command calls `LogWarnings()` after processing to log them sorted. Used by `process`, `organize`, `duplicates`, and `index` commands.
 
 ### EXIF/Metadata Handling
 - Uses `ExifToolJson` class with `JsonPropertyName` attributes for precise metadata field mapping

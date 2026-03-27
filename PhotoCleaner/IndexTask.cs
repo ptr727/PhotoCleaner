@@ -7,7 +7,11 @@ internal enum IndexStatus
     Unchanged,
 }
 
-internal sealed class IndexTask(CommandLine.Options options, Database database)
+internal sealed class IndexTask(
+    CommandLine.Options options,
+    Database database,
+    SkippedExtensionTracker skippedExtensions
+)
 {
     internal async Task<(IndexStatus status, string hash, bool wasProcessed)> IndexFileAsync(
         string filePath,
@@ -81,6 +85,7 @@ internal sealed class IndexTask(CommandLine.Options options, Database database)
                     if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
                     {
                         Log.Warning("Skipping non-media file: '{FilePath}'", file);
+                        skippedExtensions.Track(Path.GetExtension(file));
                         _ = Interlocked.Increment(ref ignored);
                         return;
                     }

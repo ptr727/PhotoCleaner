@@ -1,6 +1,10 @@
 namespace PhotoCleaner;
 
-internal sealed class DuplicatesTask(CommandLine.Options options, Database database)
+internal sealed class DuplicatesTask(
+    CommandLine.Options options,
+    Database database,
+    SkippedExtensionTracker skippedExtensions
+)
 {
     private enum DuplicateCheckResult
     {
@@ -18,7 +22,7 @@ internal sealed class DuplicatesTask(CommandLine.Options options, Database datab
     {
         // Phase 1: hash source files and register them in the database
         Log.Information("Indexing {FileCount} source files", sourceFiles.Count);
-        IndexTask indexTask = new(options, database);
+        IndexTask indexTask = new(options, database, skippedExtensions);
         (int inserted, int updated, int unchanged, int ignoredSrc, int indexFailed) =
             await indexTask.ExecuteAsync(sourceFiles, cancellationToken).ConfigureAwait(false);
         int indexed = inserted + updated + unchanged;
@@ -63,6 +67,7 @@ internal sealed class DuplicatesTask(CommandLine.Options options, Database datab
         if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
         {
             Log.Warning("Skipping non-media file: '{FilePath}'", file);
+            skippedExtensions.Track(Path.GetExtension(file));
             return DuplicateCheckResult.Ignored;
         }
 

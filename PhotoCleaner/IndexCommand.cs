@@ -2,6 +2,8 @@ namespace PhotoCleaner;
 
 internal sealed class IndexCommand(CommandLine.Options options, CancellationToken cancellationToken)
 {
+    private readonly SkippedExtensionTracker _skippedExtensions = new();
+
     internal async Task<int> ExecuteAsync() =>
         await CommandRunner
             .RunAsync(
@@ -20,7 +22,7 @@ internal sealed class IndexCommand(CommandLine.Options options, CancellationToke
                                 options.DbFile,
                                 async database =>
                                 {
-                                    IndexTask task = new(options, database!);
+                                    IndexTask task = new(options, database!, _skippedExtensions);
                                     return await task.ExecuteAsync(files, cancellationToken)
                                         .ConfigureAwait(false);
                                 },
@@ -49,6 +51,8 @@ internal sealed class IndexCommand(CommandLine.Options options, CancellationToke
                     {
                         Log.Information("Ignored {IgnoredCount} non-media files", ignored);
                     }
+
+                    _skippedExtensions.LogWarnings();
 
                     if (failed > 0)
                     {

@@ -8,9 +8,7 @@ internal sealed class ProcessCommand(
 )
 {
     private ConcurrentBag<string> _fileNames = [];
-    private readonly ConcurrentDictionary<string, byte> _unknownExtensions = new(
-        StringComparer.OrdinalIgnoreCase
-    );
+    private readonly SkippedExtensionTracker _skippedExtensions = new();
     private int _failedCount;
     private int _deletedCount;
     private int _modifiedCount;
@@ -54,15 +52,7 @@ internal sealed class ProcessCommand(
 
                     Log.Information("Total {TotalCount} files", _totalCount);
 
-                    if (!_unknownExtensions.IsEmpty)
-                    {
-                        List<string> unknownExtensionsList = [.. _unknownExtensions.Keys];
-                        unknownExtensionsList.Sort();
-                        foreach (string extension in unknownExtensionsList)
-                        {
-                            Log.Warning("Unknown file extension: '{Extension}'", extension);
-                        }
-                    }
+                    _skippedExtensions.LogWarnings();
 
                     if (_skippedCount > 0)
                     {
@@ -112,7 +102,7 @@ internal sealed class ProcessCommand(
                                 new FileInfo(fileName),
                                 database,
                                 reProcessNames,
-                                _unknownExtensions,
+                                _skippedExtensions,
                                 ct
                             )
                             .ConfigureAwait(false)

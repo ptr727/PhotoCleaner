@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using CliWrap;
 using CliWrap.Buffered;
 
@@ -7,7 +6,7 @@ namespace PhotoCleaner;
 internal sealed class OrganizeTask(
     CommandLine.Options options,
     Database? database,
-    ConcurrentDictionary<string, byte> unknownExtensions
+    SkippedExtensionTracker skippedExtensions
 )
 {
     private static readonly FrozenSet<string> s_exiftoolWriteExtensions = new[]
@@ -92,7 +91,7 @@ internal sealed class OrganizeTask(
         if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
         {
             Log.Warning("Skipping non-media file: '{FilePath}'", file);
-            _ = unknownExtensions.TryAdd(Path.GetExtension(file), 0);
+            skippedExtensions.Track(Path.GetExtension(file));
             return OrganizeResult.Ignored;
         }
 

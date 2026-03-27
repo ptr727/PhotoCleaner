@@ -9,7 +9,7 @@ internal sealed class ProcessTask(
     FileInfo fileInfo,
     Database? database,
     ConcurrentBag<string> reProcessNames,
-    ConcurrentDictionary<string, byte> unknownExtensions,
+    SkippedExtensionTracker skippedExtensions,
     CancellationToken cancellationToken
 )
 {
@@ -64,7 +64,7 @@ internal sealed class ProcessTask(
         FileInfo fileInfo,
         Database? database,
         ConcurrentBag<string> reProcessNames,
-        ConcurrentDictionary<string, byte> unknownExtensions,
+        SkippedExtensionTracker skippedExtensions,
         CancellationToken cancellationToken = default
     )
     {
@@ -73,7 +73,7 @@ internal sealed class ProcessTask(
             fileInfo,
             database,
             reProcessNames,
-            unknownExtensions,
+            skippedExtensions,
             cancellationToken
         );
         return processTask.ExecuteAsync();
@@ -92,7 +92,7 @@ internal sealed class ProcessTask(
         if (!MediaUtilities.SupportedExtensions.Contains(fileInfo.Extension))
         {
             Log.Warning("Skipping non-media file: '{FilePath}'", fileInfo.FullName);
-            _ = unknownExtensions.TryAdd(fileInfo.Extension, 0);
+            skippedExtensions.Track(fileInfo.Extension);
             return ProcessResult.UnknownExtension;
         }
 
@@ -100,7 +100,7 @@ internal sealed class ProcessTask(
         string? preProcessHash = null;
         if (database is not null)
         {
-            IndexTask indexTask = new(options, database);
+            IndexTask indexTask = new(options, database, skippedExtensions);
             (IndexStatus status, string hash, bool wasProcessed) = await indexTask
                 .IndexFileAsync(fileInfo.FullName, cancellationToken)
                 .ConfigureAwait(false);

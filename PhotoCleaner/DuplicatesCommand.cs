@@ -5,6 +5,8 @@ internal sealed class DuplicatesCommand(
     CancellationToken cancellationToken
 )
 {
+    private readonly SkippedExtensionTracker _skippedExtensions = new();
+
     internal async Task<int> ExecuteAsync() =>
         await CommandRunner
             .RunAsync(
@@ -29,7 +31,11 @@ internal sealed class DuplicatesCommand(
                                 options.DbFile,
                                 async database =>
                                 {
-                                    DuplicatesTask task = new(options, database!);
+                                    DuplicatesTask task = new(
+                                        options,
+                                        database!,
+                                        _skippedExtensions
+                                    );
                                     return await task.ExecuteAsync(
                                             sourceFiles,
                                             outFiles,
@@ -48,6 +54,8 @@ internal sealed class DuplicatesCommand(
                     {
                         Log.Information("Ignored {IgnoredCount} non-media source files", ignored);
                     }
+
+                    _skippedExtensions.LogWarnings();
 
                     if (deleted > 0)
                     {

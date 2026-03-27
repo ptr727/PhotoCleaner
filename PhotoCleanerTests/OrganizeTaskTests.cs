@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
@@ -893,8 +892,8 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             Touch(txt);
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            ConcurrentDictionary<string, byte> unknownExtensions = new();
-            OrganizeTask task = new(CreateOptions(outDir), database: null, unknownExtensions);
+            SkippedExtensionTracker skippedExtensions = new();
+            OrganizeTask task = new(CreateOptions(outDir), database: null, skippedExtensions);
             (int organized, int ignored, int skipped, int failed, int deletedDirs) =
                 await task.ExecuteAsync(
                     [txt, jpg],
@@ -906,8 +905,8 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             ignored.Should().Be(1);
             skipped.Should().Be(0);
             failed.Should().Be(0);
-            unknownExtensions.Should().ContainKey(".txt");
-            unknownExtensions.Should().HaveCount(1);
+            skippedExtensions.Extensions.Should().Contain(".txt");
+            skippedExtensions.Extensions.Should().HaveCount(1);
         }
         finally
         {

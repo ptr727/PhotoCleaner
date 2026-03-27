@@ -10,3 +10,4 @@
 *.user
 
 BenchmarkDotNet.Artifacts/
+[Pp]ublish/

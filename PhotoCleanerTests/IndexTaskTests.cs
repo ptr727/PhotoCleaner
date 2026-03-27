@@ -51,7 +51,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(CreateOptions(), db);
+            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             (IndexStatus status, string hash, bool wasProcessed) = await task.IndexFileAsync(
                 filePath
@@ -80,7 +80,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(CreateOptions(), db);
+            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             // First call inserts
             await task.IndexFileAsync(filePath);
@@ -110,7 +110,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(CreateOptions(), db);
+            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             // Insert and mark as processed
             await task.IndexFileAsync(filePath);
@@ -147,7 +147,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(CreateOptions(), db);
+            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             await task.IndexFileAsync(filePath);
             await db.SetProcessedAsync(filePath);
@@ -175,12 +175,16 @@ public sealed class IndexTaskTests
             await db.InitializeAsync();
 
             // Insert with no-rehash first
-            IndexTask noRehashTask = new(CreateOptions(), db);
+            IndexTask noRehashTask = new(CreateOptions(), db, new SkippedExtensionTracker());
             (_, string firstHash, _) = await noRehashTask.IndexFileAsync(filePath);
 
             // Rehash task forces recomputation - result should be same hash (file unchanged)
             // but the code path goes through ComputeHashAsync
-            IndexTask rehashTask = new(CreateOptions(rehash: true), db);
+            IndexTask rehashTask = new(
+                CreateOptions(rehash: true),
+                db,
+                new SkippedExtensionTracker()
+            );
             (IndexStatus status, string rehashResult, _) = await rehashTask.IndexFileAsync(
                 filePath
             );
@@ -205,7 +209,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(CreateOptions(), db);
+            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             (int inserted, int updated, int unchanged, int ignored, int failed) =
                 await task.ExecuteAsync([mediaFile, nonMediaFile]);
@@ -235,7 +239,7 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync();
-            IndexTask task = new(CreateOptions(), db);
+            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             // Pre-insert changedFile and unchangedFile
             await task.IndexFileAsync(changedFile);

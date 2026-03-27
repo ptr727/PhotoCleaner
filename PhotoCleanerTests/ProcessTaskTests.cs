@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using CliWrap;
 using PhotoCleaner;
 using Serilog;
@@ -934,7 +933,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             new FileInfo(filePath),
             null,
             [],
-            new ConcurrentDictionary<string, byte>(),
+            new SkippedExtensionTracker(),
             default
         );
 }

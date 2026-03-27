@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace PhotoCleaner;
 
 internal sealed class OrganizeCommand(
@@ -7,9 +5,7 @@ internal sealed class OrganizeCommand(
     CancellationToken cancellationToken
 )
 {
-    private readonly ConcurrentDictionary<string, byte> _unknownExtensions = new(
-        StringComparer.OrdinalIgnoreCase
-    );
+    private readonly SkippedExtensionTracker _skippedExtensions = new();
 
     internal async Task<int> ExecuteAsync() =>
         await CommandRunner
@@ -29,7 +25,7 @@ internal sealed class OrganizeCommand(
                                 options.DbFile,
                                 async database =>
                                 {
-                                    OrganizeTask task = new(options, database, _unknownExtensions);
+                                    OrganizeTask task = new(options, database, _skippedExtensions);
                                     return await task.ExecuteAsync(
                                             files,
                                             options.Path,
@@ -53,15 +49,7 @@ internal sealed class OrganizeCommand(
                         Log.Information("Ignored {IgnoredCount} non-media files", ignored);
                     }
 
-                    if (!_unknownExtensions.IsEmpty)
-                    {
-                        List<string> unknownExtensionsList = [.. _unknownExtensions.Keys];
-                        unknownExtensionsList.Sort();
-                        foreach (string extension in unknownExtensionsList)
-                        {
-                            Log.Warning("Unknown file extension: '{Extension}'", extension);
-                        }
-                    }
+                    _skippedExtensions.LogWarnings();
 
                     if (skipped > 0)
                     {
