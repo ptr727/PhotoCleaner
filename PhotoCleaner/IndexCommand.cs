@@ -23,6 +23,7 @@ internal sealed class IndexCommand(CommandLine.Options options, CancellationToke
                                 async database =>
                                 {
                                     IndexTask task = new(options, database!, _skippedExtensions);
+                                    Log.Information("Indexing {FileCount} files", files.Count);
                                     return await task.ExecuteAsync(files, cancellationToken)
                                         .ConfigureAwait(false);
                                 },

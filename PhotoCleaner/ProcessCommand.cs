@@ -99,7 +99,7 @@ internal sealed class ProcessCommand(
                 },
                 async (fileName, ct) =>
                 {
-                    Log.Debug("Processing '{FilePath}'", fileName);
+                    Log.Information("Processing '{FilePath}'", fileName);
                     try
                     {
                         switch (

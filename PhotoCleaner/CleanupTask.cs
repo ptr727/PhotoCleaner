@@ -10,9 +10,11 @@ internal sealed class CleanupTask(CommandLine.Options options)
         int deleted = 0;
         int failed = 0;
 
+        Log.Information("Cleaning up {FileCount} files", allFiles.Count);
         foreach (string file in allFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Log.Information("Checking '{FilePath}'", file);
 
             if (MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
             {

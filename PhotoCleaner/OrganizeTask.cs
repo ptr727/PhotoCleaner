@@ -60,6 +60,7 @@ internal sealed class OrganizeTask(
             ignored = 0,
             skipped = 0,
             failed = 0;
+        Log.Information("Organizing {FileCount} files", allFiles.Count);
         await Parallel
             .ForEachAsync(
                 allFiles,
@@ -105,6 +106,8 @@ internal sealed class OrganizeTask(
         CancellationToken cancellationToken = default
     )
     {
+        Log.Information("Organizing '{FilePath}'", file);
+
         // Skip non-media files
         if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
         {
@@ -116,7 +119,7 @@ internal sealed class OrganizeTask(
         string? hash = null;
         if (!options.DryRun && database is not null)
         {
-            Log.Information("Indexing '{FilePath}'", file);
+            Log.Debug("Hashing '{FilePath}'", file);
             hash = await Database
                 .ResolveHashAsync(file, null, options.Rehash, cancellationToken)
                 .ConfigureAwait(false);

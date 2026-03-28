@@ -100,11 +100,13 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         int deleted = 0;
         int failed = 0;
 
+        Log.Information("Undoing {GroupCount} backup groups", groups.Count);
         foreach (KeyValuePair<string, List<string>> kvp in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             string basePath = kvp.Key;
+            Log.Information("Undoing '{FilePath}'", basePath);
             List<string> backups = kvp.Value;
 
             if (derivedBases.Contains(basePath))

@@ -56,7 +56,11 @@ internal sealed class DuplicatesCommand(
                             .ConfigureAwait(false);
 
                     Log.Information("Total {TotalCount} files", totalCount);
-                    Log.Information("Indexed {IndexedCount} source files", indexed);
+
+                    if (indexed > 0)
+                    {
+                        Log.Information("Indexed {IndexedCount} source files", indexed);
+                    }
 
                     if (ignored > 0)
                     {

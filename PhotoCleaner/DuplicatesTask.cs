@@ -89,13 +89,14 @@ internal sealed class DuplicatesTask(
             return DuplicateCheckResult.Ignored;
         }
 
-        Log.Information("Indexing '{FilePath}'", file);
+        Log.Information("Checking duplicate '{FilePath}'", file);
         FileRecord? cached = await outDatabase
             .GetByPathAsync(file, cancellationToken)
             .ConfigureAwait(false);
         string hash = await Database
             .ResolveHashAsync(file, cached, options.Rehash, cancellationToken)
             .ConfigureAwait(false);
+        Log.Debug("File '{FilePath}' has hash '{Hash}'", file, hash);
 
         // Upsert into outdb for future cache hits
         FileInfo info = new(file);
@@ -129,7 +130,7 @@ internal sealed class DuplicatesTask(
             return DuplicateCheckResult.Kept;
         }
 
-        Log.Information("Deleting duplicate '{FilePath}'", file);
+        Log.Information("Deleting duplicate '{FilePath}' with hash '{Hash}'", file, hash);
         if (options.DryRun)
         {
             return DuplicateCheckResult.Deleted;
