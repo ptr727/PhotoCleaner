@@ -87,6 +87,11 @@ internal sealed class ProcessCommand(
     )]
     private async Task ExecuteProcessAsync(Database? database)
     {
+        // Separate files that share a stem (different extensions) so they
+        // are never processed in parallel - prevents one thread from
+        // deleting/renaming a file that another thread is reading.
+        ConcurrentBag<string> deferred = FixExtensionConflicts();
+
         ConcurrentBag<string> reProcessNames = [];
         Log.Information("Processing {FileCount} files", _fileNames.Count);
         await Parallel
@@ -134,6 +139,14 @@ internal sealed class ProcessCommand(
                                 break;
                         }
                     }
+                    catch (Exception ex)
+                        when (ex is FileNotFoundException || !File.Exists(fileName))
+                    {
+                        Log.Information(
+                            "File no longer exists during processing (concurrent rename): '{FilePath}'",
+                            fileName
+                        );
+                    }
                     catch (OperationCanceledException)
                     {
                         throw;
@@ -146,6 +159,12 @@ internal sealed class ProcessCommand(
                 }
             )
             .ConfigureAwait(false);
+
+        // Merge deferred extension-conflict files for the next iteration
+        foreach (string deferredFile in deferred)
+        {
+            reProcessNames.Add(deferredFile);
+        }
 
         if (reProcessNames.IsEmpty)
         {
@@ -184,6 +203,66 @@ internal sealed class ProcessCommand(
         }
 
         return foundConflicts;
+    }
+
+    private ConcurrentBag<string> FixExtensionConflicts()
+    {
+        (ConcurrentBag<string> filtered, ConcurrentBag<string> deferred) = SplitExtensionConflicts(
+            _fileNames
+        );
+        _fileNames = filtered;
+        return deferred;
+    }
+
+    internal static (
+        ConcurrentBag<string> kept,
+        ConcurrentBag<string> deferred
+    ) SplitExtensionConflicts(ConcurrentBag<string> fileNames)
+    {
+        // Group files by directory + stem (filename without extension).
+        // When multiple files share the same stem (e.g. IMG.DNG + IMG.jpg),
+        // keep only one per group and defer the rest so they are never
+        // processed in parallel.
+        ConcurrentBag<string> deferred = [];
+        Dictionary<string, List<string>> stemMap = new(
+            fileNames.Count,
+            StringComparer.OrdinalIgnoreCase
+        );
+        foreach (string fileName in fileNames)
+        {
+            string stem = Path.Combine(
+                Path.GetDirectoryName(fileName) ?? string.Empty,
+                Path.GetFileNameWithoutExtension(fileName)
+            );
+            if (!stemMap.TryGetValue(stem, out List<string>? group))
+            {
+                stemMap[stem] = [fileName];
+            }
+            else
+            {
+                group.Add(fileName);
+            }
+        }
+
+        ConcurrentBag<string> filtered = [];
+        foreach (KeyValuePair<string, List<string>> entry in stemMap)
+        {
+            filtered.Add(entry.Value[0]);
+            if (entry.Value.Count > 1)
+            {
+                Log.Information(
+                    "Deferring {DeferCount} extension conflict(s) for stem '{Stem}'",
+                    entry.Value.Count - 1,
+                    entry.Key
+                );
+                for (int i = 1; i < entry.Value.Count; i++)
+                {
+                    deferred.Add(entry.Value[i]);
+                }
+            }
+        }
+
+        return (filtered, deferred);
     }
 
     private void RenamedMixedCaseFiles(List<string> files)

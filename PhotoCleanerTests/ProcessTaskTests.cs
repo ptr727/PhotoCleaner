@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CliWrap;
 using PhotoCleaner;
 using Serilog;
@@ -877,6 +878,116 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         {
             TempDirectoryFixture.DeleteWorkDir(workDir);
         }
+    }
+
+    // -- SplitExtensionConflicts -----------------------------------------------
+
+    [Fact]
+    public void SplitExtensionConflicts_NoConflicts_KeepsAllFiles()
+    {
+        ConcurrentBag<string> files =
+        [
+            "/photos/IMG_0001.jpg",
+            "/photos/IMG_0002.jpg",
+            "/photos/IMG_0003.png",
+        ];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(3);
+        deferred.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_SameStemDifferentExtensions_DefersExtra()
+    {
+        ConcurrentBag<string> files = ["/photos/IMG_2859.DNG", "/photos/IMG_2859.jpg"];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(1);
+        deferred.Should().HaveCount(1);
+        kept.Concat(deferred)
+            .Should()
+            .BeEquivalentTo(["/photos/IMG_2859.DNG", "/photos/IMG_2859.jpg"]);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_ThreeExtensionVariants_DefersTwoKeepsOne()
+    {
+        ConcurrentBag<string> files =
+        [
+            "/photos/photo.jpeg",
+            "/photos/photo.jpg",
+            "/photos/photo.png",
+        ];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(1);
+        deferred.Should().HaveCount(2);
+        kept.Concat(deferred)
+            .Should()
+            .BeEquivalentTo(["/photos/photo.jpeg", "/photos/photo.jpg", "/photos/photo.png"]);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_CaseInsensitiveStem_DefersExtra()
+    {
+        ConcurrentBag<string> files = ["/photos/IMG_0001.DNG", "/photos/img_0001.jpg"];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(1);
+        deferred.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_DifferentDirectories_NoConflict()
+    {
+        ConcurrentBag<string> files = ["/photos/2019/IMG_0001.DNG", "/photos/2020/IMG_0001.jpg"];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(2);
+        deferred.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_EmptyBag_ReturnsEmpty()
+    {
+        ConcurrentBag<string> files = [];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().BeEmpty();
+        deferred.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_MixedConflictsAndUnique_PartitionsCorrectly()
+    {
+        ConcurrentBag<string> files =
+        [
+            "/photos/IMG_0001.DNG",
+            "/photos/IMG_0001.jpg",
+            "/photos/IMG_0002.jpg",
+            "/photos/IMG_0003.jpeg",
+            "/photos/IMG_0003.jpg",
+        ];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(3);
+        deferred.Should().HaveCount(2);
+        kept.Concat(deferred).Should().HaveCount(5);
     }
 
     // -- Helpers ---------------------------------------------------------------
