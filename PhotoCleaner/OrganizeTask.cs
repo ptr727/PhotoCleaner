@@ -132,10 +132,7 @@ internal sealed class OrganizeTask(
 
         string? sha256 = null;
         string? sha1 = null;
-        if (
-            !options.DryRun
-            && (database is not null || skipDatabase is not null || trashDatabase is not null)
-        )
+        if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
             Log.Debug("Hashing '{FilePath}'", file);
             (string resolvedSha256, string? resolvedSha1) = await Database

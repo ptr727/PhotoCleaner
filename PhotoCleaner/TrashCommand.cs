@@ -45,11 +45,12 @@ internal sealed class TrashCommand(
                                             page
                                         );
                                         ImmichSearchRequest request = new() { Page = page };
-                                        List<ImmichAssetDto> assets = await FetchTrashedAssetsAsync(
+                                        ImmichSearchAssets result = await FetchTrashedAssetsAsync(
                                                 client,
                                                 request
                                             )
                                             .ConfigureAwait(false);
+                                        List<ImmichAssetDto> assets = result.Items;
 
                                         if (assets.Count == 0)
                                         {
@@ -71,7 +72,18 @@ internal sealed class TrashCommand(
                                                 continue;
                                             }
 
-                                            string sha1Hex = ConvertChecksum(asset.Checksum);
+                                            string? sha1Hex = ConvertChecksum(asset.Checksum);
+                                            if (sha1Hex is null)
+                                            {
+                                                Log.Warning(
+                                                    "Skipping asset '{FileName}' (id: {AssetId}) with invalid checksum '{Checksum}'",
+                                                    asset.OriginalFileName,
+                                                    asset.Id,
+                                                    asset.Checksum
+                                                );
+                                                continue;
+                                            }
+
                                             Log.Debug(
                                                 "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
                                                 asset.OriginalFileName,
@@ -91,7 +103,15 @@ internal sealed class TrashCommand(
                                             assets.Count,
                                             page
                                         );
-                                        page++;
+
+                                        if (result.NextPage is null)
+                                        {
+                                            hasMore = false;
+                                        }
+                                        else
+                                        {
+                                            page++;
+                                        }
                                     }
 
                                     long countAfter = await trashDatabase
@@ -132,7 +152,7 @@ internal sealed class TrashCommand(
         return client;
     }
 
-    private async Task<List<ImmichAssetDto>> FetchTrashedAssetsAsync(
+    private async Task<ImmichSearchAssets> FetchTrashedAssetsAsync(
         HttpClient client,
         ImmichSearchRequest request
     )
@@ -154,9 +174,19 @@ internal sealed class TrashCommand(
             )
             .ConfigureAwait(false);
 
-        return searchResponse?.Assets.Items ?? [];
+        return searchResponse?.Assets ?? new ImmichSearchAssets();
     }
 
-    internal static string ConvertChecksum(string base64Checksum) =>
-        Convert.ToHexStringLower(Convert.FromBase64String(base64Checksum));
+    internal static string? ConvertChecksum(string base64Checksum)
+    {
+        if (string.IsNullOrWhiteSpace(base64Checksum))
+        {
+            return null;
+        }
+
+        byte[] buffer = new byte[(base64Checksum.Length + 3) / 4 * 3];
+        return !Convert.TryFromBase64String(base64Checksum, buffer, out int bytesWritten)
+            ? null
+            : Convert.ToHexStringLower(buffer.AsSpan(0, bytesWritten));
+    }
 }

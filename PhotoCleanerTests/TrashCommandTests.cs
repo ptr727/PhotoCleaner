@@ -41,7 +41,10 @@ public sealed class TrashCommandTests
             },
         };
 
-    private static ImmichSearchResponse MakeResponse(params string[] base64Checksums)
+    private static ImmichSearchResponse MakeResponse(
+        string[] base64Checksums,
+        string? nextPage = null
+    )
     {
         List<ImmichAssetDto> items = [];
         int index = 0;
@@ -60,7 +63,7 @@ public sealed class TrashCommandTests
         }
         return new ImmichSearchResponse
         {
-            Assets = new ImmichSearchAssets { Items = items, NextPage = null },
+            Assets = new ImmichSearchAssets { Items = items, NextPage = nextPage },
         };
     }
 
@@ -75,13 +78,14 @@ public sealed class TrashCommandTests
     [Fact]
     public void ConvertChecksum_Base64ToHex_ReturnsLowercaseHex()
     {
-        // 20 bytes of 0xFF -> base64
+        // 20 bytes of 0xAB -> base64
         byte[] bytes = new byte[20];
         Array.Fill(bytes, (byte)0xAB);
         string base64 = Convert.ToBase64String(bytes);
 
-        string hex = TrashCommand.ConvertChecksum(base64);
+        string? hex = TrashCommand.ConvertChecksum(base64);
 
+        hex.Should().NotBeNull();
         hex.Should().Be("abababababababababababababababababababab");
         hex.Should().HaveLength(40); // SHA-1 = 20 bytes = 40 hex chars
     }
@@ -92,11 +96,20 @@ public sealed class TrashCommandTests
         // A realistic Immich checksum (base64-encoded SHA-1)
         string base64 = "J76BZtEWfrTV8jm2GjwQRuuO8mY=";
 
-        string hex = TrashCommand.ConvertChecksum(base64);
+        string? hex = TrashCommand.ConvertChecksum(base64);
 
+        hex.Should().NotBeNull();
         hex.Should().HaveLength(40);
         hex.Should().MatchRegex("^[0-9a-f]+$");
     }
+
+    [Fact]
+    public void ConvertChecksum_EmptyString_ReturnsNull() =>
+        TrashCommand.ConvertChecksum("").Should().BeNull();
+
+    [Fact]
+    public void ConvertChecksum_InvalidBase64_ReturnsNull() =>
+        TrashCommand.ConvertChecksum("not-valid-base64!!!").Should().BeNull();
 
     [Fact]
     public async Task ExecuteAsync_SinglePage_InsertsHashes()
@@ -112,7 +125,10 @@ public sealed class TrashCommandTests
 
             using MockImmichHandler handler = new();
             handler.EnqueueResponse(
-                MakeResponse(Convert.ToBase64String(sha1a), Convert.ToBase64String(sha1b))
+                MakeResponse(
+                    [Convert.ToBase64String(sha1a), Convert.ToBase64String(sha1b)],
+                    nextPage: "2"
+                )
             );
             handler.EnqueueResponse(EmptyResponse()); // page 2 empty -> stop
 
@@ -155,8 +171,8 @@ public sealed class TrashCommandTests
             sha1b[0] = 0x20;
 
             using MockImmichHandler handler = new();
-            handler.EnqueueResponse(MakeResponse(Convert.ToBase64String(sha1a))); // page 1
-            handler.EnqueueResponse(MakeResponse(Convert.ToBase64String(sha1b))); // page 2
+            handler.EnqueueResponse(MakeResponse([Convert.ToBase64String(sha1a)], nextPage: "2")); // page 1
+            handler.EnqueueResponse(MakeResponse([Convert.ToBase64String(sha1b)], nextPage: "3")); // page 2
             handler.EnqueueResponse(EmptyResponse()); // page 3 empty -> stop
 
             using HttpClient client = new(handler, disposeHandler: false)
@@ -226,7 +242,7 @@ public sealed class TrashCommandTests
 
             using MockImmichHandler handler = new();
             // Same hash appears twice in the same page
-            handler.EnqueueResponse(MakeResponse(base64, base64));
+            handler.EnqueueResponse(MakeResponse([base64, base64], nextPage: "2"));
             handler.EnqueueResponse(EmptyResponse());
 
             using HttpClient client = new(handler, disposeHandler: false)
