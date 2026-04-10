@@ -306,11 +306,11 @@ internal sealed class OrganizeTask(
             // Restore source mtime last - after any exiftool writes
             File.SetLastWriteTimeUtc(finalDest, sourceInfo.LastWriteTimeUtc);
 
-            if (sha256 is not null)
+            if (database is not null && sha256 is not null)
             {
                 Log.Debug("Inserting '{FilePath}' with SHA-256 '{Sha256}'", finalDest, sha256);
                 FileInfo destInfo = new(finalDest);
-                await database!
+                await database
                     .InsertAsync(
                         new FileRecord(
                             finalDest,

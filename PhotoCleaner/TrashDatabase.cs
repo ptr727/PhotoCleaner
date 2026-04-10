@@ -20,7 +20,11 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
         _connection = new SqliteConnection($"Data Source={dbPath};{mode}Pooling=False");
         await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        if (!readOnly)
+        if (readOnly)
+        {
+            await ValidateSchemaAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
         {
             using SqliteCommand cmd = _connection.CreateCommand();
             cmd.CommandText = """
@@ -30,6 +34,21 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
                 )
                 """;
             _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ValidateSchemaAsync(CancellationToken cancellationToken)
+    {
+        using SqliteCommand cmd = _connection!.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='trash_hashes'";
+        object? result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (result is not long count || count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Database '{dbPath}' does not contain the expected 'trash_hashes' table. "
+                    + "Run the 'trash' command first to create it."
+            );
         }
     }
 

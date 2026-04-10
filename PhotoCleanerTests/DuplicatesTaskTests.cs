@@ -467,4 +467,101 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             File.Delete(outDbPath);
         }
     }
+
+    // -- TrashDb: file whose SHA-1 matches trash DB is deleted -----------------
+
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_MatchingFileDeleted()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        string outDbPath = TempDb();
+        string trashDbPath = TempDb();
+        try
+        {
+            // Source and target are different files (no SHA-256 duplicate)
+            string srcJpg = Path.Combine(srcDir, "source.jpg");
+            string outJpg = Path.Combine(outDir, "target.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), srcJpg);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), outJpg);
+
+            // Compute target SHA-1 and seed it into the trash DB
+            (string _, string outSha1) = await Database.ComputeHashesAsync(outJpg);
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync();
+            await trashDb.InsertHashAsync(outSha1);
+
+            await using Database db = await OpenDbAsync(dbPath);
+            await using Database outDb = await OpenDbAsync(outDbPath);
+            DuplicatesTask task = new(CreateOptions(), db, outDb, trashDb, new());
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [srcJpg],
+                [outJpg],
+                TestContext.Current.CancellationToken
+            );
+
+            indexed.Should().Be(1);
+            deleted.Should().Be(1); // deleted via trash match
+            kept.Should().Be(0);
+            failed.Should().Be(0);
+            File.Exists(outJpg).Should().BeFalse();
+            File.Exists(srcJpg).Should().BeTrue(); // source untouched
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+            File.Delete(outDbPath);
+            File.Delete(trashDbPath);
+        }
+    }
+
+    // -- TrashDb: non-matching file is kept ------------------------------------
+
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_NonMatchingFileKept()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        string outDbPath = TempDb();
+        string trashDbPath = TempDb();
+        try
+        {
+            string srcJpg = Path.Combine(srcDir, "source.jpg");
+            string outJpg = Path.Combine(outDir, "target.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), srcJpg);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), outJpg);
+
+            // Seed trash DB with a non-matching hash
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync();
+            await trashDb.InsertHashAsync("0000000000000000000000000000000000000000");
+
+            await using Database db = await OpenDbAsync(dbPath);
+            await using Database outDb = await OpenDbAsync(outDbPath);
+            DuplicatesTask task = new(CreateOptions(), db, outDb, trashDb, new());
+            (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
+                [srcJpg],
+                [outJpg],
+                TestContext.Current.CancellationToken
+            );
+
+            indexed.Should().Be(1);
+            deleted.Should().Be(0);
+            kept.Should().Be(1);
+            failed.Should().Be(0);
+            File.Exists(outJpg).Should().BeTrue(); // not trashed, kept
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+            File.Delete(outDbPath);
+            File.Delete(trashDbPath);
+        }
+    }
 }

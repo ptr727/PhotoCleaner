@@ -1166,4 +1166,238 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             Directory.Delete(outDir, recursive: true);
         }
     }
+
+    // -- TrashDb: file whose SHA-1 is in trash DB is skipped -------------------
+
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_MatchingFileSkipped()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string trashDbPath = TempDb();
+        try
+        {
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+
+            // Compute SHA-1 and seed the trash DB
+            (string _, string sha1) = await Database.ComputeHashesAsync(jpg);
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync();
+            await trashDb.InsertHashAsync(sha1);
+
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: trashDb,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int skipDbSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            trashSkipped.Should().Be(1);
+            skipDbSkipped.Should().Be(0);
+            skipped.Should().Be(0);
+            failed.Should().Be(0);
+            Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(trashDbPath);
+        }
+    }
+
+    // -- TrashDb: file NOT in trash DB is organized normally --------------------
+
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_NonMatchingFileOrganized()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string trashDbPath = TempDb();
+        try
+        {
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+
+            // Seed trash DB with a different hash
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync();
+            await trashDb.InsertHashAsync("0000000000000000000000000000000000000000");
+
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: trashDb,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int skipDbSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            trashSkipped.Should().Be(0);
+            failed.Should().Be(0);
+            Directory.GetFiles(outDir, "*.jpg", SearchOption.AllDirectories).Should().HaveCount(1);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(trashDbPath);
+        }
+    }
+
+    // -- SkipDb: file whose SHA-256 is in skip DB is skipped -------------------
+
+    [Fact]
+    public async Task ExecuteAsync_SkipDb_MatchingFileSkipped()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string skipDbPath = TempDb();
+        try
+        {
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+
+            // Compute SHA-256 and seed the skip DB
+            (string sha256, string sha1) = await Database.ComputeHashesAsync(jpg);
+            await using Database skipDb = new(skipDbPath);
+            await skipDb.InitializeAsync();
+            FileInfo info = new(jpg);
+            await skipDb.InsertAsync(
+                new FileRecord(
+                    "/dummy/path.jpg",
+                    sha256,
+                    sha1,
+                    info.Length,
+                    info.LastWriteTimeUtc.Ticks,
+                    false
+                )
+            );
+
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: skipDb,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int skipDbSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            skipDbSkipped.Should().Be(1);
+            trashSkipped.Should().Be(0);
+            skipped.Should().Be(0);
+            failed.Should().Be(0);
+            Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(skipDbPath);
+        }
+    }
+
+    // -- SkipDb without Db: organize works with only skipdb --------------------
+
+    [Fact]
+    public async Task ExecuteAsync_SkipDbWithoutDb_NonMatchingFileOrganized()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string skipDbPath = TempDb();
+        try
+        {
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+
+            // Seed skip DB with a different hash so the file is not skipped
+            await using Database skipDb = new(skipDbPath);
+            await skipDb.InitializeAsync();
+            FileInfo info = new(jpg);
+            await skipDb.InsertAsync(
+                new FileRecord(
+                    "/dummy/other.jpg",
+                    "0000000000000000000000000000000000000000000000000000000000000000",
+                    null,
+                    1,
+                    0,
+                    false
+                )
+            );
+
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: skipDb,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int skipDbSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            skipDbSkipped.Should().Be(0);
+            failed.Should().Be(0);
+            Directory.GetFiles(outDir, "*.jpg", SearchOption.AllDirectories).Should().HaveCount(1);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(skipDbPath);
+        }
+    }
 }

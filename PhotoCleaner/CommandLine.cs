@@ -198,6 +198,18 @@ internal sealed class CommandLine
             Description = "Immich server URL (e.g. http://immich:2283)",
             Required = true,
         };
+        requiredUrlOption.Validators.Add(result =>
+        {
+            string? url = result.GetValue(requiredUrlOption);
+            if (
+                string.IsNullOrWhiteSpace(url)
+                || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            )
+            {
+                result.AddError("--url must be a valid absolute http or https URL.");
+            }
+        });
         Option<string> requiredApiKeyOption = new("--apikey")
         {
             Description = "Immich API key",
@@ -356,11 +368,39 @@ internal sealed class CommandLine
     private static Option<bool> CreateRehashOption() =>
         new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
 
-    private static Option<FileInfo?> CreateTrashDbFileOption() =>
-        new("--trashdb") { Description = "SQLite database with Immich trash hashes to be skipped" };
+    private static Option<FileInfo?> CreateTrashDbFileOption()
+    {
+        Option<FileInfo?> option = new("--trashdb")
+        {
+            Description = "SQLite database with Immich trash hashes to be skipped",
+        };
+        option.Validators.Add(result =>
+        {
+            FileInfo? file = result.GetValue(option);
+            if (file is not null && !file.Exists)
+            {
+                result.AddError($"File does not exist: '{file.FullName}'");
+            }
+        });
+        return option;
+    }
 
-    private static Option<FileInfo?> CreateSkipDbFileOption() =>
-        new("--skipdb") { Description = "SQLite database with indexed files to be skipped" };
+    private static Option<FileInfo?> CreateSkipDbFileOption()
+    {
+        Option<FileInfo?> option = new("--skipdb")
+        {
+            Description = "SQLite database with indexed files to be skipped",
+        };
+        option.Validators.Add(result =>
+        {
+            FileInfo? file = result.GetValue(option);
+            if (file is not null && !file.Exists)
+            {
+                result.AddError($"File does not exist: '{file.FullName}'");
+            }
+        });
+        return option;
+    }
 
     private static Option<bool> CreateReprocessOption() =>
         new("--reprocess")
