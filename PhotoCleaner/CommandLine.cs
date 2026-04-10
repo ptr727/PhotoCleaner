@@ -142,7 +142,7 @@ internal sealed class CommandLine
 
         Command command = new(
             "duplicates",
-            "Delete files in --outpath whose content (SHA-256) matches a file in --path"
+            "Delete files in --outpath whose content matches a file in --path or a hash in --trashdb"
         )
         {
             _pathOption,
@@ -372,7 +372,7 @@ internal sealed class CommandLine
     {
         Option<FileInfo?> option = new("--trashdb")
         {
-            Description = "SQLite database with Immich trash hashes to be skipped",
+            Description = "SQLite database with Immich trash hashes (read-only)",
         };
         option.Validators.Add(result =>
         {

@@ -63,7 +63,7 @@ Commands:
   undo        Undo media file processing
   cleanup     Delete files not in the supported media list
   organize    Organize media files into date-based subdirectories
-  duplicates  Delete files in --outpath whose content (SHA-256) matches a file in --path
+  duplicates  Delete files in --outpath whose content matches a file in --path or a hash in --trashdb
   index       Index files into the database for deduplication tracking
   trash       Sync trashed asset hashes from Immich
 
@@ -129,14 +129,14 @@ Options:
   --datepath                     Set missing EXIF creation date from file path
   --db <db>                      SQLite database file for file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
-  --trashdb <trashdb>            SQLite database with Immich trash hashes to be skipped (read-only)
+  --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
   --skipdb <skipdb>              SQLite database with indexed files to be skipped (read-only)
 ```
 
 ```text
 $> PhotoCleaner duplicates --help
 Description:
-  Delete files in --outpath whose content (SHA-256) matches a file in --path
+  Delete files in --outpath whose content matches a file in --path or a hash in --trashdb
 
 Options:
   --path <path> (REQUIRED)       The directory path to process
@@ -146,7 +146,7 @@ Options:
   --db <db> (REQUIRED)           SQLite database file for source file state tracking
   --outdb <outdb> (REQUIRED)     SQLite database file for target file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
-  --trashdb <trashdb>            SQLite database with Immich trash hashes to be skipped (read-only)
+  --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
 ```
 
 ```text
