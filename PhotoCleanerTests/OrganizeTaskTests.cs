@@ -552,7 +552,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             .ExecuteBufferedAsync();
         ExifToolJson? meta = JsonSerializer.Deserialize(
             result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']']),
-            SourceGenerationContext.Default.ExifToolJson
+            ExifToolJsonContext.Default.ExifToolJson
         );
         return meta?.XMPSubject ?? [];
     }

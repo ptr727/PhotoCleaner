@@ -78,7 +78,7 @@ internal static class MediaUtilities
             .ExecuteBufferedAsync(cancellationToken);
         ExifToolJson? exifToolJson = JsonSerializer.Deserialize(
             result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']']),
-            SourceGenerationContext.Default.ExifToolJson
+            ExifToolJsonContext.Default.ExifToolJson
         );
         ArgumentNullException.ThrowIfNull(exifToolJson);
         return exifToolJson;

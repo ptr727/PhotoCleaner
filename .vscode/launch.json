@@ -7,7 +7,7 @@
             "request": "attach"
         },
         {
-            "name": "Process",
+            "name": "PhotoCleaner Process",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",

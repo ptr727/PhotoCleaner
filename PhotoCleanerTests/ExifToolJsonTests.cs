@@ -8,7 +8,7 @@ public sealed class ExifToolJsonTests
     // -- StringOrStringArrayConverter -----------------------------------------
 
     private static ExifToolJson Deserialize(string json) =>
-        JsonSerializer.Deserialize(json, SourceGenerationContext.Default.ExifToolJson)!;
+        JsonSerializer.Deserialize(json, ExifToolJsonContext.Default.ExifToolJson)!;
 
     [Fact]
     public void XMPSubject_StringArray_DeserializesCorrectly()
