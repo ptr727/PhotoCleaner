@@ -79,8 +79,11 @@ internal static partial class DateFromPath
         if (hyphenMatch.Success)
         {
             if (
-                DateTime.TryParse(
+                DateTime.TryParseExact(
                     $"{hyphenMatch.Groups[1].Value}-{hyphenMatch.Groups[2].Value}-{hyphenMatch.Groups[3].Value}",
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
                     out DateTime hyphenDate
                 )
             )
@@ -148,8 +151,11 @@ internal static partial class DateFromPath
         if (underscoreMatch.Success)
         {
             if (
-                DateTime.TryParse(
+                DateTime.TryParseExact(
                     $"{underscoreMatch.Groups[1].Value}-{underscoreMatch.Groups[2].Value}-{underscoreMatch.Groups[3].Value}",
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
                     out DateTime underscoreDate
                 )
             )
@@ -175,8 +181,11 @@ internal static partial class DateFromPath
         // Pattern 4: YYYY MM DD format with spaces (e.g., EV 2014 07 03_0003.tif)
         Match spaceMatch = FilenameSpaceDateRegex().Match(fileName);
         return !spaceMatch.Success ? null
-            : DateTime.TryParse(
+            : DateTime.TryParseExact(
                 $"{spaceMatch.Groups[1].Value}-{spaceMatch.Groups[2].Value}-{spaceMatch.Groups[3].Value}",
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
                 out DateTime spaceDate
             )
                 ? spaceDate
@@ -191,7 +200,15 @@ internal static partial class DateFromPath
         {
             string dateString =
                 $"{pathHyphenMatch.Groups[1].Value}-{pathHyphenMatch.Groups[2].Value}-{pathHyphenMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime pathHyphenDate))
+            if (
+                DateTime.TryParseExact(
+                    dateString,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out DateTime pathHyphenDate
+                )
+            )
             {
                 return pathHyphenDate;
             }
@@ -203,7 +220,15 @@ internal static partial class DateFromPath
         {
             string dateString =
                 $"{pathUnderscoreMatch.Groups[1].Value}-{pathUnderscoreMatch.Groups[2].Value}-{pathUnderscoreMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime pathUnderscoreDate))
+            if (
+                DateTime.TryParseExact(
+                    dateString,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out DateTime pathUnderscoreDate
+                )
+            )
             {
                 return pathUnderscoreDate;
             }
@@ -233,7 +258,15 @@ internal static partial class DateFromPath
         {
             string dateString =
                 $"{pathYearMonthDayMatch.Groups[1].Value}-{pathYearMonthDayMatch.Groups[2].Value}-{pathYearMonthDayMatch.Groups[3].Value}";
-            if (DateTime.TryParse(dateString, out DateTime pathYearMonthDayDate))
+            if (
+                DateTime.TryParseExact(
+                    dateString,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out DateTime pathYearMonthDayDate
+                )
+            )
             {
                 return pathYearMonthDayDate;
             }

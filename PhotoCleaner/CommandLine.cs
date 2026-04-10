@@ -127,6 +127,14 @@ internal sealed class CommandLine
         Option<FileInfo?> requiredOutDbOption = CreateOutDbFileOption();
         requiredOutDbOption.Required = true;
 
+        // Duplicates requires the outpath to exist (it enumerates files in it at runtime).
+        // Use a local option with AcceptExistingOnly() so bad paths fail at parse time.
+        Option<DirectoryInfo> outPathOption = new Option<DirectoryInfo>("--outpath")
+        {
+            Description = "Target directory to scan for duplicates (must exist)",
+            Required = true,
+        }.AcceptExistingOnly();
+
         Command command = new(
             "duplicates",
             "Delete files in --outpath whose content (SHA-256) matches a file in --path"
@@ -135,7 +143,7 @@ internal sealed class CommandLine
             _pathOption,
             _dryRunOption,
             _threadsOption,
-            _outPathOption,
+            outPathOption,
             requiredDbOption,
             requiredOutDbOption,
             _rehashOption,
@@ -146,7 +154,8 @@ internal sealed class CommandLine
                     CreateOptions(
                         parseResult,
                         parseResult.GetValue(requiredDbOption),
-                        parseResult.GetValue(requiredOutDbOption)
+                        parseResult.GetValue(requiredOutDbOption),
+                        parseResult.GetValue(outPathOption)
                     ),
                     cancellationToken
                 ).ExecuteAsync()
@@ -190,7 +199,8 @@ internal sealed class CommandLine
     internal Options CreateOptions(
         ParseResult parseResult,
         FileInfo? dbPathOverride = null,
-        FileInfo? outDbPathOverride = null
+        FileInfo? outDbPathOverride = null,
+        DirectoryInfo? outPathOverride = null
     ) =>
         new()
         {
@@ -201,7 +211,7 @@ internal sealed class CommandLine
             DryRun = parseResult.GetValue(_dryRunOption),
             DatePath = parseResult.GetValue(_datePathOption),
             SkipBackup = parseResult.GetValue(_skipBackupOption),
-            OutPath = parseResult.GetValue(_outPathOption),
+            OutPath = outPathOverride ?? parseResult.GetValue(_outPathOption),
             Format = parseResult.GetValue(_formatOption) ?? "yyyy/MM/dd",
             DeleteEmpty = parseResult.GetValue(_deleteEmptyOption),
             Move = parseResult.GetValue(_moveOption),
