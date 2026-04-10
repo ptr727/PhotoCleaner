@@ -497,24 +497,6 @@ public sealed class DatabaseTests
     }
 
     [Fact]
-    public async Task ComputeSha1Async_ReturnsValidHex()
-    {
-        string file = Path.GetTempFileName();
-        try
-        {
-            await File.WriteAllBytesAsync(file, Encoding.UTF8.GetBytes("hello photo"));
-            string sha1 = await Database.ComputeSha1Async(file);
-            sha1.Should().NotBeNullOrEmpty();
-            sha1.Should().HaveLength(40); // SHA-1 is 20 bytes = 40 hex chars
-            sha1.Should().MatchRegex("^[0-9a-f]+$");
-        }
-        finally
-        {
-            File.Delete(file);
-        }
-    }
-
-    [Fact]
     public async Task ComputeHashesAsync_BothHashesAreValid()
     {
         string file = Path.GetTempFileName();
@@ -527,12 +509,6 @@ public sealed class DatabaseTests
             sha256.Should().MatchRegex("^[0-9a-f]+$");
             sha1.Should().HaveLength(40); // SHA-1 is 20 bytes = 40 hex chars
             sha1.Should().MatchRegex("^[0-9a-f]+$");
-
-            // Cross-verify with single-hash methods
-            string standalonesha256 = await Database.ComputeSha256Async(file);
-            string standalonesha1 = await Database.ComputeSha1Async(file);
-            sha256.Should().Be(standalonesha256);
-            sha1.Should().Be(standalonesha1);
         }
         finally
         {

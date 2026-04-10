@@ -317,31 +317,6 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         );
     }
 
-    internal static async Task<string> ComputeSha256Async(
-        string filePath,
-        CancellationToken cancellationToken = default
-    )
-    {
-        using FileStream fs = File.OpenRead(filePath);
-        byte[] hashBytes = await SHA256.HashDataAsync(fs, cancellationToken).ConfigureAwait(false);
-        return Convert.ToHexStringLower(hashBytes);
-    }
-
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Security",
-        "CA5350:Do Not Use Weak Cryptographic Algorithms",
-        Justification = "SHA-1 required for Immich compatibility - Immich uses SHA-1 checksums"
-    )]
-    internal static async Task<string> ComputeSha1Async(
-        string filePath,
-        CancellationToken cancellationToken = default
-    )
-    {
-        using FileStream fs = File.OpenRead(filePath);
-        byte[] hashBytes = await SHA1.HashDataAsync(fs, cancellationToken).ConfigureAwait(false);
-        return Convert.ToHexStringLower(hashBytes);
-    }
-
     public void Dispose()
     {
         _connection?.Dispose();
