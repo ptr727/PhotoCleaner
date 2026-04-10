@@ -169,7 +169,7 @@ Description:
 Options:
   --url <url> (REQUIRED)         Immich server URL (e.g. http://immich:2283)
   --apikey <apikey> (REQUIRED)   Immich API key
-  --trashdb <trashdb> (REQUIRED) SQLite database with Immich trash hashes to be skipped
+  --trashdb <trashdb> (REQUIRED) SQLite database to store Immich trash hashes
 ```
 
 **Option notes:**

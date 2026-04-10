@@ -60,6 +60,7 @@ internal sealed class TrashCommand(
 
                                         totalFetched += assets.Count;
 
+                                        List<(string Sha1Hex, string? OriginalFileName)> batch = [];
                                         foreach (ImmichAssetDto asset in assets)
                                         {
                                             if (!asset.IsTrashed)
@@ -89,12 +90,13 @@ internal sealed class TrashCommand(
                                                 asset.OriginalFileName,
                                                 sha1Hex
                                             );
+                                            batch.Add((sha1Hex, asset.OriginalFileName));
+                                        }
+
+                                        if (batch.Count > 0)
+                                        {
                                             await trashDatabase
-                                                .InsertHashAsync(
-                                                    sha1Hex,
-                                                    asset.OriginalFileName,
-                                                    cancellationToken
-                                                )
+                                                .InsertHashesAsync(batch, cancellationToken)
                                                 .ConfigureAwait(false);
                                         }
 

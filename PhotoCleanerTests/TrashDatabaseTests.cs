@@ -174,4 +174,80 @@ public sealed class TrashDatabaseTests
             File.Delete(dbPath);
         }
     }
+
+    [Fact]
+    public async Task InsertHashesAsync_BatchInsert_AllHashesPresent()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync();
+
+            List<(string Sha1Hex, string? OriginalFileName)> batch =
+            [
+                ("aaa111", "photo1.jpg"),
+                ("bbb222", "photo2.jpg"),
+                ("ccc333", null),
+            ];
+            await db.InsertHashesAsync(batch);
+
+            long count = await db.GetCountAsync();
+            count.Should().Be(3);
+            (await db.Sha1ExistsAsync("aaa111")).Should().BeTrue();
+            (await db.Sha1ExistsAsync("bbb222")).Should().BeTrue();
+            (await db.Sha1ExistsAsync("ccc333")).Should().BeTrue();
+            (await db.Sha1ExistsAsync("ddd444")).Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InsertHashesAsync_DuplicatesInBatch_Ignored()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync();
+
+            List<(string Sha1Hex, string? OriginalFileName)> batch =
+            [
+                ("aaa111", "photo1.jpg"),
+                ("aaa111", "photo1_dup.jpg"),
+                ("bbb222", "photo2.jpg"),
+            ];
+            await db.InsertHashesAsync(batch);
+
+            long count = await db.GetCountAsync();
+            count.Should().Be(2); // duplicate ignored
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InsertHashesAsync_EmptyBatch_NoError()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync();
+
+            await db.InsertHashesAsync([]);
+
+            long count = await db.GetCountAsync();
+            count.Should().Be(0);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
 }
