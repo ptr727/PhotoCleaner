@@ -37,6 +37,10 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             Rehash = false,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            ImmichUrl = null,
+            ImmichApiKey = null,
+            TrashDbFile = null,
+            SkipDbFile = null,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,
@@ -83,7 +87,13 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
-            DuplicatesTask task = new(CreateOptions(), db, outDb, new SkippedExtensionTracker());
+            DuplicatesTask task = new(
+                CreateOptions(),
+                db,
+                outDb,
+                null,
+                new SkippedExtensionTracker()
+            );
             (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
                 [srcTxt],
                 [outTxt],
@@ -124,7 +134,13 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
-            DuplicatesTask task = new(CreateOptions(), db, outDb, new SkippedExtensionTracker());
+            DuplicatesTask task = new(
+                CreateOptions(),
+                db,
+                outDb,
+                null,
+                new SkippedExtensionTracker()
+            );
             (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
                 [srcJpg],
                 [outJpg],
@@ -165,7 +181,13 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
-            DuplicatesTask task = new(CreateOptions(), db, outDb, new SkippedExtensionTracker());
+            DuplicatesTask task = new(
+                CreateOptions(),
+                db,
+                outDb,
+                null,
+                new SkippedExtensionTracker()
+            );
             (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
                 [srcJpg],
                 [outJpg],
@@ -211,6 +233,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
                 CreateOptions(dryRun: true),
                 db,
                 outDb,
+                null,
                 new SkippedExtensionTracker()
             );
             (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
@@ -261,7 +284,13 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
-            DuplicatesTask task = new(CreateOptions(), db, outDb, new SkippedExtensionTracker());
+            DuplicatesTask task = new(
+                CreateOptions(),
+                db,
+                outDb,
+                null,
+                new SkippedExtensionTracker()
+            );
             (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
                 [srcJpg, srcPng],
                 [outDupJpg, outUniqueJpg],
@@ -302,7 +331,13 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             // Run 1: index source, nothing in outpath
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
-            DuplicatesTask task = new(CreateOptions(), db, outDb, new SkippedExtensionTracker());
+            DuplicatesTask task = new(
+                CreateOptions(),
+                db,
+                outDb,
+                null,
+                new SkippedExtensionTracker()
+            );
             await task.ExecuteAsync([srcJpg], [], TestContext.Current.CancellationToken);
 
             // Run 2: source dir is empty but DB still holds the hash;
@@ -350,7 +385,13 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
-            DuplicatesTask task = new(CreateOptions(), db, outDb, new SkippedExtensionTracker());
+            DuplicatesTask task = new(
+                CreateOptions(),
+                db,
+                outDb,
+                null,
+                new SkippedExtensionTracker()
+            );
             (int indexed, int ignored, int deleted, int kept, int failed) = await task.ExecuteAsync(
                 [srcJpg],
                 [outJpg],
@@ -363,7 +404,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             // Verify outdb has a cached record for the target file
             FileRecord? cached = await outDb.GetByPathAsync(outJpg);
             cached.Should().NotBeNull();
-            cached.Hash.Should().NotBeNullOrEmpty();
+            cached.Sha256.Should().NotBeNullOrEmpty();
         }
         finally
         {
@@ -390,7 +431,13 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
-            DuplicatesTask task = new(CreateOptions(), db, outDb, new SkippedExtensionTracker());
+            DuplicatesTask task = new(
+                CreateOptions(),
+                db,
+                outDb,
+                null,
+                new SkippedExtensionTracker()
+            );
 
             // Run 1: computes and caches target hash
             await task.ExecuteAsync([srcJpg], [outJpg], TestContext.Current.CancellationToken);
@@ -410,7 +457,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
             // Outdb record should be unchanged (same hash, same mtime)
             FileRecord? afterRun2 = await outDb.GetByPathAsync(outJpg);
             afterRun2.Should().NotBeNull();
-            afterRun2.Hash.Should().Be(afterRun1.Hash);
+            afterRun2.Sha256.Should().Be(afterRun1.Sha256);
         }
         finally
         {

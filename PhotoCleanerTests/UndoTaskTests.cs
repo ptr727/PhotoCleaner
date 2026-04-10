@@ -26,6 +26,10 @@ public sealed class UndoTaskTests
             Rehash = false,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            ImmichUrl = null,
+            ImmichApiKey = null,
+            TrashDbFile = null,
+            SkipDbFile = null,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,

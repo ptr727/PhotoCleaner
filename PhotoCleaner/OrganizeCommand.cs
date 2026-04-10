@@ -19,23 +19,50 @@ internal sealed class OrganizeCommand(
                         cancellationToken
                     );
 
-                    (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                        await DatabaseScope
-                            .RunAsync(
-                                options.DbFile,
-                                async database =>
-                                {
-                                    OrganizeTask task = new(options, database, _skippedExtensions);
-                                    return await task.ExecuteAsync(
-                                            files,
-                                            options.Path,
-                                            cancellationToken
-                                        )
-                                        .ConfigureAwait(false);
-                                },
-                                cancellationToken
-                            )
-                            .ConfigureAwait(false);
+                    (
+                        int organized,
+                        int ignored,
+                        int skipped,
+                        int refSkipped,
+                        int trashSkipped,
+                        int failed,
+                        int deletedDirs
+                    ) = await TrashDatabaseScope
+                        .RunAsync(
+                            options.TrashDbFile,
+                            async trashDatabase =>
+                                await DatabaseScope
+                                    .RunAsync(
+                                        options.SkipDbFile,
+                                        async skipDatabase =>
+                                            await DatabaseScope
+                                                .RunAsync(
+                                                    options.DbFile,
+                                                    async database =>
+                                                    {
+                                                        OrganizeTask task = new(
+                                                            options,
+                                                            database,
+                                                            skipDatabase,
+                                                            trashDatabase,
+                                                            _skippedExtensions
+                                                        );
+                                                        return await task.ExecuteAsync(
+                                                                files,
+                                                                options.Path,
+                                                                cancellationToken
+                                                            )
+                                                            .ConfigureAwait(false);
+                                                    },
+                                                    cancellationToken
+                                                )
+                                                .ConfigureAwait(false),
+                                        cancellationToken
+                                    )
+                                    .ConfigureAwait(false),
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
 
                     Log.Information("Total {TotalCount} files", totalCount);
 
@@ -56,6 +83,22 @@ internal sealed class OrganizeCommand(
                         Log.Information(
                             "Skipped {SkippedCount} files already in collection",
                             skipped
+                        );
+                    }
+
+                    if (refSkipped > 0)
+                    {
+                        Log.Information(
+                            "Skipped {RefSkippedCount} files found in reference database",
+                            refSkipped
+                        );
+                    }
+
+                    if (trashSkipped > 0)
+                    {
+                        Log.Information(
+                            "Skipped {TrashSkippedCount} files trashed in Immich",
+                            trashSkipped
                         );
                     }
 

@@ -49,6 +49,10 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            ImmichUrl = null,
+            ImmichApiKey = null,
+            TrashDbFile = null,
+            SkipDbFile = null,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,
@@ -90,13 +94,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string txt = Path.Combine(srcDir, "notes.txt");
             Touch(txt);
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [txt],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [txt],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(0);
             ignored.Should().Be(1);
@@ -125,13 +142,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(srcDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(CreateOptions(outDir, dryRun: true), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir, dryRun: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
@@ -161,13 +191,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
@@ -197,13 +240,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             // No EXIF date set -> falls back to DateTime.MinValue
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
@@ -239,13 +295,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await File.AppendAllTextAsync(jpg2, "extra", TestContext.Current.CancellationToken);
             long jpg2Size = new FileInfo(jpg2).Length;
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg1, jpg2],
-                    new DirectoryInfo(srcDir1),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg1, jpg2],
+                new DirectoryInfo(srcDir1),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(2);
             ignored.Should().Be(0);
@@ -280,13 +349,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             DateTime originalMtime = new(2020, 6, 15, 12, 0, 0, DateTimeKind.Utc);
             File.SetLastWriteTimeUtc(jpg, originalMtime);
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             string dest = Path.Combine(outDir, "0001-01", "photo.jpg");
@@ -315,13 +397,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:03:10 08:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir, move: true), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir, move: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
@@ -350,13 +445,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:03:10 08:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             File.Exists(jpg).Should().BeTrue(); // source retained (copy)
@@ -389,14 +497,23 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             OrganizeTask task = new(
                 CreateOptions(outDir, deleteEmpty: true, move: true),
                 database: null,
+                skipDatabase: null,
+                trashDatabase: null,
                 new()
             );
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             failed.Should().Be(0);
@@ -426,27 +543,41 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
             // Pre-record the file's hash so it appears already organized
-            string hash = await Database.ComputeHashAsync(jpg);
+            (string sha256, string sha1) = await Database.ComputeHashesAsync(jpg);
             await using Database db = new(dbPath);
             await db.InitializeAsync();
             FileInfo info = new(jpg);
             await db.InsertAsync(
                 new FileRecord(
                     "/already/organized/photo.jpg",
-                    hash,
+                    sha256,
+                    sha1,
                     info.Length,
                     info.LastWriteTimeUtc.Ticks,
                     false
                 )
             );
 
-            OrganizeTask task = new(CreateOptions(outDir), database: db, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(0);
             ignored.Should().Be(0);
@@ -478,14 +609,23 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             OrganizeTask task = new(
                 CreateOptions(outDir, format: "yyyy/MM"),
                 database: null,
+                skipDatabase: null,
+                trashDatabase: null,
                 new()
             );
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
@@ -514,24 +654,37 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            string hash = await Database.ComputeHashAsync(jpg);
+            (string sha256, string _) = await Database.ComputeHashesAsync(jpg);
             await using Database db = new(dbPath);
             await db.InitializeAsync();
 
-            OrganizeTask task = new(CreateOptions(outDir), database: db, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             ignored.Should().Be(0);
             skipped.Should().Be(0);
             failed.Should().Be(0);
             File.Exists(Path.Combine(outDir, "2024-06", "photo.jpg")).Should().BeTrue();
-            bool recorded = await db.HashExistsAsync(hash);
+            bool recorded = await db.Sha256ExistsAsync(sha256);
             recorded.Should().BeTrue();
         }
         finally
@@ -578,7 +731,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir, tagPath: true), database: null, new());
+            OrganizeTask task = new(
+                CreateOptions(outDir, tagPath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
             await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
@@ -609,7 +768,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir, tagPath: true), database: null, new());
+            OrganizeTask task = new(
+                CreateOptions(outDir, tagPath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
             await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
@@ -642,7 +807,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await SetXmpSubjectAsync(jpg, "trip");
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir, tagPath: true), database: null, new());
+            OrganizeTask task = new(
+                CreateOptions(outDir, tagPath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
             await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
@@ -674,7 +845,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await SetXmpSubjectAsync(jpg, "existingtag");
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir, tagPath: true), database: null, new());
+            OrganizeTask task = new(
+                CreateOptions(outDir, tagPath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
             await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
@@ -706,7 +883,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
             await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
@@ -740,14 +923,23 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             OrganizeTask task = new(
                 CreateOptions(outDir, dryRun: true, tagPath: true),
                 database: null,
+                skipDatabase: null,
+                trashDatabase: null,
                 new()
             );
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
@@ -773,13 +965,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(datedDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(CreateOptions(outDir, datePath: true), database: null, new());
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir, datePath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             failed.Should().Be(0);
@@ -808,7 +1013,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(CreateOptions(outDir, datePath: true), database: null, new());
+            OrganizeTask task = new(
+                CreateOptions(outDir, datePath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
             await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
@@ -839,7 +1050,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(datedDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(CreateOptions(outDir), database: null, new());
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
             await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
@@ -872,14 +1089,23 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             OrganizeTask task = new(
                 CreateOptions(outDir, dryRun: true, datePath: true),
                 database: null,
+                skipDatabase: null,
+                trashDatabase: null,
                 new()
             );
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
@@ -906,13 +1132,26 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
             SkippedExtensionTracker skippedExtensions = new();
-            OrganizeTask task = new(CreateOptions(outDir), database: null, skippedExtensions);
-            (int organized, int ignored, int skipped, int failed, int deletedDirs) =
-                await task.ExecuteAsync(
-                    [txt, jpg],
-                    new DirectoryInfo(srcDir),
-                    TestContext.Current.CancellationToken
-                );
+            OrganizeTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                skippedExtensions
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int refSkipped,
+                int trashSkipped,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [txt, jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
 
             organized.Should().Be(1);
             ignored.Should().Be(1);

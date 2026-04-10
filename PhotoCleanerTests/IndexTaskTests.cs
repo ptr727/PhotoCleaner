@@ -25,6 +25,10 @@ public sealed class IndexTaskTests
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            ImmichUrl = null,
+            ImmichApiKey = null,
+            TrashDbFile = null,
+            SkipDbFile = null,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,
@@ -54,15 +58,15 @@ public sealed class IndexTaskTests
             await db.InitializeAsync();
             IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
-            (IndexStatus status, string hash, bool wasProcessed) = await task.IndexFileAsync(
-                filePath
-            );
+            (IndexStatus status, string sha256, string? sha1, bool wasProcessed) =
+                await task.IndexFileAsync(filePath);
 
             status.Should().Be(IndexStatus.Inserted);
-            hash.Should().NotBeNullOrEmpty();
+            sha256.Should().NotBeNullOrEmpty();
+            sha1.Should().NotBeNullOrEmpty();
             wasProcessed.Should().BeFalse();
 
-            bool exists = await db.HashExistsAsync(hash);
+            bool exists = await db.Sha256ExistsAsync(sha256);
             exists.Should().BeTrue();
         }
         finally
@@ -87,12 +91,12 @@ public sealed class IndexTaskTests
             await task.IndexFileAsync(filePath);
 
             // Second call with same file should return Unchanged
-            (IndexStatus status, string hash, bool wasProcessed) = await task.IndexFileAsync(
-                filePath
-            );
+            (IndexStatus status, string sha256, string? sha1, bool wasProcessed) =
+                await task.IndexFileAsync(filePath);
 
             status.Should().Be(IndexStatus.Unchanged);
-            hash.Should().NotBeNullOrEmpty();
+            sha256.Should().NotBeNullOrEmpty();
+            sha1.Should().NotBeNullOrEmpty();
             wasProcessed.Should().BeFalse();
         }
         finally
@@ -124,13 +128,13 @@ public sealed class IndexTaskTests
             await File.WriteAllBytesAsync(filePath, Encoding.UTF8.GetBytes("completely different"));
             File.SetLastWriteTimeUtc(filePath, DateTime.UtcNow.AddSeconds(1));
 
-            (IndexStatus status, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
+            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
 
             status.Should().Be(IndexStatus.Updated);
             wasProcessed.Should().BeFalse();
 
             FileRecord? after = await db.GetByPathAsync(filePath);
-            after!.IsProcessed.Should().BeFalse(); // reset by UpdateHashAsync
+            after!.IsProcessed.Should().BeFalse(); // reset by UpdateHashesAsync
         }
         finally
         {
@@ -153,7 +157,7 @@ public sealed class IndexTaskTests
             await task.IndexFileAsync(filePath);
             await db.SetProcessedAsync(filePath);
 
-            (IndexStatus status, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
+            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
 
             status.Should().Be(IndexStatus.Unchanged);
             wasProcessed.Should().BeTrue();
@@ -177,16 +181,16 @@ public sealed class IndexTaskTests
 
             // Insert with no-rehash first
             IndexTask noRehashTask = new(CreateOptions(), db, new SkippedExtensionTracker());
-            (_, string firstHash, _) = await noRehashTask.IndexFileAsync(filePath);
+            (_, string firstHash, _, _) = await noRehashTask.IndexFileAsync(filePath);
 
             // Rehash task forces recomputation - result should be same hash (file unchanged)
-            // but the code path goes through ComputeHashAsync
+            // but the code path goes through ComputeHashesAsync
             IndexTask rehashTask = new(
                 CreateOptions(rehash: true),
                 db,
                 new SkippedExtensionTracker()
             );
-            (IndexStatus status, string rehashResult, _) = await rehashTask.IndexFileAsync(
+            (IndexStatus status, string rehashResult, _, _) = await rehashTask.IndexFileAsync(
                 filePath
             );
 

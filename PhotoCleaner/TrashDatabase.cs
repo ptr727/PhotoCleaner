@@ -1,0 +1,120 @@
+using Microsoft.Data.Sqlite;
+
+namespace PhotoCleaner;
+
+internal sealed class TrashDatabase(string dbPath) : IDisposable, IAsyncDisposable
+{
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private SqliteConnection? _connection;
+
+    internal async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        Log.Debug("Initializing trash database at '{DbPath}'", dbPath);
+        _connection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+        await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        using SqliteCommand cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS trash_hashes (
+                sha1 TEXT NOT NULL PRIMARY KEY
+            )
+            """;
+        _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    internal Task InsertHashAsync(string sha1Hex, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "INSERT OR IGNORE INTO trash_hashes (sha1) VALUES (@sha1)";
+                _ = cmd.Parameters.AddWithValue("@sha1", sha1Hex);
+                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken
+        );
+
+    internal Task<bool> Sha1ExistsAsync(
+        string sha1Hex,
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM trash_hashes WHERE sha1 = @sha1";
+                _ = cmd.Parameters.AddWithValue("@sha1", sha1Hex);
+                object? result = await cmd.ExecuteScalarAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return result is long count && count > 0;
+            },
+            cancellationToken
+        );
+
+    internal Task<long> GetCountAsync(CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM trash_hashes";
+                object? result = await cmd.ExecuteScalarAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return result is long count ? count : 0L;
+            },
+            cancellationToken
+        );
+
+    internal Task ClearAsync(CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "DELETE FROM trash_hashes";
+                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken
+        );
+
+    private async Task<T> ExecuteAsync<T>(
+        Func<SqliteCommand, Task<T>> operation,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using SqliteCommand cmd = _connection!.CreateCommand();
+            return await operation(cmd).ConfigureAwait(false);
+        }
+        finally
+        {
+            _ = _semaphore.Release();
+        }
+    }
+
+    private async Task ExecuteAsync(
+        Func<SqliteCommand, Task> operation,
+        CancellationToken cancellationToken = default
+    ) =>
+        await ExecuteAsync<object?>(
+                async cmd =>
+                {
+                    await operation(cmd).ConfigureAwait(false);
+                    return null;
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+    public void Dispose()
+    {
+        _connection?.Dispose();
+        _semaphore.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _semaphore.Dispose();
+    }
+}

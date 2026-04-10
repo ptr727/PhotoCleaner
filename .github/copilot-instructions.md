@@ -12,15 +12,17 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final); installs `exiftool` and `ffmpeg` in the final stage
 - **PhotoCleaner/**: Main console application
   - `Program.cs`: Entry point with logger setup (Main only)
-  - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `cleanup`, `organize`, `duplicates`, and `index` subcommands)
+  - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `cleanup`, `organize`, `duplicates`, `index`, and `trash` subcommands)
   - `MediaUtilities.cs`: Shared static utilities - `SupportedExtensions` (FrozenSet), `GetUniqueFileName`, `GetExifToolJsonAsync`, `SetCreateDateAsync`, video/duration constants
   - `CommandRunner.cs`: Thin wrapper for command start/complete/error logging
   - `DatabaseScope.cs`: Generic async DB lifecycle helper (create, init, dispose)
+  - `TrashDatabaseScope.cs`: Same lifecycle helper pattern for `TrashDatabase`
   - `FileEnumerator.cs`: Parallel file enumeration returning `(IReadOnlyList<string>, int)`
   - `ProcessCommand.cs`: Process command orchestration - case conflict resolution, reprocessing loop, result reporting
   - `OrganizeCommand.cs`: Organize command orchestration
   - `DuplicatesCommand.cs`: Duplicates command orchestration (dual-path enumeration)
   - `IndexCommand.cs`: Index command orchestration
+  - `TrashCommand.cs`: Trash command orchestration - fetches trashed asset checksums from Immich API, stores SHA-1 hashes in a `TrashDatabase`
   - `UndoCommand.cs`: Undo command orchestration
   - `CleanupCommand.cs`: Cleanup command orchestration
   - `ProcessTask.cs`: Core file processing pipeline (validation, conversion, metadata)
@@ -28,11 +30,15 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `CleanupTask.cs`: Cleanup logic - deletes files whose extensions are not in the supported list
   - `OrganizeTask.cs`: Organize logic - copies (default) or moves supported media files into date-based subdirectories; optional SQLite deduplication via `Database`
   - `DuplicatesTask.cs`: Duplicates logic - two-phase: indexes source files into DB via `IndexTask`, then deletes matching files from the target directory
-  - `IndexTask.cs`: Common DB upsert logic used by `process`, `duplicates`, and `index` commands; `IndexFileAsync` (single-file) returns `(IndexStatus, hash, wasProcessed)`; `ExecuteAsync` (batch parallel) returns `(inserted, updated, unchanged, ignored, failed)`
-  - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `hash`, `file_size`, `mtime_ticks`, `is_processed`); non-unique hash index for dedup lookups; size/mtime caching via `ResolveHashAsync` to skip rehashing unchanged files
+  - `IndexTask.cs`: Common DB upsert logic used by `process`, `duplicates`, and `index` commands; `IndexFileAsync` (single-file) returns `(IndexStatus, sha256, sha1, wasProcessed)`; `ExecuteAsync` (batch parallel) returns `(inserted, updated, unchanged, ignored, failed)`
+  - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`, `file_size`, `mtime_ticks`, `is_processed`); indexes on both hash columns; size/mtime caching via `ResolveHashesAsync` to skip rehashing unchanged files; schema migration renames legacy `hash` column to `sha256` and adds `sha1`
+  - `TrashDatabase.cs`: Simple SQLite wrapper for Immich trash hashes; single `trash_hashes` table (`sha1` PRIMARY KEY); used by `trash` and `organize` commands
+  - `ImmichApiModels.cs`: AOT-compatible JSON models for Immich API (`ImmichSearchRequest`, `ImmichSearchResponse`, `ImmichAssetDto`) with `ImmichJsonContext` source generation
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
   - `SkippedExtensionTracker.cs`: Thread-safe tracker for unknown file extensions skipped during processing; used by all commands that filter by `MediaUtilities.SupportedExtensions` (`process`, `organize`, `duplicates`, `index`)
+  - `HttpClientFactory.cs`: Singleton `HttpClient` with Polly resilience pipeline (retry, circuit breaker, timeout) and `SocketsHttpHandler` connection pooling
+  - `AssemblyInfo.cs`: Assembly metadata (app name, version) used by `HttpClientFactory` for User-Agent header
   - `Extensions.cs`: Extension methods for logging and error handling
 - **PhotoCleanerTests/**: Comprehensive test project
   - `DateInferenceTests.cs`: Core date inference functionality tests (33 tests)
@@ -46,6 +52,8 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `DatabaseTests.cs`: Database tests (15 tests)
   - `DuplicatesTaskTests.cs`: Duplicates task tests (6 tests)
   - `IndexTaskTests.cs`: IndexTask tests (7 tests)
+  - `TrashDatabaseTests.cs`: TrashDatabase tests (8 tests)
+  - `TrashCommandTests.cs`: TrashCommand tests with mock HTTP handler (6 tests)
 
 ### Core Processing Pipeline
 
@@ -108,16 +116,19 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 
 ### Command Line Interface (CommandLine.cs)
 - **System.CommandLine Integration**: Uses modern .NET command line parsing
-- **Six subcommands**: `process`, `undo`, `cleanup`, `organize`, `duplicates`, `index` - each with their own option set
+- **Seven subcommands**: `process`, `undo`, `cleanup`, `organize`, `duplicates`, `index`, `trash` - each with their own option set
 - **Required `--path` Parameter**: Single directory path using `Option<DirectoryInfo>`. Validated with `AcceptExistingOnly()`
 - **Optional `--dryrun` Flag**: Non-destructive preview mode (process, undo, cleanup, organize, duplicates - not index)
 - **Optional `--threads` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()` (process, organize, duplicates, index)
 - **Optional `--skipbackup` Flag** (process only): Skips all `.bak` file creation - originals are deleted/overwritten in-place. Logs a warning at startup. Disables undo.
 - **`cleanup` subcommand**: Deletes every file whose extension is not in `MediaUtilities.SupportedExtensions`. Logs a warning for `.bak*` artefacts before deleting them. Supports `--dryrun` only (no `--threads` - pure I/O, no benefit).
-- **`organize` subcommand**: Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from source paths after all files are organized (deepest first; source roots are never deleted). `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool; filtered by `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) checked via `meta.FileTypeExtension` (exiftool-detected) to avoid un-normalized-extension issues; uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every organized file (e.g. `--tags "vacation,family"`); parsed via `string.Split(',', RemoveEmptyEntries | TrimEntries)`; merged with `--tagpath` tags; filtered by the same `s_exiftoolWriteExtensions` set. `--datepath` (default `false`) infers the EXIF creation date from the source file path (via `DateFromPath.InferCreatedDate`) when no date is already embedded; applies the date to the destination file before restoring mtime; filtered by the same `s_exiftoolWriteExtensions` set. `--db <sqlite-file>` (optional) enables SHA-256 deduplication: files whose hash is already in the DB are skipped; new files are copied/moved and recorded in the `files` table (dest path as PK). `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
-- **`duplicates` subcommand**: Deletes files from `--outpath` whose SHA-256 hash matches any file in `--path`. Two-phase: (1) hash all supported files in `--path` via `IndexTask.ExecuteAsync` (idempotent upsert via path PK; size/mtime cache avoids rehashing); (2) hash all supported files in `--outpath` using `ResolveHashAsync` with `--outdb` for size/mtime caching, upsert into outdb, and delete those found in the source DB via `HashExistsAsync`. `--db <sqlite-file>` is **required** (source file index). `--outdb <sqlite-file>` is **required** (target file hash cache; reusable as `--db` for subsequent `process` runs). Source files are never touched. Supports `--dryrun`, `--threads`, and `--rehash`.
+- **`organize` subcommand**: Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from source paths after all files are organized (deepest first; source roots are never deleted). `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool; filtered by `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) checked via `meta.FileTypeExtension` (exiftool-detected) to avoid un-normalized-extension issues; uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every organized file (e.g. `--tags "vacation,family"`); parsed via `string.Split(',', RemoveEmptyEntries | TrimEntries)`; merged with `--tagpath` tags; filtered by the same `s_exiftoolWriteExtensions` set. `--datepath` (default `false`) infers the EXIF creation date from the source file path (via `DateFromPath.InferCreatedDate`) when no date is already embedded; applies the date to the destination file before restoring mtime; filtered by the same `s_exiftoolWriteExtensions` set. `--db <sqlite-file>` (optional) enables SHA-256 deduplication: files whose hash is already in the DB are skipped; new files are copied/moved and recorded in the `files` table (dest path as PK). `--trashdb <sqlite-file>` (optional) skips files whose SHA-1 matches a hash in the Immich trash DB (populated by the `trash` command). `--skipdb <sqlite-file>` (optional) skips files whose SHA-256 matches a record in the reference DB (read-only, no recording). `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
+- **`duplicates` subcommand**: Deletes files from `--outpath` whose SHA-256 hash matches any file in `--path`, or whose SHA-1 matches a hash in the optional `--trashdb`. Two-phase: (1) hash all supported files in `--path` via `IndexTask.ExecuteAsync` (idempotent upsert via path PK; size/mtime cache avoids rehashing); (2) hash all supported files in `--outpath` using `ResolveHashesAsync` with `--outdb` for size/mtime caching, upsert into outdb, and delete those found in the source DB via `Sha256ExistsAsync` or in the trash DB via `Sha1ExistsAsync`. `--db <sqlite-file>` is **required** (source file index). `--outdb <sqlite-file>` is **required** (target file hash cache; reusable as `--db` for subsequent `process` runs). `--trashdb <sqlite-file>` is **optional** (Immich trash hashes). Source files are never touched. Supports `--dryrun`, `--threads`, and `--rehash`.
 - **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
-- **Optional `--rehash` Flag** (process, organize, duplicates, index): Forces recomputation of SHA-256 for every file, ignoring the size/mtime cache. Useful after filesystem operations that preserve mtime but change content.
+- **`trash` subcommand**: Syncs trashed asset checksums from an Immich server into a local SQLite trash database. `--url` (Immich server URL, required), `--apikey` (Immich API key, required), `--db <sqlite-file>` (trash database, required). Uses `POST /api/search/metadata` with `trashedAfter` to fetch all trashed assets, converts Base64 SHA-1 checksums to hex, and inserts them via `INSERT OR IGNORE`. Full sync (idempotent, append-only). No `--dryrun`.
+- **Optional `--trashdb` Flag** (organize, duplicates): SQLite database file with Immich trash hashes. In organize, files whose SHA-1 matches a hash in the trash DB are skipped. In duplicates, matching files are deleted alongside SHA-256 duplicates.
+- **Optional `--skipdb` Flag** (organize only): SQLite database of files to skip (read-only SHA-256 check). Files whose SHA-256 matches a record in this DB are skipped without being recorded. Use this to skip files already present in another collection.
+- **Optional `--rehash` Flag** (process, organize, duplicates, index): Forces recomputation of SHA-256 and SHA-1 for every file, ignoring the size/mtime cache. Useful after filesystem operations that preserve mtime but change content.
 - **Optional `--duration` Flag** (process only): Overrides `ShortVideoDuration` (default `1.0`s). Videos in a live-photo-compatible format whose duration is <= this value are always deleted. Must be `> 0`. Stored in `CommandLine.Options.ShortVideoDuration` and read by `DeleteLivePhotosAsync`.
 - **Optional `--reprocess` Flag** (process only): When set, ignores `is_processed` in the DB and forces every file to be processed again. Stored in `CommandLine.Options.Reprocess`; disables the `IndexStatus.Unchanged && wasProcessed` early-return in `ExecuteAsync`.
 - **Command Construction**: `CommandLine.SetAction` handlers create the appropriate command class (e.g., `ProcessCommand`, `OrganizeCommand`) with `CommandLine.Options` and `CancellationToken`
@@ -137,7 +148,7 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **xUnit**: Testing framework for PhotoCleanerTests project
 
 ### Test Architecture
-- **PhotoCleanerTests Project**: 216 comprehensive tests covering all functionality
+- **PhotoCleanerTests Project**: 300 comprehensive tests covering all functionality
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
 - **Test Categories**:
   - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
@@ -251,16 +262,35 @@ PhotoCleaner index --path /icloud/originals --db /data/photos.db
 PhotoCleaner duplicates --path /icloud/originals --outpath /import1 --db /data/photos.db --outdb /data/import1.db
 PhotoCleaner duplicates --path /icloud/originals --outpath /import2 --db /data/photos.db --outdb /data/import2.db
 
+# Trash: sync Immich trash hashes into a local DB
+PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --db /data/trash.db
+
+# Organize with trash skip (prevents re-importing files trashed in Immich)
+PhotoCleaner organize --path /photos --outpath /organized --db /data/photos.db --trashdb /data/trash.db
+
+# Organize with skip DB (skip files already in another collection)
+PhotoCleaner organize --path /photos --outpath /organized --skipdb /data/existing-collection.db
+
+# Duplicates with trash (delete files matching source OR trashed in Immich)
+PhotoCleaner duplicates --path /source --outpath /target --db /data/source.db --outdb /data/target.db --trashdb /data/trash.db
+
+# Full workflow with trash integration
+PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --db /data/trash.db
+PhotoCleaner organize --path /icloud --outpath /intermediate --db /data/photos.db --trashdb /data/trash.db
+PhotoCleaner process --path /intermediate --db /data/process.db
+
 # Help
 PhotoCleaner --help
 PhotoCleaner process --help
 PhotoCleaner cleanup --help
 PhotoCleaner index --help
 PhotoCleaner duplicates --help
+PhotoCleaner trash --help
 ```
 
 ## JSON Source Generation
 Uses `SourceGenerationContext` for AOT-compatible JSON serialization of `ExifToolJson` metadata.
+Uses `ImmichJsonContext` for AOT-compatible JSON serialization of Immich API models.
 
 ## Testing Strategy
 - **Direct Method Testing**: Uses `InternalsVisibleTo` for compile-time safe method calls
