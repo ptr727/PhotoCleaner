@@ -74,7 +74,7 @@ public class MediaBenchmarks
     }
 
     [Benchmark]
-    public async Task<(string, string)> Sha256Hash() =>
+    public async Task<(string, string)> ComputeHashes() =>
         await Database.ComputeHashesAsync(_jpegPath);
 
     [Benchmark]

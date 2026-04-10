@@ -203,8 +203,11 @@ internal sealed class CommandLine
             Description = "Immich API key",
             Required = true,
         };
-        Option<FileInfo?> requiredTrashDbOption = CreateTrashDbFileOption();
-        requiredTrashDbOption.Required = true;
+        Option<FileInfo?> requiredTrashDbOption = new("--trashdb")
+        {
+            Description = "SQLite database to store Immich trash hashes",
+            Required = true,
+        };
 
         Command command = new("trash", "Sync trashed asset hashes from Immich")
         {

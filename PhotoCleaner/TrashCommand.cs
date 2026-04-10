@@ -31,76 +31,90 @@ internal sealed class TrashCommand(
                                     .GetCountAsync(cancellationToken)
                                     .ConfigureAwait(false);
 
+                                bool ownsHttpClient = httpClient is null;
                                 HttpClient client = httpClient ?? CreateDefaultHttpClient();
-                                int page = 1;
-                                bool hasMore = true;
-
-                                while (hasMore)
+                                try
                                 {
-                                    Log.Information("Fetching trashed assets page {Page}", page);
-                                    ImmichSearchRequest request = new() { Page = page };
-                                    List<ImmichAssetDto> assets = await FetchTrashedAssetsAsync(
-                                            client,
-                                            request
-                                        )
-                                        .ConfigureAwait(false);
+                                    int page = 1;
+                                    bool hasMore = true;
 
-                                    if (assets.Count == 0)
+                                    while (hasMore)
                                     {
-                                        hasMore = false;
-                                        continue;
-                                    }
+                                        Log.Information(
+                                            "Fetching trashed assets page {Page}",
+                                            page
+                                        );
+                                        ImmichSearchRequest request = new() { Page = page };
+                                        List<ImmichAssetDto> assets = await FetchTrashedAssetsAsync(
+                                                client,
+                                                request
+                                            )
+                                            .ConfigureAwait(false);
 
-                                    totalFetched += assets.Count;
-
-                                    foreach (ImmichAssetDto asset in assets)
-                                    {
-                                        if (!asset.IsTrashed)
+                                        if (assets.Count == 0)
                                         {
-                                            Log.Warning(
-                                                "Skipping non-trashed asset '{FileName}' (id: {AssetId})",
-                                                asset.OriginalFileName,
-                                                asset.Id
-                                            );
+                                            hasMore = false;
                                             continue;
                                         }
 
-                                        string sha1Hex = ConvertChecksum(asset.Checksum);
-                                        Log.Debug(
-                                            "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
-                                            asset.OriginalFileName,
-                                            sha1Hex
-                                        );
-                                        await trashDatabase
-                                            .InsertHashAsync(
-                                                sha1Hex,
+                                        totalFetched += assets.Count;
+
+                                        foreach (ImmichAssetDto asset in assets)
+                                        {
+                                            if (!asset.IsTrashed)
+                                            {
+                                                Log.Warning(
+                                                    "Skipping non-trashed asset '{FileName}' (id: {AssetId})",
+                                                    asset.OriginalFileName,
+                                                    asset.Id
+                                                );
+                                                continue;
+                                            }
+
+                                            string sha1Hex = ConvertChecksum(asset.Checksum);
+                                            Log.Debug(
+                                                "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
                                                 asset.OriginalFileName,
-                                                cancellationToken
-                                            )
-                                            .ConfigureAwait(false);
+                                                sha1Hex
+                                            );
+                                            await trashDatabase
+                                                .InsertHashAsync(
+                                                    sha1Hex,
+                                                    asset.OriginalFileName,
+                                                    cancellationToken
+                                                )
+                                                .ConfigureAwait(false);
+                                        }
+
+                                        Log.Information(
+                                            "Fetched {Count} trashed assets on page {Page}",
+                                            assets.Count,
+                                            page
+                                        );
+                                        page++;
                                     }
 
+                                    long countAfter = await trashDatabase
+                                        .GetCountAsync(cancellationToken)
+                                        .ConfigureAwait(false);
+                                    totalInserted = (int)(countAfter - countBefore);
+
                                     Log.Information(
-                                        "Fetched {Count} trashed assets on page {Page}",
-                                        assets.Count,
-                                        page
+                                        "Fetched {TotalFetched} trashed assets, inserted {TotalInserted} new hashes (total {TotalCount})",
+                                        totalFetched,
+                                        totalInserted,
+                                        countAfter
                                     );
-                                    page++;
                                 }
-
-                                long countAfter = await trashDatabase
-                                    .GetCountAsync(cancellationToken)
-                                    .ConfigureAwait(false);
-                                totalInserted = (int)(countAfter - countBefore);
-
-                                Log.Information(
-                                    "Fetched {TotalFetched} trashed assets, inserted {TotalInserted} new hashes (total {TotalCount})",
-                                    totalFetched,
-                                    totalInserted,
-                                    countAfter
-                                );
+                                finally
+                                {
+                                    if (ownsHttpClient)
+                                    {
+                                        client.Dispose();
+                                    }
+                                }
                             },
-                            cancellationToken
+                            cancellationToken: cancellationToken
                         )
                         .ConfigureAwait(false);
                 }
@@ -123,7 +137,7 @@ internal sealed class TrashCommand(
         ImmichSearchRequest request
     )
     {
-        HttpResponseMessage response = await client
+        using HttpResponseMessage response = await client
             .PostAsJsonAsync(
                 "/api/search/metadata",
                 request,

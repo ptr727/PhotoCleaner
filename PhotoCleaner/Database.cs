@@ -24,7 +24,11 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         _connection = new SqliteConnection($"Data Source={dbPath};{mode}Pooling=False");
         await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        if (!readOnly)
+        if (readOnly)
+        {
+            await ValidateSchemaAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
         {
             // Create table for new databases
             using SqliteCommand createCmd = _connection.CreateCommand();
@@ -51,6 +55,21 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                 CREATE INDEX IF NOT EXISTS idx_files_sha1 ON files (sha1)
                 """;
             _ = await indexCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ValidateSchemaAsync(CancellationToken cancellationToken)
+    {
+        using SqliteCommand cmd = _connection!.CreateCommand();
+        cmd.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='files'";
+        object? result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        string schema = result as string ?? "";
+        if (!schema.Contains("sha256", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Database '{dbPath}' has a legacy schema (missing 'sha256' column). "
+                    + "Open it in read-write mode first to migrate the schema."
+            );
         }
     }
 

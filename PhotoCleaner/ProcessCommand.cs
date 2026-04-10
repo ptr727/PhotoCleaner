@@ -46,7 +46,7 @@ internal sealed class ProcessCommand(
                                     await ExecuteProcessAsync(database).ConfigureAwait(false);
                                 }
                             },
-                            cancellationToken
+                            cancellationToken: cancellationToken
                         )
                         .ConfigureAwait(false);
 

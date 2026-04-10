@@ -10,8 +10,8 @@ internal static class DatabaseScope
     internal static async Task<T> RunAsync<T>(
         FileInfo? dbFile,
         Func<Database?, Task<T>> work,
-        CancellationToken cancellationToken = default,
-        bool readOnly = false
+        bool readOnly = false,
+        CancellationToken cancellationToken = default
     )
     {
         if (dbFile is null)
@@ -40,8 +40,8 @@ internal static class DatabaseScope
     internal static async Task RunAsync(
         FileInfo? dbFile,
         Func<Database?, Task> work,
-        CancellationToken cancellationToken = default,
-        bool readOnly = false
+        bool readOnly = false,
+        CancellationToken cancellationToken = default
     ) =>
         await RunAsync<object?>(
                 dbFile,
@@ -50,8 +50,8 @@ internal static class DatabaseScope
                     await work(db).ConfigureAwait(false);
                     return null;
                 },
-                cancellationToken,
-                readOnly
+                readOnly,
+                cancellationToken
             )
             .ConfigureAwait(false);
 }

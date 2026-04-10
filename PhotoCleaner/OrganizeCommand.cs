@@ -54,15 +54,15 @@ internal sealed class OrganizeCommand(
                                                             )
                                                             .ConfigureAwait(false);
                                                     },
-                                                    cancellationToken
+                                                    cancellationToken: cancellationToken
                                                 )
                                                 .ConfigureAwait(false),
-                                        cancellationToken,
-                                        readOnly: true
+                                        readOnly: true,
+                                        cancellationToken: cancellationToken
                                     )
                                     .ConfigureAwait(false),
-                            cancellationToken,
-                            readOnly: true
+                            readOnly: true,
+                            cancellationToken: cancellationToken
                         )
                         .ConfigureAwait(false);
 
