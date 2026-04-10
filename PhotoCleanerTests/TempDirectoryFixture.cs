@@ -91,6 +91,24 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Returns true when the filesystem hosting <paramref name="directory"/> is case-sensitive.
+    /// Probes at runtime so it works correctly on Linux (true), Windows NTFS (false), and macOS HFS+ (false).
+    /// </summary>
+    internal static bool IsFileSystemCaseSensitive(string directory)
+    {
+        string upper = Path.Combine(directory, "_CASE_PROBE_");
+        File.WriteAllBytes(upper, []);
+        try
+        {
+            return !File.Exists(Path.Combine(directory, "_case_probe_"));
+        }
+        finally
+        {
+            File.Delete(upper);
+        }
+    }
+
     private async Task GenerateImagesAsync()
     {
         await RunFfmpegAsync([

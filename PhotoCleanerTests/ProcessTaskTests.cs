@@ -62,6 +62,16 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
+            // On case-insensitive filesystems (Windows NTFS, macOS HFS+) "photo.Jpg" and
+            // "photo.jpg" are the same file, so the rename is meaningless and File.Exists()
+            // cannot distinguish them. Skip on those platforms; the test runs fully on Linux.
+            if (!TempDirectoryFixture.IsFileSystemCaseSensitive(workDir))
+            {
+                Assert.Skip(
+                    "Filesystem is case-insensitive; mixed-case extension rename test only runs on case-sensitive filesystems"
+                );
+            }
+
             string filePath = Path.Combine(workDir, "photo.Jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
 
