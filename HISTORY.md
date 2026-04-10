@@ -1,9 +1,9 @@
-# ProjectTemplate
+# PhotoCleaner
 
-C# .NET project template.
+Release history for PhotoCleaner.
 
 ## Release History
 
-- Version 1.0:
-  - Something.
-  - And something else.
+Formal release notes have not been published yet.
+
+This file is reserved for future PhotoCleaner release history entries.
