@@ -5,5 +5,10 @@
 
 .idea
 .vs
-
+.artifacts
+.DS_Store
 *.user
+.claude
+
+BenchmarkDotNet.Artifacts/
+[Pp]ublish/

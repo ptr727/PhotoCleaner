@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "PhotoCleaner": {
-      "commandName": "Project",
-      "commandLineArgs": "--path=\"\\\\SAMBA\\Media\\TestPhoto\""
-    }
-  }
-}

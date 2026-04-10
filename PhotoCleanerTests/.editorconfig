@@ -1,0 +1,31 @@
+root = false
+
+# C# files
+[*.cs]
+
+# Allow underscores in test method names
+dotnet_diagnostic.CA1707.severity = none
+
+# Ignore unused private members
+dotnet_diagnostic.IDE0052.severity = none
+
+# Ignore expression value is never used
+dotnet_diagnostic.IDE0058.severity = none
+
+# Ignore missing XML docs for public test APIs
+dotnet_diagnostic.CS1591.severity = none
+
+# Ignore making public types internal
+dotnet_diagnostic.CA1515.severity = none
+
+# Test fixture helpers don't need ConfigureAwait (not library code)
+dotnet_diagnostic.CA2007.severity = none
+
+# Serilog RenderMessage locale is intentional for test assertions
+dotnet_diagnostic.CA1305.severity = none
+
+# xUnit MemberData parameters are never null at runtime
+dotnet_diagnostic.CA1062.severity = none
+
+# Raw string literals containing JSON are intentional in tests
+dotnet_diagnostic.JSON002.severity = none

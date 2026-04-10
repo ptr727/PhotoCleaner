@@ -94,44 +94,20 @@
             }
         },
         {
-            "label": "Test PhotoCleaner",
+            "label": ".Net Outdated Upgrade",
             "type": "process",
             "command": "dotnet",
             "args": [
-                "test",
-                "PhotoCleanerTests/PhotoCleanerTests.csproj",
-                "--verbosity",
-                "normal"
+                "outdated",
+                "--upgrade:prompt"
             ],
-            "group": "test",
+            "problemMatcher": [
+                "$msCompile"
+            ],
             "presentation": {
                 "showReuseMessage": false,
                 "clear": false
-            },
-            "dependsOn": [
-                ".Net Build"
-            ]
-        },
-        {
-            "label": "Test with Coverage",
-            "type": "process",
-            "command": "dotnet",
-            "args": [
-                "test",
-                "PhotoCleanerTests/PhotoCleanerTests.csproj",
-                "--collect",
-                "XPlat Code Coverage",
-                "--verbosity",
-                "normal"
-            ],
-            "group": "test",
-            "presentation": {
-                "showReuseMessage": false,
-                "clear": false
-            },
-            "dependsOn": [
-                ".Net Build"
-            ]
+            }
         }
     ]
 }

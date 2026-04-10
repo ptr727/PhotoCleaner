@@ -6,24 +6,54 @@
     ],
     "settings": {
         "cSpell.words": [
+            "Betz",
+            "datefrompath",
+            "datepath",
+            "deleteempty",
+            "Diagnoser",
             "dryrun",
+            "ebug",
+            "Eeuo",
             "Exif",
             "exiftool",
             "faststart",
             "ffprobe",
+            "Gyan",
+            "icloudpd",
+            "Immich",
+            "ISOBMFF",
+            "lavfi",
             "libx",
+            "Lightroom",
+            "livephoto",
+            "logclear",
+            "logfile",
+            "longvideo",
+            "Lumia",
             "matroska",
             "movflags",
             "msvideo",
             "nostdin",
+            "NTFS",
+            "outdb",
+            "outpath",
+            "photocleaner",
+            "pipefail",
             "quicktime",
             "reencode",
+            "Reencodes",
             "remux",
             "remuxed",
+            "Remuxes",
             "Remuxing",
             "Serilog",
             "setdate",
-            "Xunit"
+            "skipbackup",
+            "subdirs",
+            "Uniquified",
+            "winget",
+            "Xunit",
+            "yourapikey"
         ],
         "dotnet.defaultSolution": "PhotoCleaner.slnx",
         "files.trimTrailingWhitespace": true,
@@ -46,7 +76,9 @@
         "csharp.debug.symbolOptions.searchNuGetOrgSymbolServer": true,
         "csharp.debug.symbolOptions.searchMicrosoftSymbolServer": true,
         "files.encoding": "utf8",
-        "csharp.debug.justMyCode": false
+        "csharp.debug.justMyCode": false,
+        "claudeCode.preferredLocation": "sidebar",
+        "claudeCode.useCtrlEnterToSend": true,
     },
     "extensions": {
         "recommendations": [
@@ -56,7 +88,8 @@
             "streetsidesoftware.code-spell-checker",
             "editorconfig.editorconfig",
             "csharpier.csharpier-vscode",
-            "github.vscode-github-actions"
+            "github.vscode-github-actions",
+            "eamodio.gitlens"
         ]
     }
 }
