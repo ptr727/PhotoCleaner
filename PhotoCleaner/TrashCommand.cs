@@ -21,8 +21,9 @@ internal sealed class TrashCommand(
                             {
                                 if (trashDatabase is null)
                                 {
-                                    Log.Error("Trash database path is required");
-                                    return;
+                                    throw new InvalidOperationException(
+                                        "Trash database path is required (--trashdb)"
+                                    );
                                 }
 
                                 int totalFetched = 0;
@@ -110,9 +111,21 @@ internal sealed class TrashCommand(
                                         {
                                             hasMore = false;
                                         }
+                                        else if (
+                                            int.TryParse(result.NextPage, out int nextPage)
+                                            && nextPage > 0
+                                        )
+                                        {
+                                            page = nextPage;
+                                        }
                                         else
                                         {
-                                            page++;
+                                            Log.Warning(
+                                                "Stopping pagination: invalid NextPage value '{NextPage}' after page {Page}",
+                                                result.NextPage,
+                                                page
+                                            );
+                                            hasMore = false;
                                         }
                                     }
 
@@ -147,7 +160,7 @@ internal sealed class TrashCommand(
     {
         HttpClient client = new(HttpClientFactory.GetResilienceHandler(), disposeHandler: false)
         {
-            BaseAddress = new Uri(options.ImmichUrl!),
+            BaseAddress = new Uri(options.ImmichUrl!.TrimEnd('/') + "/"),
             Timeout = TimeSpan.FromSeconds(120),
         };
         client.DefaultRequestHeaders.Add("x-api-key", options.ImmichApiKey);
@@ -161,7 +174,7 @@ internal sealed class TrashCommand(
     {
         using HttpResponseMessage response = await client
             .PostAsJsonAsync(
-                "/api/search/metadata",
+                "api/search/metadata",
                 request,
                 ImmichJsonContext.Default.ImmichSearchRequest,
                 cancellationToken
