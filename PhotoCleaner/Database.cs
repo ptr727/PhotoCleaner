@@ -19,10 +19,10 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         Log.Debug("Initializing database at '{DbPath}'", dbPath);
-        _connection = new SqliteConnection($"Data Source={dbPath}");
+        _connection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
         await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        SqliteCommand cmd = _connection.CreateCommand();
+        using SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = """
             CREATE TABLE IF NOT EXISTS files (
                 path         TEXT NOT NULL PRIMARY KEY,
@@ -145,7 +145,7 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            SqliteCommand cmd = _connection!.CreateCommand();
+            using SqliteCommand cmd = _connection!.CreateCommand();
             return await operation(cmd).ConfigureAwait(false);
         }
         finally

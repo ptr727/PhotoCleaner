@@ -1,7 +1,7 @@
 namespace PhotoCleanerBenchmarks;
 
 [MemoryDiagnoser]
-public class MediaBenchmarks : IDisposable
+public class MediaBenchmarks
 {
     private string _tempDir = string.Empty;
     private string _jpegPath = string.Empty;
@@ -63,12 +63,6 @@ public class MediaBenchmarks : IDisposable
             false
         );
         await _database.InsertAsync(seedRecord);
-    }
-
-    public void Dispose()
-    {
-        _database?.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     [GlobalCleanup]

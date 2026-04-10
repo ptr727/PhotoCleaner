@@ -21,9 +21,9 @@ public sealed class DatabaseTests
             await using Database db = new(dbPath);
             await db.InitializeAsync();
 
-            await using SqliteConnection conn = new($"Data Source={dbPath}");
+            await using SqliteConnection conn = new($"Data Source={dbPath};Pooling=False");
             await conn.OpenAsync();
-            SqliteCommand cmd = conn.CreateCommand();
+            using SqliteCommand cmd = conn.CreateCommand();
             cmd.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='files'";
             object? result = await cmd.ExecuteScalarAsync();

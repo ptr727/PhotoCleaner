@@ -100,7 +100,6 @@
             "args": [
                 "outdated",
                 "--upgrade:prompt"
-
             ],
             "problemMatcher": [
                 "$msCompile"
@@ -109,6 +108,6 @@
                 "showReuseMessage": false,
                 "clear": false
             }
-        },
-   ]
+        }
+    ]
 }

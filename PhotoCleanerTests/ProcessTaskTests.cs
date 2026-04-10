@@ -8,8 +8,20 @@ using Serilog.Events;
 namespace PhotoCleanerTests;
 
 public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
-    : IClassFixture<TempDirectoryFixture>
+    : IClassFixture<TempDirectoryFixture>,
+        IAsyncLifetime
 {
+    public ValueTask InitializeAsync()
+    {
+        if (!fixture.IsAvailable)
+        {
+            Assert.Skip(fixture.SkipReason ?? "Required tools not available");
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
     private sealed class InMemorySink : ILogEventSink
     {
         private readonly List<LogEvent> _events = [];

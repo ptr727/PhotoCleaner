@@ -4,8 +4,20 @@ using Serilog.Events;
 namespace PhotoCleanerTests;
 
 public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
-    : IClassFixture<TempDirectoryFixture>
+    : IClassFixture<TempDirectoryFixture>,
+        IAsyncLifetime
 {
+    public ValueTask InitializeAsync()
+    {
+        if (!fixture.IsAvailable)
+        {
+            Assert.Skip(fixture.SkipReason ?? "Required tools not available");
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
     private static CommandLine.Options CreateOptions(bool dryRun = false) =>
         new()
         {

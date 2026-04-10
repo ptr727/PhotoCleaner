@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -119,11 +120,14 @@ public sealed class ExifToolJson
     [JsonPropertyName("XMP:CreateDate")]
     public string? XMPCreateDate { get; set; }
 
-#pragma warning disable CA1819 // JSON deserialization requires array type
+    [SuppressMessage(
+        "Performance",
+        "CA1819:Properties should not return arrays",
+        Justification = "Required for JSON deserialization"
+    )]
     [JsonConverter(typeof(StringOrStringArrayConverter))]
     [JsonPropertyName("XMP:Subject")]
     public string[]? XMPSubject { get; set; }
-#pragma warning restore CA1819
 
     [JsonPropertyName("XMP:DateCreated")]
     public string? XMPDateCreated { get; set; }

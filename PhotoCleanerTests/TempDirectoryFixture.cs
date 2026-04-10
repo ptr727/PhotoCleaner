@@ -35,6 +35,8 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
     internal const string AacMp4File = "aac.mp4";
 
     public string SourceDir { get; private set; } = string.Empty;
+    public bool IsAvailable { get; private set; } = true;
+    public string? SkipReason { get; private set; }
 
     public async ValueTask InitializeAsync()
     {
@@ -43,9 +45,21 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
             $"PhotoCleanerTests_{Path.GetRandomFileName()}"
         );
         Directory.CreateDirectory(SourceDir);
-        await GenerateImagesAsync();
-        await GenerateDngFilesAsync();
-        await GenerateVideoFilesAsync();
+        try
+        {
+            await GenerateImagesAsync();
+            await GenerateDngFilesAsync();
+            await GenerateVideoFilesAsync();
+        }
+        catch (Exception ex)
+            when (ex is System.ComponentModel.Win32Exception
+                || (ex.InnerException is System.ComponentModel.Win32Exception)
+            )
+        {
+            IsAvailable = false;
+            SkipReason =
+                "Required external tools (ffmpeg/exiftool) are not installed or not in PATH.";
+        }
     }
 
     public ValueTask DisposeAsync()
