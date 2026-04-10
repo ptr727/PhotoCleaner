@@ -63,7 +63,13 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         using SqliteCommand cmd = _connection!.CreateCommand();
         cmd.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='files'";
         object? result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        string schema = result as string ?? "";
+        if (result is not string schema || string.IsNullOrEmpty(schema))
+        {
+            throw new InvalidOperationException(
+                $"Database '{dbPath}' does not contain the expected 'files' table."
+            );
+        }
+
         if (!schema.Contains("sha256", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(

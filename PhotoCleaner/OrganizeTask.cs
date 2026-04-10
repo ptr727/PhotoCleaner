@@ -188,7 +188,7 @@ internal sealed class OrganizeTask(
                 if (exists)
                 {
                     Log.Information(
-                        "Skipping already processed '{FilePath}' with SHA-256 '{Sha256}'",
+                        "Skipping already organized '{FilePath}' with SHA-256 '{Sha256}'",
                         file,
                         sha256
                     );
