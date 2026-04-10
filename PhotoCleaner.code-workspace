@@ -70,8 +70,6 @@
         "csharp.debug.symbolOptions.searchMicrosoftSymbolServer": true,
         "files.encoding": "utf8",
         "csharp.debug.justMyCode": false,
-        "claudeCode.allowDangerouslySkipPermissions": true,
-        "claudeCode.initialPermissionMode": "acceptEdits",
         "claudeCode.preferredLocation": "sidebar",
         "claudeCode.useCtrlEnterToSend": true,
     },
