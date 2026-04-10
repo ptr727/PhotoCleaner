@@ -105,7 +105,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -153,7 +153,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -202,7 +202,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -251,7 +251,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -306,7 +306,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -360,7 +360,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -408,7 +408,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -456,7 +456,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -505,7 +505,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -569,7 +569,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -617,7 +617,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -669,7 +669,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -931,7 +931,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -976,7 +976,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -1097,7 +1097,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs
@@ -1143,7 +1143,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 int organized,
                 int ignored,
                 int skipped,
-                int refSkipped,
+                int skipDbSkipped,
                 int trashSkipped,
                 int failed,
                 int deletedDirs

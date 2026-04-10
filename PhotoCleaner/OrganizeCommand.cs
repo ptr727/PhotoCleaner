@@ -23,7 +23,7 @@ internal sealed class OrganizeCommand(
                         int organized,
                         int ignored,
                         int skipped,
-                        int refSkipped,
+                        int skipDbSkipped,
                         int trashSkipped,
                         int failed,
                         int deletedDirs
@@ -86,11 +86,11 @@ internal sealed class OrganizeCommand(
                         );
                     }
 
-                    if (refSkipped > 0)
+                    if (skipDbSkipped > 0)
                     {
                         Log.Information(
-                            "Skipped {RefSkippedCount} files found in reference database",
-                            refSkipped
+                            "Skipped {SkipDbSkippedCount} files found in skip database",
+                            skipDbSkipped
                         );
                     }
 

@@ -16,18 +16,28 @@ internal sealed class TrashDatabase(string dbPath) : IDisposable, IAsyncDisposab
         using SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = """
             CREATE TABLE IF NOT EXISTS trash_hashes (
-                sha1 TEXT NOT NULL PRIMARY KEY
+                sha1                TEXT NOT NULL PRIMARY KEY,
+                original_file_name  TEXT
             )
             """;
         _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    internal Task InsertHashAsync(string sha1Hex, CancellationToken cancellationToken = default) =>
+    internal Task InsertHashAsync(
+        string sha1Hex,
+        string? originalFileName = null,
+        CancellationToken cancellationToken = default
+    ) =>
         ExecuteAsync(
             async cmd =>
             {
-                cmd.CommandText = "INSERT OR IGNORE INTO trash_hashes (sha1) VALUES (@sha1)";
+                cmd.CommandText =
+                    "INSERT OR IGNORE INTO trash_hashes (sha1, original_file_name) VALUES (@sha1, @name)";
                 _ = cmd.Parameters.AddWithValue("@sha1", sha1Hex);
+                _ = cmd.Parameters.AddWithValue(
+                    "@name",
+                    originalFileName is not null ? originalFileName : DBNull.Value
+                );
                 _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             },
             cancellationToken

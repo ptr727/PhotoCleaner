@@ -85,7 +85,7 @@ Options:
   --dryrun                      Perform a dry run without making changes
   --threads <threads>           Number of parallel threads [default: 4]
   --skipbackup                  Skip creating backup files (disables undo)
-  --db <db>                     SQLite database file for deduplication tracking
+  --db <db>                     SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
   --duration <duration>         Maximum duration in seconds below which a video is considered a short clip and deleted [default: 1]
   --reprocess                   Re-process files even if already marked as processed in the database
@@ -127,10 +127,10 @@ Options:
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
   --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
   --datepath                     Set missing EXIF creation date from file path
-  --db <db>                      SQLite database file for deduplication tracking
+  --db <db>                      SQLite database file for file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
-  --trashdb <trashdb>            SQLite database with Immich trash hashes (skip matching files)
-  --skipdb <skipdb>              SQLite database of files to skip (read-only SHA-256 check)
+  --trashdb <trashdb>            SQLite database with Immich trash hashes to be skipped (read-only)
+  --skipdb <skipdb>              SQLite database with indexed files to be skipped (read-only)
 ```
 
 ```text
@@ -143,10 +143,10 @@ Options:
   --dryrun                       Perform a dry run without making changes
   --threads <threads>            Number of parallel threads [default: 4]
   --outpath <outpath> (REQUIRED) Target directory to scan for duplicates
-  --db <db> (REQUIRED)           SQLite database file for source file index
-  --outdb <outdb> (REQUIRED)     SQLite database file for target file hash caching
+  --db <db> (REQUIRED)           SQLite database file for source file state tracking
+  --outdb <outdb> (REQUIRED)     SQLite database file for target file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
-  --trashdb <trashdb>            SQLite database with Immich trash hashes (delete matching files)
+  --trashdb <trashdb>            SQLite database with Immich trash hashes to be skipped (read-only)
 ```
 
 ```text
@@ -157,7 +157,7 @@ Description:
 Options:
   --path <path> (REQUIRED)      The directory path to index
   --threads <threads>           Number of parallel threads [default: 4]
-  --db <db> (REQUIRED)          SQLite database file for deduplication tracking
+  --db <db> (REQUIRED)          SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
 ```
 
@@ -169,7 +169,7 @@ Description:
 Options:
   --url <url> (REQUIRED)         Immich server URL (e.g. http://immich:2283)
   --apikey <apikey> (REQUIRED)   Immich API key
-  --db <db> (REQUIRED)           SQLite database file for trash hashes
+  --trashdb <trashdb> (REQUIRED) SQLite database with Immich trash hashes to be skipped
 ```
 
 **Option notes:**
@@ -219,12 +219,12 @@ Options:
   unchanged target files skip SHA-256 recomputation on re-runs. The outdb from a duplicates
   run can be reused as the `--db` for a subsequent `process` run on the same directory,
   avoiding redundant hashing across workflow steps. Created automatically on first use.
-- `--trashdb <path>` - optional for `organize` and `duplicates`; path to a SQLite database
-  containing Immich trash hashes (populated by the `trash` command). For `organize`: files
-  whose SHA-1 matches a trash hash are skipped (not copied). For `duplicates`: matching files
-  are deleted alongside SHA-256 duplicates.
-- `--skipdb <path>` - optional for `organize`; path to a SQLite database of files to skip
-  (read-only SHA-256 check). Files whose SHA-256 is in this DB are skipped without being
+- `--trashdb <path>` - **required** for `trash`, optional for `organize` and `duplicates`;
+  path to a SQLite database with Immich trash hashes. For `trash`: hashes are fetched from the
+  Immich API and written to the database. For `organize`: files matching a trash hash are
+  skipped (read-only). For `duplicates`: matching files are deleted (read-only).
+- `--skipdb <path>` - optional for `organize`; path to a SQLite database with indexed files
+  to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
 - `--url <url>` - **required** for `trash`; the Immich server URL (e.g. `http://immich:2283`).
 - `--apikey <key>` - **required** for `trash`; the Immich API key. Create one in Immich under
@@ -310,7 +310,7 @@ PhotoCleaner index --path /home/user/Source --db /data/dedup.db
 PhotoCleaner index --path /home/user/Source --db /data/dedup.db --rehash
 
 # Sync Immich trash hashes into a local database
-PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --db /data/trash.db
+PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /data/trash.db
 
 # Organize and skip files that were trashed in Immich (prevents re-import)
 PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --db /data/photos.db --trashdb /data/trash.db
@@ -322,7 +322,7 @@ PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --
 PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/source.db --outdb /data/target.db --trashdb /data/trash.db
 
 # Full workflow with Immich trash integration
-PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --db /data/trash.db
+PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --trashdb /data/trash.db
 PhotoCleaner organize --path /home/user/iCloud --outpath /home/user/Intermediate --db /data/photos.db --trashdb /data/trash.db
 PhotoCleaner process --path /home/user/Intermediate --db /data/process.db
 ```
@@ -393,9 +393,9 @@ directories to `outpath/date/filename`:
    Applied before the file is moved so the original path is still available.
 2. **Skip checks** (opt-in): before any file operation, the source file is hashed (SHA-256
    and SHA-1) and checked against up to three databases in order:
-   - `--trashdb`: if the SHA-1 matches a hash in the Immich trash DB, the file is skipped
+   - `--trashdb`: if the file matches a hash in the Immich trash DB, the file is skipped
      (counted as "trashed in Immich").
-   - `--skipdb`: if the SHA-256 matches a record in the reference DB, the file is skipped
+   - `--skipdb`: if the file matches a record in the reference DB, the file is skipped
      (counted as "skipped by reference"). This is a read-only check - no records are written.
    - `--db`: if the SHA-256 is already present (from a previous organize run), the file is
      skipped (counted as "skipped"). Otherwise, the file is copied/moved and a record is
@@ -526,7 +526,7 @@ docker run --rm \
 # Sync Immich trash hashes
 docker run --rm \
     -v /host/db:/db \
-    photocleaner:latest trash --url http://immich:2283 --apikey YOUR_API_KEY --db /db/trash.db
+    photocleaner:latest trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /db/trash.db
 
 # Organize with trash skip (prevents re-importing files trashed in Immich)
 docker run --rm \

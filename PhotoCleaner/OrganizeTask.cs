@@ -38,7 +38,7 @@ internal sealed class OrganizeTask(
         Organized,
         Ignored,
         Skipped,
-        SkippedByReference,
+        SkippedBySkipDb,
         TrashedInImmich,
         Failed,
     }
@@ -52,7 +52,7 @@ internal sealed class OrganizeTask(
         int organized,
         int ignored,
         int skipped,
-        int refSkipped,
+        int skipDbSkipped,
         int trashSkipped,
         int failed,
         int deletedDirs
@@ -65,7 +65,7 @@ internal sealed class OrganizeTask(
         int organized = 0,
             ignored = 0,
             skipped = 0,
-            refSkipped = 0,
+            skipDbSkipped = 0,
             trashSkipped = 0,
             failed = 0;
         Log.Information("Organizing {FileCount} files", allFiles.Count);
@@ -87,8 +87,8 @@ internal sealed class OrganizeTask(
                             OrganizeResult.Organized => Interlocked.Increment(ref organized),
                             OrganizeResult.Ignored => Interlocked.Increment(ref ignored),
                             OrganizeResult.Skipped => Interlocked.Increment(ref skipped),
-                            OrganizeResult.SkippedByReference => Interlocked.Increment(
-                                ref refSkipped
+                            OrganizeResult.SkippedBySkipDb => Interlocked.Increment(
+                                ref skipDbSkipped
                             ),
                             OrganizeResult.TrashedInImmich => Interlocked.Increment(
                                 ref trashSkipped
@@ -111,7 +111,7 @@ internal sealed class OrganizeTask(
             .ConfigureAwait(false);
 
         int deletedDirs = options.DeleteEmpty ? DeleteEmptyDirectories(sourceDir) : 0;
-        return (organized, ignored, skipped, refSkipped, trashSkipped, failed, deletedDirs);
+        return (organized, ignored, skipped, skipDbSkipped, trashSkipped, failed, deletedDirs);
     }
 
     private async Task<OrganizeResult> OrganizeFileAsync(
@@ -162,20 +162,20 @@ internal sealed class OrganizeTask(
                 }
             }
 
-            // Check skip DB - skip files in reference collection (read-only)
+            // Check skip DB (read-only)
             if (skipDatabase is not null)
             {
-                bool inReference = await skipDatabase
+                bool inSkipDb = await skipDatabase
                     .Sha256ExistsAsync(sha256, cancellationToken)
                     .ConfigureAwait(false);
-                if (inReference)
+                if (inSkipDb)
                 {
                     Log.Information(
-                        "Skipping file found in reference database '{FilePath}' with SHA-256 '{Sha256}'",
+                        "Skipping file found in skip database '{FilePath}' with SHA-256 '{Sha256}'",
                         file,
                         sha256
                     );
-                    return OrganizeResult.SkippedByReference;
+                    return OrganizeResult.SkippedBySkipDb;
                 }
             }
 

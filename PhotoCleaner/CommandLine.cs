@@ -345,26 +345,19 @@ internal sealed class CommandLine
         };
 
     private static Option<FileInfo?> CreateDbFileOption() =>
-        new("--db") { Description = "SQLite database file for deduplication tracking" };
+        new("--db") { Description = "SQLite database file for file state tracking" };
 
     private static Option<FileInfo?> CreateOutDbFileOption() =>
-        new("--outdb") { Description = "SQLite database file for target file hash caching" };
+        new("--outdb") { Description = "SQLite database file for target file state tracking" };
 
     private static Option<bool> CreateRehashOption() =>
         new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
 
     private static Option<FileInfo?> CreateTrashDbFileOption() =>
-        new("--trashdb")
-        {
-            Description =
-                "SQLite database with Immich trash hashes (skip during organize, delete during duplicates)",
-        };
+        new("--trashdb") { Description = "SQLite database with Immich trash hashes to be skipped" };
 
     private static Option<FileInfo?> CreateSkipDbFileOption() =>
-        new("--skipdb")
-        {
-            Description = "SQLite database of files to skip (read-only SHA-256 check)",
-        };
+        new("--skipdb") { Description = "SQLite database with indexed files to be skipped" };
 
     private static Option<bool> CreateReprocessOption() =>
         new("--reprocess")

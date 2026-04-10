@@ -55,9 +55,28 @@ internal sealed class TrashCommand(
 
                                     foreach (ImmichAssetDto asset in assets)
                                     {
+                                        if (!asset.IsTrashed)
+                                        {
+                                            Log.Warning(
+                                                "Skipping non-trashed asset '{FileName}' (id: {AssetId})",
+                                                asset.OriginalFileName,
+                                                asset.Id
+                                            );
+                                            continue;
+                                        }
+
                                         string sha1Hex = ConvertChecksum(asset.Checksum);
+                                        Log.Information(
+                                            "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
+                                            asset.OriginalFileName,
+                                            sha1Hex
+                                        );
                                         await trashDatabase
-                                            .InsertHashAsync(sha1Hex, cancellationToken)
+                                            .InsertHashAsync(
+                                                sha1Hex,
+                                                asset.OriginalFileName,
+                                                cancellationToken
+                                            )
                                             .ConfigureAwait(false);
                                     }
 
