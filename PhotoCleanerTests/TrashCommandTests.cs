@@ -70,9 +70,7 @@ public sealed class TrashCommandTests
             Assets = new ImmichSearchAssets { Items = [], NextPage = null },
         };
 
-    // Known SHA-1 values for test checksums
-    // "AAAAAAAAAAAAAAAAAAAAAA==" is 16 zero bytes -> hex "00000000000000000000000000000000"
-    // Convert.FromBase64String("J76BZtEWfrTV8jm2GjwQRuuO8mY=") -> a real Immich-style checksum
+    // "J76BZtEWfrTV8jm2GjwQRuuO8mY=" is a real Immich-style Base64-encoded SHA-1 checksum (20 bytes -> 40 hex chars)
 
     [Fact]
     public void ConvertChecksum_Base64ToHex_ReturnsLowercaseHex()

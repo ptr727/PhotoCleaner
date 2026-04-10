@@ -12,42 +12,46 @@ internal sealed record FileRecord(
     bool IsProcessed
 );
 
-internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
+internal sealed class Database(string dbPath, bool readOnly = false) : IDisposable, IAsyncDisposable
 {
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
 
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        Log.Debug("Initializing database at '{DbPath}'", dbPath);
-        _connection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+        Log.Debug("Initializing database at '{DbPath}' (readOnly={ReadOnly})", dbPath, readOnly);
+        string mode = readOnly ? "Mode=ReadOnly;" : "";
+        _connection = new SqliteConnection($"Data Source={dbPath};{mode}Pooling=False");
         await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        // Create table for new databases
-        using SqliteCommand createCmd = _connection.CreateCommand();
-        createCmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS files (
-                path         TEXT NOT NULL PRIMARY KEY,
-                sha256       TEXT NOT NULL,
-                sha1         TEXT,
-                file_size    INTEGER NOT NULL,
-                mtime_ticks  INTEGER NOT NULL,
-                is_processed INTEGER NOT NULL DEFAULT 0
-            )
-            """;
-        _ = await createCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (!readOnly)
+        {
+            // Create table for new databases
+            using SqliteCommand createCmd = _connection.CreateCommand();
+            createCmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS files (
+                    path         TEXT NOT NULL PRIMARY KEY,
+                    sha256       TEXT NOT NULL,
+                    sha1         TEXT,
+                    file_size    INTEGER NOT NULL,
+                    mtime_ticks  INTEGER NOT NULL,
+                    is_processed INTEGER NOT NULL DEFAULT 0
+                )
+                """;
+            _ = await createCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
-        // Migrate legacy schema before creating indexes on the new column names
-        await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
+            // Migrate legacy schema before creating indexes on the new column names
+            await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
 
-        // Create indexes after migration so column names are guaranteed correct
-        using SqliteCommand indexCmd = _connection.CreateCommand();
-        indexCmd.CommandText = """
-            DROP INDEX IF EXISTS idx_files_hash;
-            CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files (sha256);
-            CREATE INDEX IF NOT EXISTS idx_files_sha1 ON files (sha1)
-            """;
-        _ = await indexCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            // Create indexes after migration so column names are guaranteed correct
+            using SqliteCommand indexCmd = _connection.CreateCommand();
+            indexCmd.CommandText = """
+                DROP INDEX IF EXISTS idx_files_hash;
+                CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files (sha256);
+                CREATE INDEX IF NOT EXISTS idx_files_sha1 ON files (sha1)
+                """;
+            _ = await indexCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task MigrateSchemaAsync(CancellationToken cancellationToken)
@@ -268,7 +272,11 @@ internal sealed class Database(string dbPath) : IDisposable, IAsyncDisposable
         if (!rehash && cached is not null)
         {
             FileInfo info = new(filePath);
-            if (cached.FileSize == info.Length && cached.MtimeTicks == info.LastWriteTimeUtc.Ticks)
+            if (
+                cached.FileSize == info.Length
+                && cached.MtimeTicks == info.LastWriteTimeUtc.Ticks
+                && cached.Sha1 is not null
+            )
             {
                 return (cached.Sha256, cached.Sha1);
             }

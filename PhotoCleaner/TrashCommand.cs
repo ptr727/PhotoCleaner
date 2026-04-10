@@ -66,7 +66,7 @@ internal sealed class TrashCommand(
                                         }
 
                                         string sha1Hex = ConvertChecksum(asset.Checksum);
-                                        Log.Information(
+                                        Log.Debug(
                                             "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
                                             asset.OriginalFileName,
                                             sha1Hex
@@ -109,9 +109,11 @@ internal sealed class TrashCommand(
 
     private HttpClient CreateDefaultHttpClient()
     {
-        HttpClient client = HttpClientFactory.GetHttpClient();
-        client.BaseAddress = new Uri(options.ImmichUrl!);
-        _ = client.DefaultRequestHeaders.Remove("x-api-key");
+        HttpClient client = new(HttpClientFactory.GetResilienceHandler(), disposeHandler: false)
+        {
+            BaseAddress = new Uri(options.ImmichUrl!),
+            Timeout = TimeSpan.FromSeconds(120),
+        };
         client.DefaultRequestHeaders.Add("x-api-key", options.ImmichApiKey);
         return client;
     }

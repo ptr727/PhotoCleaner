@@ -2,25 +2,35 @@ using Microsoft.Data.Sqlite;
 
 namespace PhotoCleaner;
 
-internal sealed class TrashDatabase(string dbPath) : IDisposable, IAsyncDisposable
+internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
+    : IDisposable,
+        IAsyncDisposable
 {
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
 
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        Log.Debug("Initializing trash database at '{DbPath}'", dbPath);
-        _connection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+        Log.Debug(
+            "Initializing trash database at '{DbPath}' (readOnly={ReadOnly})",
+            dbPath,
+            readOnly
+        );
+        string mode = readOnly ? "Mode=ReadOnly;" : "";
+        _connection = new SqliteConnection($"Data Source={dbPath};{mode}Pooling=False");
         await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        using SqliteCommand cmd = _connection.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS trash_hashes (
-                sha1                TEXT NOT NULL PRIMARY KEY,
-                original_file_name  TEXT
-            )
-            """;
-        _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (!readOnly)
+        {
+            using SqliteCommand cmd = _connection.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS trash_hashes (
+                    sha1                TEXT NOT NULL PRIMARY KEY,
+                    original_file_name  TEXT
+                )
+                """;
+            _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     internal Task InsertHashAsync(

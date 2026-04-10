@@ -6,9 +6,12 @@
     ],
     "settings": {
         "cSpell.words": [
+            "apikey",
+            "artefacts",
             "Betz",
             "datefrompath",
             "datepath",
+            "dedup",
             "deleteempty",
             "Diagnoser",
             "dryrun",
@@ -21,6 +24,7 @@
             "Gyan",
             "icloudpd",
             "Immich",
+            "immichcli",
             "ISOBMFF",
             "lavfi",
             "libx",
@@ -49,8 +53,12 @@
             "Serilog",
             "setdate",
             "skipbackup",
+            "skipdb",
             "subdirs",
+            "tagpath",
+            "trashdb",
             "Uniquified",
+            "upserts",
             "winget",
             "Xunit",
             "yourapikey"

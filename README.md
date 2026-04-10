@@ -628,7 +628,7 @@ docker run --rm \
     trash \
     --url http://immich:2283 \
     --apikey $IMMICH_API_KEY \
-    --db /db/trash.db
+    --trashdb /db/trash.db
 ```
 
 **Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to organize new photos**:

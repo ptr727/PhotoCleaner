@@ -263,7 +263,7 @@ PhotoCleaner duplicates --path /icloud/originals --outpath /import1 --db /data/p
 PhotoCleaner duplicates --path /icloud/originals --outpath /import2 --db /data/photos.db --outdb /data/import2.db
 
 # Trash: sync Immich trash hashes into a local DB
-PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --db /data/trash.db
+PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /data/trash.db
 
 # Organize with trash skip (prevents re-importing files trashed in Immich)
 PhotoCleaner organize --path /photos --outpath /organized --db /data/photos.db --trashdb /data/trash.db
@@ -275,7 +275,7 @@ PhotoCleaner organize --path /photos --outpath /organized --skipdb /data/existin
 PhotoCleaner duplicates --path /source --outpath /target --db /data/source.db --outdb /data/target.db --trashdb /data/trash.db
 
 # Full workflow with trash integration
-PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --db /data/trash.db
+PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --trashdb /data/trash.db
 PhotoCleaner organize --path /icloud --outpath /intermediate --db /data/photos.db --trashdb /data/trash.db
 PhotoCleaner process --path /intermediate --db /data/process.db
 

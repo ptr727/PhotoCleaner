@@ -27,10 +27,7 @@ internal static class HttpClientFactory
                         Delay = TimeSpan.FromSeconds(1),
                         MaxDelay = TimeSpan.FromSeconds(30),
                         ShouldHandle = args =>
-                            ValueTask.FromResult(
-                                args.Outcome.Exception != null
-                                    || args.Outcome.Result is { IsSuccessStatusCode: false }
-                            ),
+                            ValueTask.FromResult(IsTransientFailure(args.Outcome)),
                     }
                 )
                 .AddCircuitBreaker(
@@ -41,10 +38,7 @@ internal static class HttpClientFactory
                         SamplingDuration = TimeSpan.FromSeconds(60),
                         BreakDuration = TimeSpan.FromSeconds(30),
                         ShouldHandle = args =>
-                            ValueTask.FromResult(
-                                args.Outcome.Exception != null
-                                    || args.Outcome.Result is { IsSuccessStatusCode: false }
-                            ),
+                            ValueTask.FromResult(IsTransientFailure(args.Outcome)),
                     }
                 )
                 .AddTimeout(TimeSpan.FromSeconds(30))
@@ -65,5 +59,21 @@ internal static class HttpClientFactory
             new ProductInfoHeaderValue(AssemblyInfo.AppName, AssemblyInfo.InformationalVersion)
         );
         return httpClient;
+    }
+
+    private static bool IsTransientFailure(Outcome<HttpResponseMessage> outcome)
+    {
+        if (outcome.Exception is not null)
+        {
+            return true;
+        }
+
+        if (outcome.Result is null)
+        {
+            return false;
+        }
+
+        int statusCode = (int)outcome.Result.StatusCode;
+        return statusCode is 408 or 429 or >= 500;
     }
 }

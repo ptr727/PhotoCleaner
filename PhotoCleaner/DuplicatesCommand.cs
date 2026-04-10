@@ -59,7 +59,8 @@ internal sealed class DuplicatesCommand(
                                             cancellationToken
                                         )
                                         .ConfigureAwait(false),
-                                cancellationToken
+                                cancellationToken,
+                                readOnly: true
                             )
                             .ConfigureAwait(false);
 

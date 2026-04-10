@@ -169,7 +169,7 @@
                 "trash",
                 "--url=https://immich.home.insanegenius.net",
                 "--trashdb=/data/media/PhotoCleaner/Trash.db",
-                "--apikey=kvdlaW0pl6H2EY2sW76dm0GxuvcRc6dStQ4BHnlcVrM",
+                "--apikey=${env:IMMICH_API_KEY}",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",
                 "--logclear=true"

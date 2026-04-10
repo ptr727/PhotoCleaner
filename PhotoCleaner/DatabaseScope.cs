@@ -10,7 +10,8 @@ internal static class DatabaseScope
     internal static async Task<T> RunAsync<T>(
         FileInfo? dbFile,
         Func<Database?, Task<T>> work,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        bool readOnly = false
     )
     {
         if (dbFile is null)
@@ -18,8 +19,12 @@ internal static class DatabaseScope
             return await work(null).ConfigureAwait(false);
         }
 
-        _ = Directory.CreateDirectory(dbFile.DirectoryName!);
-        Database database = new(dbFile.FullName);
+        if (!readOnly)
+        {
+            _ = Directory.CreateDirectory(dbFile.DirectoryName!);
+        }
+
+        Database database = new(dbFile.FullName, readOnly);
         try
         {
             Log.Information("Using database '{DbFile}'", dbFile.FullName);
@@ -35,7 +40,8 @@ internal static class DatabaseScope
     internal static async Task RunAsync(
         FileInfo? dbFile,
         Func<Database?, Task> work,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        bool readOnly = false
     ) =>
         await RunAsync<object?>(
                 dbFile,
@@ -44,7 +50,8 @@ internal static class DatabaseScope
                     await work(db).ConfigureAwait(false);
                     return null;
                 },
-                cancellationToken
+                cancellationToken,
+                readOnly
             )
             .ConfigureAwait(false);
 }
