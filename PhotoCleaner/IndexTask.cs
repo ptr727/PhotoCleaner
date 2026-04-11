@@ -47,9 +47,14 @@ internal sealed class IndexTask(
             return (IndexStatus.Inserted, sha256, sha1, false);
         }
 
-        if (sha256 != cached.Sha256)
+        if (
+            sha256 != cached.Sha256
+            || sha1 != cached.Sha1
+            || info.Length != cached.FileSize
+            || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
+        )
         {
-            Log.Debug("Updating '{FilePath}' with new SHA-256 '{Sha256}'", filePath, sha256);
+            Log.Debug("Updating '{FilePath}' with SHA-256 '{Sha256}'", filePath, sha256);
             await database
                 .UpdateHashesAsync(
                     filePath,
@@ -60,13 +65,12 @@ internal sealed class IndexTask(
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-            return (IndexStatus.Updated, sha256, sha1, false);
-        }
-
-        // Backfill SHA-1 if missing from an older DB row
-        if (cached.Sha1 is null && sha1 is not null)
-        {
-            await database.UpdateSha1Async(filePath, sha1, cancellationToken).ConfigureAwait(false);
+            return (
+                IndexStatus.Updated,
+                sha256,
+                sha1,
+                sha256 == cached.Sha256 && cached.IsProcessed
+            );
         }
 
         return (IndexStatus.Unchanged, sha256, sha1 ?? cached.Sha1, cached.IsProcessed);

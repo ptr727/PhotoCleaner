@@ -119,7 +119,12 @@ internal sealed class DuplicatesTask(
                     )
                     .ConfigureAwait(false);
             }
-            else if (sha256 != cached.Sha256)
+            else if (
+                sha256 != cached.Sha256
+                || sha1 != cached.Sha1
+                || info.Length != cached.FileSize
+                || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
+            )
             {
                 await outDatabase
                     .UpdateHashesAsync(
@@ -130,12 +135,6 @@ internal sealed class DuplicatesTask(
                         info.LastWriteTimeUtc.Ticks,
                         cancellationToken
                     )
-                    .ConfigureAwait(false);
-            }
-            else if (cached.Sha1 is null && sha1 is not null)
-            {
-                await outDatabase
-                    .UpdateSha1Async(file, sha1, cancellationToken)
                     .ConfigureAwait(false);
             }
         }

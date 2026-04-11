@@ -26,8 +26,8 @@ internal sealed class TrashCommand(
                                     );
                                 }
 
-                                int totalFetched = 0;
-                                int totalInserted = 0;
+                                long totalFetched = 0;
+                                long totalInserted = 0;
                                 long countBefore = await trashDatabase
                                     .GetCountAsync(cancellationToken)
                                     .ConfigureAwait(false);
@@ -132,7 +132,7 @@ internal sealed class TrashCommand(
                                     long countAfter = await trashDatabase
                                         .GetCountAsync(cancellationToken)
                                         .ConfigureAwait(false);
-                                    totalInserted = (int)(countAfter - countBefore);
+                                    totalInserted = Math.Max(0, countAfter - countBefore);
 
                                     Log.Information(
                                         "Fetched {TotalFetched} trashed assets, inserted {TotalInserted} new hashes (total {TotalCount})",
