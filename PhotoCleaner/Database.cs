@@ -70,10 +70,13 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             );
         }
 
-        if (!schema.Contains("sha256", StringComparison.OrdinalIgnoreCase))
+        if (
+            !schema.Contains("sha256", StringComparison.OrdinalIgnoreCase)
+            || !schema.Contains("sha1", StringComparison.OrdinalIgnoreCase)
+        )
         {
             throw new InvalidOperationException(
-                $"Database '{dbPath}' has a legacy schema (missing 'sha256' column). "
+                $"Database '{dbPath}' has a legacy schema (missing 'sha256' or 'sha1' column). "
                     + "Open it in read-write mode first to migrate the schema."
             );
         }
