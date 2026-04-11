@@ -119,17 +119,28 @@ internal sealed class DuplicatesTask(
                     )
                     .ConfigureAwait(false);
             }
-            else if (
-                sha256 != cached.Sha256
-                || sha1 != cached.Sha1
-                || info.Length != cached.FileSize
-                || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
-            )
+            else if (sha256 != cached.Sha256)
             {
                 await outDatabase
                     .UpdateHashesAsync(
                         file,
                         sha256,
+                        sha1,
+                        info.Length,
+                        info.LastWriteTimeUtc.Ticks,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            else if (
+                sha1 != cached.Sha1
+                || info.Length != cached.FileSize
+                || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
+            )
+            {
+                await outDatabase
+                    .UpdateMetadataAsync(
+                        file,
                         sha1,
                         info.Length,
                         info.LastWriteTimeUtc.Ticks,

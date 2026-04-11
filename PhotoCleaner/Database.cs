@@ -245,6 +245,27 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             cancellationToken
         );
 
+    internal Task UpdateMetadataAsync(
+        string path,
+        string? sha1,
+        long fileSize,
+        long mtimeTicks,
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText =
+                    "UPDATE files SET sha1 = @sha1, file_size = @size, mtime_ticks = @mtime WHERE path = @path";
+                _ = cmd.Parameters.AddWithValue("@path", path);
+                _ = cmd.Parameters.AddWithValue("@sha1", sha1 is not null ? sha1 : DBNull.Value);
+                _ = cmd.Parameters.AddWithValue("@size", fileSize);
+                _ = cmd.Parameters.AddWithValue("@mtime", mtimeTicks);
+                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken
+        );
+
     internal Task SetProcessedAsync(string path, CancellationToken cancellationToken = default) =>
         ExecuteAsync(
             async cmd =>
@@ -297,13 +318,17 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         if (!rehash && cached is not null)
         {
             FileInfo info = new(filePath);
-            if (
-                cached.FileSize == info.Length
-                && cached.MtimeTicks == info.LastWriteTimeUtc.Ticks
-                && cached.Sha1 is not null
-            )
+            if (cached.FileSize == info.Length && cached.MtimeTicks == info.LastWriteTimeUtc.Ticks)
             {
-                return (cached.Sha256, cached.Sha1);
+                if (cached.Sha1 is not null)
+                {
+                    return (cached.Sha256, cached.Sha1);
+                }
+
+                // Size/mtime match but sha1 missing (legacy row) - compute only sha1
+                (string _, string sha1) = await ComputeHashesAsync(filePath, cancellationToken)
+                    .ConfigureAwait(false);
+                return (cached.Sha256, sha1);
             }
         }
 

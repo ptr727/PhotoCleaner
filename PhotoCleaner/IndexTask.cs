@@ -47,14 +47,10 @@ internal sealed class IndexTask(
             return (IndexStatus.Inserted, sha256, sha1, false);
         }
 
-        if (
-            sha256 != cached.Sha256
-            || sha1 != cached.Sha1
-            || info.Length != cached.FileSize
-            || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
-        )
+        if (sha256 != cached.Sha256)
         {
-            Log.Debug("Updating '{FilePath}' with SHA-256 '{Sha256}'", filePath, sha256);
+            // Content changed - update hashes and reset is_processed
+            Log.Debug("Updating '{FilePath}' with new SHA-256 '{Sha256}'", filePath, sha256);
             await database
                 .UpdateHashesAsync(
                     filePath,
@@ -65,12 +61,27 @@ internal sealed class IndexTask(
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-            return (
-                IndexStatus.Updated,
-                sha256,
-                sha1,
-                sha256 == cached.Sha256 && cached.IsProcessed
-            );
+            return (IndexStatus.Updated, sha256, sha1, false);
+        }
+
+        if (
+            sha1 != cached.Sha1
+            || info.Length != cached.FileSize
+            || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
+        )
+        {
+            // Metadata changed (sha1 backfill, size/mtime refresh) - preserve is_processed
+            Log.Debug("Updating metadata for '{FilePath}'", filePath);
+            await database
+                .UpdateMetadataAsync(
+                    filePath,
+                    sha1,
+                    info.Length,
+                    info.LastWriteTimeUtc.Ticks,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            return (IndexStatus.Updated, sha256, sha1, cached.IsProcessed);
         }
 
         return (IndexStatus.Unchanged, sha256, sha1 ?? cached.Sha1, cached.IsProcessed);
