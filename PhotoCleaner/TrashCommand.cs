@@ -113,7 +113,7 @@ internal sealed class TrashCommand(
                                         }
                                         else if (
                                             int.TryParse(result.NextPage, out int nextPage)
-                                            && nextPage > 0
+                                            && nextPage > page
                                         )
                                         {
                                             page = nextPage;
