@@ -161,9 +161,17 @@ internal sealed class OrganizeCommand(
         }
 
         Database database = new(dbFile.FullName, readOnly);
-        Log.Information("Using database '{DbFile}'", dbFile.FullName);
-        await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        return database;
+        try
+        {
+            Log.Information("Using database '{DbFile}'", dbFile.FullName);
+            await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            return database;
+        }
+        catch
+        {
+            await database.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static async Task<TrashDatabase?> OpenTrashDatabaseAsync(
@@ -183,8 +191,16 @@ internal sealed class OrganizeCommand(
         }
 
         TrashDatabase database = new(dbFile.FullName, readOnly);
-        Log.Information("Using trash database '{DbFile}'", dbFile.FullName);
-        await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        return database;
+        try
+        {
+            Log.Information("Using trash database '{DbFile}'", dbFile.FullName);
+            await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            return database;
+        }
+        catch
+        {
+            await database.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 }
