@@ -27,7 +27,45 @@ internal sealed class OrganizeCommand(
                         int trashSkipped,
                         int failed,
                         int deletedDirs
-                    ) = await RunWithDatabasesAsync(files).ConfigureAwait(false);
+                    ) = await TrashDatabaseScope
+                        .RunAsync(
+                            options.TrashDbFile,
+                            async trashDatabase =>
+                                await DatabaseScope
+                                    .RunAsync(
+                                        options.SkipDbFile,
+                                        async skipDatabase =>
+                                            await DatabaseScope
+                                                .RunAsync(
+                                                    options.DbFile,
+                                                    async database =>
+                                                    {
+                                                        OrganizeTask task = new(
+                                                            options,
+                                                            database,
+                                                            skipDatabase,
+                                                            trashDatabase,
+                                                            _skippedExtensions
+                                                        );
+                                                        return await task.ExecuteAsync(
+                                                                files,
+                                                                options.Path,
+                                                                cancellationToken
+                                                            )
+                                                            .ConfigureAwait(false);
+                                                    },
+                                                    cancellationToken: cancellationToken
+                                                )
+                                                .ConfigureAwait(false),
+                                        readOnly: true,
+                                        label: "skip database",
+                                        cancellationToken: cancellationToken
+                                    )
+                                    .ConfigureAwait(false),
+                            readOnly: true,
+                            cancellationToken: cancellationToken
+                        )
+                        .ConfigureAwait(false);
 
                     Log.Information("Total {TotalCount} files", totalCount);
 
@@ -79,128 +117,4 @@ internal sealed class OrganizeCommand(
                 }
             )
             .ConfigureAwait(false);
-
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "All databases are disposed in the finally block"
-    )]
-    private async Task<(
-        int organized,
-        int ignored,
-        int skipped,
-        int skipDbSkipped,
-        int trashSkipped,
-        int failed,
-        int deletedDirs
-    )> RunWithDatabasesAsync(IReadOnlyList<string> files)
-    {
-        TrashDatabase? trashDatabase = null;
-        Database? skipDatabase = null;
-        Database? database = null;
-        try
-        {
-            trashDatabase = await OpenTrashDatabaseAsync(
-                    options.TrashDbFile,
-                    readOnly: true,
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-            skipDatabase = await OpenDatabaseAsync(
-                    options.SkipDbFile,
-                    readOnly: true,
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-            database = await OpenDatabaseAsync(options.DbFile, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-
-            OrganizeTask task = new(
-                options,
-                database,
-                skipDatabase,
-                trashDatabase,
-                _skippedExtensions
-            );
-            return await task.ExecuteAsync(files, options.Path, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            if (database is not null)
-            {
-                await database.DisposeAsync().ConfigureAwait(false);
-            }
-
-            if (skipDatabase is not null)
-            {
-                await skipDatabase.DisposeAsync().ConfigureAwait(false);
-            }
-
-            if (trashDatabase is not null)
-            {
-                await trashDatabase.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-    }
-
-    private static async Task<Database?> OpenDatabaseAsync(
-        FileInfo? dbFile,
-        bool readOnly = false,
-        CancellationToken cancellationToken = default
-    )
-    {
-        if (dbFile is null)
-        {
-            return null;
-        }
-
-        if (!readOnly)
-        {
-            _ = Directory.CreateDirectory(dbFile.DirectoryName!);
-        }
-
-        Database database = new(dbFile.FullName, readOnly);
-        try
-        {
-            Log.Information("Using database '{DbFile}'", dbFile.FullName);
-            await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
-            return database;
-        }
-        catch
-        {
-            await database.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    private static async Task<TrashDatabase?> OpenTrashDatabaseAsync(
-        FileInfo? dbFile,
-        bool readOnly = false,
-        CancellationToken cancellationToken = default
-    )
-    {
-        if (dbFile is null)
-        {
-            return null;
-        }
-
-        if (!readOnly)
-        {
-            _ = Directory.CreateDirectory(dbFile.DirectoryName!);
-        }
-
-        TrashDatabase database = new(dbFile.FullName, readOnly);
-        try
-        {
-            Log.Information("Using trash database '{DbFile}'", dbFile.FullName);
-            await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
-            return database;
-        }
-        catch
-        {
-            await database.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
 }

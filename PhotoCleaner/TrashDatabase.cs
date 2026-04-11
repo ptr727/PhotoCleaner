@@ -76,32 +76,34 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
         IReadOnlyList<(string Sha1Hex, string? OriginalFileName)> hashes,
         CancellationToken cancellationToken = default
     ) =>
-        ExecuteAsync(
-            async cmd =>
-            {
-                using SqliteTransaction transaction = (SqliteTransaction)
-                    await _connection!
-                        .BeginTransactionAsync(cancellationToken)
-                        .ConfigureAwait(false);
-                cmd.Transaction = transaction;
-                cmd.CommandText =
-                    "INSERT OR IGNORE INTO trash_hashes (sha1, original_file_name) VALUES (@sha1, @name)";
-                SqliteParameter sha1Param = cmd.Parameters.Add("@sha1", SqliteType.Text);
-                SqliteParameter nameParam = cmd.Parameters.Add("@name", SqliteType.Text);
-
-                foreach ((string sha1Hex, string? originalFileName) in hashes)
+        hashes.Count == 0
+            ? Task.CompletedTask
+            : ExecuteAsync(
+                async cmd =>
                 {
-                    sha1Param.Value = sha1Hex;
-                    nameParam.Value = originalFileName is not null
-                        ? originalFileName
-                        : DBNull.Value;
-                    _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-                }
+                    using SqliteTransaction transaction = (SqliteTransaction)
+                        await _connection!
+                            .BeginTransactionAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                    cmd.Transaction = transaction;
+                    cmd.CommandText =
+                        "INSERT OR IGNORE INTO trash_hashes (sha1, original_file_name) VALUES (@sha1, @name)";
+                    SqliteParameter sha1Param = cmd.Parameters.Add("@sha1", SqliteType.Text);
+                    SqliteParameter nameParam = cmd.Parameters.Add("@name", SqliteType.Text);
 
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            },
-            cancellationToken
-        );
+                    foreach ((string sha1Hex, string? originalFileName) in hashes)
+                    {
+                        sha1Param.Value = sha1Hex;
+                        nameParam.Value = originalFileName is not null
+                            ? originalFileName
+                            : DBNull.Value;
+                        _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                },
+                cancellationToken
+            );
 
     internal Task<bool> Sha1ExistsAsync(
         string sha1Hex,

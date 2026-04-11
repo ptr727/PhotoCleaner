@@ -53,7 +53,10 @@ internal static class HttpClientFactory
 
     private static HttpClient CreateHttpClient()
     {
-        HttpClient httpClient = new(GetResilienceHandler()) { Timeout = TimeSpan.FromSeconds(120) };
+        HttpClient httpClient = new(GetResilienceHandler(), disposeHandler: false)
+        {
+            Timeout = TimeSpan.FromSeconds(120),
+        };
         string version = AssemblyInfo.InformationalVersion;
         int plusIndex = version.IndexOf('+', StringComparison.Ordinal);
         if (plusIndex >= 0)
