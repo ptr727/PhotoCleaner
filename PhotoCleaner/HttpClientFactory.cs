@@ -55,8 +55,15 @@ internal static class HttpClientFactory
     private static HttpClient CreateHttpClient()
     {
         HttpClient httpClient = new(GetResilienceHandler()) { Timeout = TimeSpan.FromSeconds(120) };
+        string version = AssemblyInfo.InformationalVersion;
+        int plusIndex = version.IndexOf('+');
+        if (plusIndex >= 0)
+        {
+            version = version[..plusIndex];
+        }
+
         httpClient.DefaultRequestHeaders.UserAgent.Add(
-            new ProductInfoHeaderValue(AssemblyInfo.AppName, AssemblyInfo.InformationalVersion)
+            new ProductInfoHeaderValue(AssemblyInfo.AppName, version)
         );
         return httpClient;
     }

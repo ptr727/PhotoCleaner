@@ -158,9 +158,19 @@ internal sealed class TrashCommand(
 
     private HttpClient CreateDefaultHttpClient()
     {
+        if (string.IsNullOrWhiteSpace(options.ImmichUrl))
+        {
+            throw new InvalidOperationException("Immich URL is required (--url)");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ImmichApiKey))
+        {
+            throw new InvalidOperationException("Immich API key is required (--apikey)");
+        }
+
         HttpClient client = new(HttpClientFactory.GetResilienceHandler(), disposeHandler: false)
         {
-            BaseAddress = new Uri(options.ImmichUrl!.TrimEnd('/') + "/"),
+            BaseAddress = new Uri(options.ImmichUrl.TrimEnd('/') + "/"),
             Timeout = TimeSpan.FromSeconds(120),
         };
         client.DefaultRequestHeaders.Add("x-api-key", options.ImmichApiKey);
@@ -199,8 +209,11 @@ internal sealed class TrashCommand(
             return null;
         }
 
-        byte[] buffer = new byte[(base64Checksum.Length + 3) / 4 * 3];
-        return !Convert.TryFromBase64String(base64Checksum, buffer, out int bytesWritten)
+        string trimmed = base64Checksum.Trim();
+        byte[] buffer = new byte[(trimmed.Length + 3) / 4 * 3];
+        return
+            !Convert.TryFromBase64String(trimmed, buffer, out int bytesWritten)
+            || bytesWritten != 20
             ? null
             : Convert.ToHexStringLower(buffer.AsSpan(0, bytesWritten));
     }
