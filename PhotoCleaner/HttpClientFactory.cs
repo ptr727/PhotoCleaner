@@ -41,7 +41,6 @@ internal static class HttpClientFactory
                             ValueTask.FromResult(IsTransientFailure(args.Outcome)),
                     }
                 )
-                .AddTimeout(TimeSpan.FromSeconds(30))
                 .Build()
         )
         {

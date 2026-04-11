@@ -326,7 +326,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                 }
 
                 // Size/mtime match but sha1 missing (legacy row) - compute only sha1
-                (string _, string sha1) = await ComputeHashesAsync(filePath, cancellationToken)
+                string sha1 = await ComputeSha1OnlyAsync(filePath, cancellationToken)
                     .ConfigureAwait(false);
                 return (cached.Sha256, sha1);
             }
@@ -365,6 +365,33 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             Convert.ToHexStringLower(sha256Hasher.GetHashAndReset()),
             Convert.ToHexStringLower(sha1Hasher.GetHashAndReset())
         );
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Security",
+        "CA5350:Do Not Use Weak Cryptographic Algorithms",
+        Justification = "SHA-1 required for Immich compatibility - Immich uses SHA-1 checksums"
+    )]
+    internal static async Task<string> ComputeSha1OnlyAsync(
+        string filePath,
+        CancellationToken cancellationToken = default
+    )
+    {
+        using IncrementalHash sha1Hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
+        byte[] buffer = new byte[81920];
+        using FileStream fs = File.OpenRead(filePath);
+        int bytesRead;
+        while (
+            (
+                bytesRead = await fs.ReadAsync(buffer.AsMemory(), cancellationToken)
+                    .ConfigureAwait(false)
+            ) > 0
+        )
+        {
+            sha1Hasher.AppendData(buffer, 0, bytesRead);
+        }
+
+        return Convert.ToHexStringLower(sha1Hasher.GetHashAndReset());
     }
 
     public void Dispose()
