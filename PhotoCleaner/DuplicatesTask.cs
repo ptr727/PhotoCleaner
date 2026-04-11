@@ -99,40 +99,45 @@ internal sealed class DuplicatesTask(
             .ConfigureAwait(false);
         Log.Debug("File '{FilePath}' has SHA-256 '{Sha256}'", file, sha256);
 
-        // Upsert into outdb for future cache hits
-        FileInfo info = new(file);
-        if (cached is null)
+        // Upsert into outdb for future cache hits (skip during dry run)
+        if (!options.DryRun)
         {
-            await outDatabase
-                .InsertAsync(
-                    new FileRecord(
+            FileInfo info = new(file);
+            if (cached is null)
+            {
+                await outDatabase
+                    .InsertAsync(
+                        new FileRecord(
+                            file,
+                            sha256,
+                            sha1,
+                            info.Length,
+                            info.LastWriteTimeUtc.Ticks,
+                            false
+                        ),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            else if (sha256 != cached.Sha256)
+            {
+                await outDatabase
+                    .UpdateHashesAsync(
                         file,
                         sha256,
                         sha1,
                         info.Length,
                         info.LastWriteTimeUtc.Ticks,
-                        false
-                    ),
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-        }
-        else if (sha256 != cached.Sha256)
-        {
-            await outDatabase
-                .UpdateHashesAsync(
-                    file,
-                    sha256,
-                    sha1,
-                    info.Length,
-                    info.LastWriteTimeUtc.Ticks,
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-        }
-        else if (cached.Sha1 is null && sha1 is not null)
-        {
-            await outDatabase.UpdateSha1Async(file, sha1, cancellationToken).ConfigureAwait(false);
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            else if (cached.Sha1 is null && sha1 is not null)
+            {
+                await outDatabase
+                    .UpdateSha1Async(file, sha1, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         bool isDuplicate = await database

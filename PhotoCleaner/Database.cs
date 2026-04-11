@@ -107,9 +107,9 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (SqliteException)
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 1)
         {
-            // Expected when column already renamed or already exists
+            // SQLITE_ERROR (1): expected when column already renamed or already exists
             return false;
         }
     }

@@ -56,7 +56,7 @@ internal static class HttpClientFactory
     {
         HttpClient httpClient = new(GetResilienceHandler()) { Timeout = TimeSpan.FromSeconds(120) };
         string version = AssemblyInfo.InformationalVersion;
-        int plusIndex = version.IndexOf('+');
+        int plusIndex = version.IndexOf('+', StringComparison.Ordinal);
         if (plusIndex >= 0)
         {
             version = version[..plusIndex];
