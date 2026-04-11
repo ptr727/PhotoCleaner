@@ -108,7 +108,7 @@ internal sealed class DuplicatesTask(
         FileRecord? cached = await outDatabase
             .GetByPathAsync(file, cancellationToken)
             .ConfigureAwait(false);
-        (string sha256, string? sha1) = await Database
+        (string sha256, string? resolvedSha1) = await Database
             .ResolveHashesAsync(
                 file,
                 cached,
@@ -117,6 +117,7 @@ internal sealed class DuplicatesTask(
                 cancellationToken
             )
             .ConfigureAwait(false);
+        string? sha1 = resolvedSha1 ?? cached?.Sha1;
         Log.Debug("File '{FilePath}' has SHA-256 '{Sha256}'", file, sha256);
 
         // Upsert into outdb for future cache hits (skip during dry run)

@@ -17,6 +17,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
     private string _sha256Column = "sha256";
+    private bool _hasSha1Column = true;
 
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -78,6 +79,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                 $"Database '{dbPath}' has an unsupported schema (missing 'sha256' or 'hash' column). "
                     + "Open it in read-write mode first to migrate the schema."
             );
+        _hasSha1Column = schema.Contains("sha1", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task MigrateSchemaAsync(CancellationToken cancellationToken)
@@ -115,6 +117,11 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Security",
+        "CA2100:Review SQL queries for security vulnerabilities",
+        Justification = "Column names are set internally from validated schema detection, not user input"
+    )]
     internal Task<FileRecord?> GetByPathAsync(
         string path,
         CancellationToken cancellationToken = default
@@ -122,24 +129,35 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         ExecuteAsync(
             async cmd =>
             {
-                cmd.CommandText =
-                    "SELECT path, sha256, sha1, file_size, mtime_ticks, is_processed FROM files WHERE path = @path LIMIT 1";
+                cmd.CommandText = _hasSha1Column
+                    ? $"SELECT path, {_sha256Column}, sha1, file_size, mtime_ticks, is_processed FROM files WHERE path = @path LIMIT 1"
+                    : $"SELECT path, {_sha256Column}, file_size, mtime_ticks, is_processed FROM files WHERE path = @path LIMIT 1";
                 _ = cmd.Parameters.AddWithValue("@path", path);
                 SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
                     .ConfigureAwait(false);
                 try
                 {
-                    return !await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                        ? null
+                    return !await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? null
+                        : _hasSha1Column
+                            ? new FileRecord(
+                                reader.GetString(0),
+                                reader.GetString(1),
+                                await reader
+                                    .IsDBNullAsync(2, cancellationToken)
+                                    .ConfigureAwait(false)
+                                    ? null
+                                    : reader.GetString(2),
+                                reader.GetInt64(3),
+                                reader.GetInt64(4),
+                                reader.GetInt64(5) != 0
+                            )
                         : new FileRecord(
                             reader.GetString(0),
                             reader.GetString(1),
-                            await reader.IsDBNullAsync(2, cancellationToken).ConfigureAwait(false)
-                                ? null
-                                : reader.GetString(2),
+                            null,
+                            reader.GetInt64(2),
                             reader.GetInt64(3),
-                            reader.GetInt64(4),
-                            reader.GetInt64(5) != 0
+                            reader.GetInt64(4) != 0
                         );
                 }
                 finally

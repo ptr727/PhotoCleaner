@@ -37,7 +37,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata
   - `SkippedExtensionTracker.cs`: Thread-safe tracker for unknown file extensions skipped during processing; used by all commands that filter by `MediaUtilities.SupportedExtensions` (`process`, `organize`, `duplicates`, `index`)
-  - `HttpClientFactory.cs`: Singleton `HttpClient` with Polly resilience pipeline (retry, circuit breaker, timeout) and `SocketsHttpHandler` connection pooling
+  - `HttpClientFactory.cs`: Polly resilience pipeline (retry, circuit breaker) and `SocketsHttpHandler` connection pooling
   - `AssemblyInfo.cs`: Assembly metadata (app name, version) used by `HttpClientFactory` for User-Agent header
   - `Extensions.cs`: Extension methods for logging and error handling
 - **PhotoCleanerTests/**: Comprehensive test project
