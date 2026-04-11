@@ -229,9 +229,10 @@ Options:
 - `--url <url>` - **required** for `trash`; the Immich server URL (e.g. `http://immich:2283`).
 - `--apikey <key>` - **required** for `trash`; the Immich API key. Create one in Immich under
   Account Settings > API Keys.
-- `--rehash` - optional (`process`, `organize`, `duplicates`, `index`); forces SHA-256 and
-  SHA-1 recomputation for every file, bypassing the size/mtime cache. Use when file content
-  may have changed without the modification timestamp being updated.
+- `--rehash` - optional (`process`, `organize`, `duplicates`, `index`); forces SHA-256
+  recomputation for every file, bypassing the size/mtime cache. SHA-1 is also recomputed when
+  `--trashdb` is in use. Use when file content may have changed without the modification
+  timestamp being updated.
 - `--duration` - optional (`process` only); overrides the short-video deletion threshold
   (default `1.0` seconds). Videos in a live-photo-compatible format whose duration is <= this
   value are always deleted. Must be `> 0`.
@@ -391,8 +392,9 @@ directories to `outpath/date/filename`:
    `20210502_200152.jpg` or directory structures like `2021/05/02/`). The inferred date is
    written to the destination file (for supported types) and used for subdirectory placement.
    Applied before the file is moved so the original path is still available.
-2. **Skip checks** (opt-in): before any file operation, the source file is hashed (SHA-256
-   and SHA-1) and checked against up to three databases in order:
+2. **Skip checks** (opt-in): before any file operation, the source file is hashed (SHA-256;
+   SHA-1 is also computed when `--trashdb` is provided) and checked against up to three
+   databases in order:
    - `--trashdb`: if the file matches a hash in the Immich trash DB, the file is skipped
      (counted as "trashed in Immich").
    - `--skipdb`: if the file matches a record in the reference DB, the file is skipped
