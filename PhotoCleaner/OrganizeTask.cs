@@ -136,7 +136,13 @@ internal sealed class OrganizeTask(
         {
             Log.Debug("Hashing '{FilePath}'", file);
             (string resolvedSha256, string? resolvedSha1) = await Database
-                .ResolveHashesAsync(file, null, options.Rehash, cancellationToken)
+                .ResolveHashesAsync(
+                    file,
+                    null,
+                    options.Rehash,
+                    needsSha1: trashDatabase is not null,
+                    cancellationToken
+                )
                 .ConfigureAwait(false);
             sha256 = resolvedSha256;
             sha1 = resolvedSha1;

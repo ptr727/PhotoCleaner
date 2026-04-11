@@ -26,7 +26,12 @@ internal sealed class IndexTask(
             .GetByPathAsync(filePath, cancellationToken)
             .ConfigureAwait(false);
         (string sha256, string? sha1) = await Database
-            .ResolveHashesAsync(filePath, cached, options.Rehash, cancellationToken)
+            .ResolveHashesAsync(
+                filePath,
+                cached,
+                options.Rehash,
+                cancellationToken: cancellationToken
+            )
             .ConfigureAwait(false);
         if (cached is null)
         {
@@ -81,7 +86,12 @@ internal sealed class IndexTask(
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-            return (IndexStatus.Updated, sha256, sha1, cached.IsProcessed);
+            return (
+                cached.IsProcessed ? IndexStatus.Unchanged : IndexStatus.Updated,
+                sha256,
+                sha1,
+                cached.IsProcessed
+            );
         }
 
         return (IndexStatus.Unchanged, sha256, sha1 ?? cached.Sha1, cached.IsProcessed);

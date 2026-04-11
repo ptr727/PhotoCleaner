@@ -315,6 +315,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         string filePath,
         FileRecord? cached,
         bool rehash,
+        bool needsSha1 = true,
         CancellationToken cancellationToken = default
     )
     {
@@ -323,7 +324,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             FileInfo info = new(filePath);
             if (cached.FileSize == info.Length && cached.MtimeTicks == info.LastWriteTimeUtc.Ticks)
             {
-                if (cached.Sha1 is not null)
+                if (!needsSha1 || cached.Sha1 is not null)
                 {
                     return (cached.Sha256, cached.Sha1);
                 }
@@ -333,6 +334,13 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                     .ConfigureAwait(false);
                 return (cached.Sha256, sha1);
             }
+        }
+
+        if (!needsSha1)
+        {
+            string sha256Only = await ComputeSha256OnlyAsync(filePath, cancellationToken)
+                .ConfigureAwait(false);
+            return (sha256Only, null);
         }
 
         return await ComputeHashesAsync(filePath, cancellationToken).ConfigureAwait(false);
@@ -368,6 +376,28 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             Convert.ToHexStringLower(sha256Hasher.GetHashAndReset()),
             Convert.ToHexStringLower(sha1Hasher.GetHashAndReset())
         );
+    }
+
+    internal static async Task<string> ComputeSha256OnlyAsync(
+        string filePath,
+        CancellationToken cancellationToken = default
+    )
+    {
+        using IncrementalHash sha256Hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[81920];
+        using FileStream fs = File.OpenRead(filePath);
+        int bytesRead;
+        while (
+            (
+                bytesRead = await fs.ReadAsync(buffer.AsMemory(), cancellationToken)
+                    .ConfigureAwait(false)
+            ) > 0
+        )
+        {
+            sha256Hasher.AppendData(buffer, 0, bytesRead);
+        }
+
+        return Convert.ToHexStringLower(sha256Hasher.GetHashAndReset());
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage(

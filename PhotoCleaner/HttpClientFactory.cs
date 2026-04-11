@@ -74,7 +74,7 @@ internal static class HttpClientFactory
     {
         if (outcome.Exception is not null)
         {
-            return true;
+            return outcome.Exception is not OperationCanceledException;
         }
 
         if (outcome.Result is null)

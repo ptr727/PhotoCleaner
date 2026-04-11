@@ -95,7 +95,13 @@ internal sealed class DuplicatesTask(
             .GetByPathAsync(file, cancellationToken)
             .ConfigureAwait(false);
         (string sha256, string? sha1) = await Database
-            .ResolveHashesAsync(file, cached, options.Rehash, cancellationToken)
+            .ResolveHashesAsync(
+                file,
+                cached,
+                options.Rehash,
+                needsSha1: trashDatabase is not null,
+                cancellationToken
+            )
             .ConfigureAwait(false);
         Log.Debug("File '{FilePath}' has SHA-256 '{Sha256}'", file, sha256);
 
