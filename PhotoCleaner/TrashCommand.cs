@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 
 namespace PhotoCleaner;
@@ -174,6 +175,16 @@ internal sealed class TrashCommand(
             Timeout = TimeSpan.FromSeconds(120),
         };
         client.DefaultRequestHeaders.Add("x-api-key", options.ImmichApiKey);
+        string version = AssemblyInfo.InformationalVersion;
+        int plusIndex = version.IndexOf('+', StringComparison.Ordinal);
+        if (plusIndex >= 0)
+        {
+            version = version[..plusIndex];
+        }
+
+        client.DefaultRequestHeaders.UserAgent.Add(
+            new ProductInfoHeaderValue(AssemblyInfo.AppName, version)
+        );
         return client;
     }
 

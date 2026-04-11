@@ -229,6 +229,11 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
 
             await using Database db = await OpenDbAsync(dbPath);
             await using Database outDb = await OpenDbAsync(outDbPath);
+
+            // Pre-index source file (dry run skips Phase 1 indexing)
+            IndexTask indexTask = new(CreateOptions(), db, new SkippedExtensionTracker());
+            await indexTask.ExecuteAsync([srcJpg], TestContext.Current.CancellationToken);
+
             DuplicatesTask task = new(
                 CreateOptions(dryRun: true),
                 db,
@@ -242,7 +247,7 @@ public sealed class DuplicatesTaskTests(TempDirectoryFixture fixture)
                 TestContext.Current.CancellationToken
             );
 
-            indexed.Should().Be(1);
+            indexed.Should().Be(0); // dry run skips Phase 1 indexing
             ignored.Should().Be(0);
             deleted.Should().Be(1); // reported as deleted
             kept.Should().Be(0);

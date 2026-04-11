@@ -27,13 +27,27 @@ internal sealed class DuplicatesTask(
         CancellationToken cancellationToken = default
     )
     {
-        // Phase 1: hash source files and register them in the database
-        Log.Information("Indexing {FileCount} source files", sourceFiles.Count);
-        IndexTask indexTask = new(options, database, skippedExtensions);
-        (int inserted, int updated, int unchanged, int ignoredSrc, int indexFailed) =
-            await indexTask.ExecuteAsync(sourceFiles, cancellationToken).ConfigureAwait(false);
-        int indexed = inserted + updated + unchanged;
-        Log.Information("Indexed {FileCount} source files", indexed);
+        // Phase 1: hash source files and register them in the database (skip during dry run)
+        int indexed = 0;
+        int ignoredSrc = 0;
+        int indexFailed = 0;
+        if (options.DryRun)
+        {
+            Log.Information(
+                "Dry run: skipping source indexing, using existing database for {FileCount} source files",
+                sourceFiles.Count
+            );
+        }
+        else
+        {
+            Log.Information("Indexing {FileCount} source files", sourceFiles.Count);
+            IndexTask indexTask = new(options, database, skippedExtensions);
+            (int inserted, int updated, int unchanged, ignoredSrc, indexFailed) = await indexTask
+                .ExecuteAsync(sourceFiles, cancellationToken)
+                .ConfigureAwait(false);
+            indexed = inserted + updated + unchanged;
+            Log.Information("Indexed {FileCount} source files", indexed);
+        }
 
         // Phase 2: scan outpath files and delete those whose hash is in the source index
         int deleted = 0,

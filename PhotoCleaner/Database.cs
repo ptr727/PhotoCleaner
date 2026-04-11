@@ -16,6 +16,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
 {
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
+    private string _sha256Column = "sha256";
 
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -70,16 +71,13 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             );
         }
 
-        if (
-            !schema.Contains("sha256", StringComparison.OrdinalIgnoreCase)
-            || !schema.Contains("sha1", StringComparison.OrdinalIgnoreCase)
-        )
-        {
-            throw new InvalidOperationException(
-                $"Database '{dbPath}' has a legacy schema (missing 'sha256' or 'sha1' column). "
+        _sha256Column =
+            schema.Contains("sha256", StringComparison.OrdinalIgnoreCase) ? "sha256"
+            : schema.Contains("hash", StringComparison.OrdinalIgnoreCase) ? "hash"
+            : throw new InvalidOperationException(
+                $"Database '{dbPath}' has an unsupported schema (missing 'sha256' or 'hash' column). "
                     + "Open it in read-write mode first to migrate the schema."
             );
-        }
     }
 
     private async Task MigrateSchemaAsync(CancellationToken cancellationToken)
@@ -152,6 +150,11 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             cancellationToken
         );
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Security",
+        "CA2100:Review SQL queries for security vulnerabilities",
+        Justification = "Column name is set internally from validated schema detection, not user input"
+    )]
     internal Task<bool> Sha256ExistsAsync(
         string sha256,
         CancellationToken cancellationToken = default
@@ -159,7 +162,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         ExecuteAsync(
             async cmd =>
             {
-                cmd.CommandText = "SELECT COUNT(*) FROM files WHERE sha256 = @sha256";
+                cmd.CommandText = $"SELECT COUNT(*) FROM files WHERE {_sha256Column} = @sha256";
                 _ = cmd.Parameters.AddWithValue("@sha256", sha256);
                 object? result = await cmd.ExecuteScalarAsync(cancellationToken)
                     .ConfigureAwait(false);

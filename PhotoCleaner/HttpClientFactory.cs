@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
 
@@ -6,12 +5,9 @@ namespace PhotoCleaner;
 
 internal static class HttpClientFactory
 {
-    private static readonly Lazy<HttpClient> s_httpClient = new(CreateHttpClient);
     private static readonly Lazy<ResilienceHandler> s_resilienceHandler = new(
         CreateResilienceHandler
     );
-
-    internal static HttpClient GetHttpClient() => s_httpClient.Value;
 
     internal static ResilienceHandler GetResilienceHandler() => s_resilienceHandler.Value;
 
@@ -50,25 +46,6 @@ internal static class HttpClientFactory
                 PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
             },
         };
-
-    private static HttpClient CreateHttpClient()
-    {
-        HttpClient httpClient = new(GetResilienceHandler(), disposeHandler: false)
-        {
-            Timeout = TimeSpan.FromSeconds(120),
-        };
-        string version = AssemblyInfo.InformationalVersion;
-        int plusIndex = version.IndexOf('+', StringComparison.Ordinal);
-        if (plusIndex >= 0)
-        {
-            version = version[..plusIndex];
-        }
-
-        httpClient.DefaultRequestHeaders.UserAgent.Add(
-            new ProductInfoHeaderValue(AssemblyInfo.AppName, version)
-        );
-        return httpClient;
-    }
 
     private static bool IsTransientFailure(Outcome<HttpResponseMessage> outcome)
     {
