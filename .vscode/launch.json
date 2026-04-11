@@ -7,17 +7,19 @@
             "request": "attach"
         },
         {
-            "name": "PhotoCleaner Process",
+            "name": "Process",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": ".Net Build",
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
                 "process",
-                "--path=/data/media/Temp/Organized",
-                "--db=/data/media/Temp/Organized/PhotoCleaner.db",
-                "--threads=8",
-                "--skipbackup=true",
+                "--path=/data/media/PhotoCleaner/Organized",
+                "--db=/data/media/PhotoCleaner/Organized.db",
+                "--rehash=false",
+                "--duration=1",
+                "--threads=4",
+                "--skipbackup=false",
                 "--dryrun=false",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",
@@ -35,7 +37,7 @@
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
                 "undo",
-                "--path=/data/media/Temp/Organized",
+                "--path=/data/media/PhotoCleaner/Organized",
                 "--dryrun=false",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",
@@ -53,7 +55,7 @@
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
                 "cleanup",
-                "--path=/data/media/Temp/Organized",
+                "--path=/data/media/PhotoCleaner/Organized",
                 "--dryrun=false",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",
@@ -71,16 +73,19 @@
             "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
             "args": [
                 "organize",
-                "--path=/data/media/Temp/UnOrganized",
-                "--outpath=/data/media/Temp/Organized",
+                "--path=/data/media/PhotoCleaner/UnOrganized",
+                "--outpath=/data/media/PhotoCleaner/Organized",
                 "--deleteempty=true",
                 "--move=false",
                 "--format=yyyy/MM/yyyy-MM-dd",
                 "--datepath=true",
                 "--tagpath=true",
                 "--tags=space in name, nospace",
-                "--db=/data/media/Temp/Organized/PhotoCleaner.db",
-                "--threads=8",
+                "--db=/data/media/PhotoCleaner/Organized.db",
+                "--trashdb=/data/media/PhotoCleaner/Trash.db",
+                "--skipdb=/data/media/PhotoCleaner/Skip.db",
+                "--rehash=false",
+                "--threads=4",
                 "--dryrun=false",
                 "--loglevel=verbose",
                 "--logfile=PhotoCleaner.log",
@@ -90,5 +95,88 @@
             "console": "internalConsole",
             "stopAtEntry": false
         },
+        {
+            "name": "Duplicates",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "duplicates",
+                "--path=/data/media/PhotoCleaner/UnOrganized",
+                "--outpath=/data/media/PhotoCleaner/Organized",
+                "--db=/data/media/PhotoCleaner/UnOrganized.db",
+                "--outdb=/data/media/PhotoCleaner/Organized.db",
+                "--trashdb=/data/media/PhotoCleaner/Trash.db",
+                "--rehash=false",
+                "--threads=4",
+                "--dryrun=true",
+                "--loglevel=verbose",
+                "--logfile=PhotoCleaner.log",
+                "--logclear=true"
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Index UnOrganized",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "index",
+                "--path=/data/media/PhotoCleaner/UnOrganized",
+                "--db=/data/media/PhotoCleaner/UnOrganized.db",
+                "--rehash=false",
+                "--threads=4",
+                "--loglevel=verbose",
+                "--logfile=PhotoCleaner.log",
+                "--logclear=true"
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Index Skip",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "index",
+                "--path=/data/media/PhotoCleaner/Skip",
+                "--db=/data/media/PhotoCleaner/Skip.db",
+                "--rehash=false",
+                "--threads=4",
+                "--loglevel=verbose",
+                "--logfile=PhotoCleaner.log",
+                "--logclear=true"
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Trash",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".Net Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "trash",
+                "--url=${env:IMMICH_URL}",
+                "--trashdb=/data/media/PhotoCleaner/Trash.db",
+                "--apikey=${env:IMMICH_API_KEY}",
+                "--loglevel=verbose",
+                "--logfile=PhotoCleaner.log",
+                "--logclear=true"
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        }
     ]
 }

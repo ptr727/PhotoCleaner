@@ -101,19 +101,19 @@ internal sealed class ProcessTask(
         if (database is not null)
         {
             IndexTask indexTask = new(options, database, skippedExtensions);
-            (IndexStatus status, string hash, bool wasProcessed) = await indexTask
+            (IndexStatus status, string sha256, string? _, bool wasProcessed) = await indexTask
                 .IndexFileAsync(fileInfo.FullName, cancellationToken)
                 .ConfigureAwait(false);
-            preProcessHash = hash;
+            preProcessHash = sha256;
             Log.Debug(
-                "File '{FilePath}' has pre-process hash '{Hash}'",
+                "File '{FilePath}' has pre-process SHA-256 '{Sha256}'",
                 fileInfo.FullName,
                 preProcessHash
             );
             if (status == IndexStatus.Unchanged && wasProcessed && !options.Reprocess)
             {
                 Log.Information(
-                    "Skipping already processed '{FilePath}' with hash '{Hash}'",
+                    "Skipping already processed '{FilePath}' with SHA-256 '{Sha256}'",
                     fileInfo.FullName,
                     preProcessHash
                 );
@@ -146,7 +146,7 @@ internal sealed class ProcessTask(
         if (preProcessHash is not null && result is ProcessResult.Success or ProcessResult.Modified)
         {
             Log.Debug(
-                "Recording processed file in database: '{FilePath}' with hash '{Hash}'",
+                "Recording processed file in database: '{FilePath}' with SHA-256 '{Sha256}'",
                 fileInfo.FullName,
                 preProcessHash
             );

@@ -6,6 +6,8 @@ namespace PhotoCleaner;
 internal sealed class OrganizeTask(
     CommandLine.Options options,
     Database? database,
+    Database? skipDatabase,
+    TrashDatabase? trashDatabase,
     SkippedExtensionTracker skippedExtensions
 )
 {
@@ -36,6 +38,8 @@ internal sealed class OrganizeTask(
         Organized,
         Ignored,
         Skipped,
+        SkippedBySkipDb,
+        TrashedInImmich,
         Failed,
     }
 
@@ -48,6 +52,8 @@ internal sealed class OrganizeTask(
         int organized,
         int ignored,
         int skipped,
+        int skipDbSkipped,
+        int trashSkipped,
         int failed,
         int deletedDirs
     )> ExecuteAsync(
@@ -59,6 +65,8 @@ internal sealed class OrganizeTask(
         int organized = 0,
             ignored = 0,
             skipped = 0,
+            skipDbSkipped = 0,
+            trashSkipped = 0,
             failed = 0;
         Log.Information("Organizing {FileCount} files", allFiles.Count);
         await Parallel
@@ -79,6 +87,12 @@ internal sealed class OrganizeTask(
                             OrganizeResult.Organized => Interlocked.Increment(ref organized),
                             OrganizeResult.Ignored => Interlocked.Increment(ref ignored),
                             OrganizeResult.Skipped => Interlocked.Increment(ref skipped),
+                            OrganizeResult.SkippedBySkipDb => Interlocked.Increment(
+                                ref skipDbSkipped
+                            ),
+                            OrganizeResult.TrashedInImmich => Interlocked.Increment(
+                                ref trashSkipped
+                            ),
                             OrganizeResult.Failed => Interlocked.Increment(ref failed),
                             _ => throw new NotImplementedException(),
                         };
@@ -97,7 +111,7 @@ internal sealed class OrganizeTask(
             .ConfigureAwait(false);
 
         int deletedDirs = options.DeleteEmpty ? DeleteEmptyDirectories(sourceDir) : 0;
-        return (organized, ignored, skipped, failed, deletedDirs);
+        return (organized, ignored, skipped, skipDbSkipped, trashSkipped, failed, deletedDirs);
     }
 
     private async Task<OrganizeResult> OrganizeFileAsync(
@@ -116,25 +130,73 @@ internal sealed class OrganizeTask(
             return OrganizeResult.Ignored;
         }
 
-        string? hash = null;
-        if (!options.DryRun && database is not null)
+        string? sha256 = null;
+        string? sha1 = null;
+        if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
             Log.Debug("Hashing '{FilePath}'", file);
-            hash = await Database
-                .ResolveHashAsync(file, null, options.Rehash, cancellationToken)
-                .ConfigureAwait(false);
-            Log.Debug("File '{FilePath}' has hash '{Hash}'", file, hash);
-            bool exists = await database
-                .HashExistsAsync(hash, cancellationToken)
-                .ConfigureAwait(false);
-            if (exists)
-            {
-                Log.Information(
-                    "Skipping already processed '{FilePath}' with hash '{Hash}'",
+            (string resolvedSha256, string? resolvedSha1) = await Database
+                .ResolveHashesAsync(
                     file,
-                    hash
-                );
-                return OrganizeResult.Skipped;
+                    null,
+                    options.Rehash,
+                    needsSha1: trashDatabase is not null,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            sha256 = resolvedSha256;
+            sha1 = resolvedSha1;
+            Log.Debug("File '{FilePath}' has SHA-256 '{Sha256}'", file, sha256);
+
+            // Check trash DB first - skip files that were trashed in Immich
+            if (trashDatabase is not null && sha1 is not null)
+            {
+                bool trashed = await trashDatabase
+                    .Sha1ExistsAsync(sha1, cancellationToken)
+                    .ConfigureAwait(false);
+                if (trashed)
+                {
+                    Log.Information(
+                        "Skipping file trashed in Immich '{FilePath}' with SHA-1 '{Sha1}'",
+                        file,
+                        sha1
+                    );
+                    return OrganizeResult.TrashedInImmich;
+                }
+            }
+
+            // Check skip DB (read-only)
+            if (skipDatabase is not null)
+            {
+                bool inSkipDb = await skipDatabase
+                    .Sha256ExistsAsync(sha256, cancellationToken)
+                    .ConfigureAwait(false);
+                if (inSkipDb)
+                {
+                    Log.Information(
+                        "Skipping file found in skip database '{FilePath}' with SHA-256 '{Sha256}'",
+                        file,
+                        sha256
+                    );
+                    return OrganizeResult.SkippedBySkipDb;
+                }
+            }
+
+            // Check dedup DB - skip files already organized
+            if (database is not null)
+            {
+                bool exists = await database
+                    .Sha256ExistsAsync(sha256, cancellationToken)
+                    .ConfigureAwait(false);
+                if (exists)
+                {
+                    Log.Information(
+                        "Skipping already organized '{FilePath}' with SHA-256 '{Sha256}'",
+                        file,
+                        sha256
+                    );
+                    return OrganizeResult.Skipped;
+                }
             }
         }
 
@@ -247,15 +309,16 @@ internal sealed class OrganizeTask(
             // Restore source mtime last - after any exiftool writes
             File.SetLastWriteTimeUtc(finalDest, sourceInfo.LastWriteTimeUtc);
 
-            if (hash is not null)
+            if (database is not null && sha256 is not null)
             {
-                Log.Debug("Inserting '{FilePath}' with hash '{Hash}'", finalDest, hash);
+                Log.Debug("Inserting '{FilePath}' with SHA-256 '{Sha256}'", finalDest, sha256);
                 FileInfo destInfo = new(finalDest);
-                await database!
+                await database
                     .InsertAsync(
                         new FileRecord(
                             finalDest,
-                            hash,
+                            sha256,
+                            sha1,
                             destInfo.Length,
                             destInfo.LastWriteTimeUtc.Ticks,
                             false

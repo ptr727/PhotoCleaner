@@ -13,47 +13,88 @@ internal sealed class IndexTask(
     SkippedExtensionTracker skippedExtensions
 )
 {
-    internal async Task<(IndexStatus status, string hash, bool wasProcessed)> IndexFileAsync(
-        string filePath,
-        CancellationToken cancellationToken = default
-    )
+    internal async Task<(
+        IndexStatus status,
+        string sha256,
+        string? sha1,
+        bool wasProcessed
+    )> IndexFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
         Log.Information("Indexing '{FilePath}'", filePath);
         FileInfo info = new(filePath);
         FileRecord? cached = await database
             .GetByPathAsync(filePath, cancellationToken)
             .ConfigureAwait(false);
-        string hash = await Database
-            .ResolveHashAsync(filePath, cached, options.Rehash, cancellationToken)
+        (string sha256, string? sha1) = await Database
+            .ResolveHashesAsync(
+                filePath,
+                cached,
+                options.Rehash,
+                cancellationToken: cancellationToken
+            )
             .ConfigureAwait(false);
         if (cached is null)
         {
-            Log.Debug("Inserting '{FilePath}' with hash '{Hash}'", filePath, hash);
+            Log.Debug("Inserting '{FilePath}' with SHA-256 '{Sha256}'", filePath, sha256);
             await database
                 .InsertAsync(
-                    new FileRecord(filePath, hash, info.Length, info.LastWriteTimeUtc.Ticks, false),
+                    new FileRecord(
+                        filePath,
+                        sha256,
+                        sha1,
+                        info.Length,
+                        info.LastWriteTimeUtc.Ticks,
+                        false
+                    ),
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-            return (IndexStatus.Inserted, hash, false);
+            return (IndexStatus.Inserted, sha256, sha1, false);
         }
 
-        if (hash != cached.Hash)
+        if (sha256 != cached.Sha256)
         {
-            Log.Debug("Updating '{FilePath}' with new hash '{Hash}'", filePath, hash);
+            // Content changed - update hashes and reset is_processed
+            Log.Debug("Updating '{FilePath}' with new SHA-256 '{Sha256}'", filePath, sha256);
             await database
-                .UpdateHashAsync(
+                .UpdateHashesAsync(
                     filePath,
-                    hash,
+                    sha256,
+                    sha1,
                     info.Length,
                     info.LastWriteTimeUtc.Ticks,
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-            return (IndexStatus.Updated, hash, false);
+            return (IndexStatus.Updated, sha256, sha1, false);
         }
 
-        return (IndexStatus.Unchanged, hash, cached.IsProcessed);
+        if (
+            sha1 != cached.Sha1
+            || info.Length != cached.FileSize
+            || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
+        )
+        {
+            // Metadata changed (sha1 backfill, size/mtime refresh) - preserve is_processed
+            Log.Debug("Updating metadata for '{FilePath}'", filePath);
+            await database
+                .UpdateMetadataAsync(
+                    filePath,
+                    sha1,
+                    info.Length,
+                    info.LastWriteTimeUtc.Ticks,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            return (
+                cached.IsProcessed ? IndexStatus.Unchanged : IndexStatus.Updated,
+                sha256,
+                sha1,
+                cached.IsProcessed
+            );
+        }
+
+        return (IndexStatus.Unchanged, sha256, sha1 ?? cached.Sha1, cached.IsProcessed);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
@@ -97,7 +138,7 @@ internal sealed class IndexTask(
 
                     try
                     {
-                        (IndexStatus status, _, _) = await IndexFileAsync(file, ct)
+                        (IndexStatus status, _, _, _) = await IndexFileAsync(file, ct)
                             .ConfigureAwait(false);
                         _ = status switch
                         {

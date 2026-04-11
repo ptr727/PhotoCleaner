@@ -23,6 +23,8 @@ internal sealed class CommandLine
     private readonly Option<bool> _rehashOption = CreateRehashOption();
     private readonly Option<double> _durationOption = CreateDurationOption();
     private readonly Option<bool> _reprocessOption = CreateReprocessOption();
+    private readonly Option<FileInfo?> _trashDbFileOption = CreateTrashDbFileOption();
+    private readonly Option<FileInfo?> _skipDbFileOption = CreateSkipDbFileOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -55,6 +57,7 @@ internal sealed class CommandLine
         command.Subcommands.Add(CreateOrganizeCommand());
         command.Subcommands.Add(CreateDuplicatesCommand());
         command.Subcommands.Add(CreateIndexCommand());
+        command.Subcommands.Add(CreateTrashCommand());
 
         return command;
     }
@@ -111,6 +114,8 @@ internal sealed class CommandLine
             _datePathOption,
             _dbFileOption,
             _rehashOption,
+            _trashDbFileOption,
+            _skipDbFileOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
@@ -137,7 +142,7 @@ internal sealed class CommandLine
 
         Command command = new(
             "duplicates",
-            "Delete files in --outpath whose content (SHA-256) matches a file in --path"
+            "Delete files in --outpath whose content matches a file in --path or a hash in --trashdb"
         )
         {
             _pathOption,
@@ -147,6 +152,7 @@ internal sealed class CommandLine
             requiredDbOption,
             requiredOutDbOption,
             _rehashOption,
+            _trashDbFileOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
@@ -185,6 +191,57 @@ internal sealed class CommandLine
         return command;
     }
 
+    private Command CreateTrashCommand()
+    {
+        Option<string> requiredUrlOption = new("--url")
+        {
+            Description = "Immich server URL (e.g. http://immich:2283)",
+            Required = true,
+        };
+        requiredUrlOption.Validators.Add(result =>
+        {
+            string? url = result.GetValue(requiredUrlOption);
+            if (
+                string.IsNullOrWhiteSpace(url)
+                || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            )
+            {
+                result.AddError("--url must be a valid absolute http or https URL.");
+            }
+        });
+        Option<string> requiredApiKeyOption = new("--apikey")
+        {
+            Description = "Immich API key",
+            Required = true,
+        };
+        Option<FileInfo?> requiredTrashDbOption = new("--trashdb")
+        {
+            Description = "SQLite database to store Immich trash hashes",
+            Required = true,
+        };
+
+        Command command = new("trash", "Sync trashed asset hashes from Immich")
+        {
+            requiredUrlOption,
+            requiredApiKeyOption,
+            requiredTrashDbOption,
+        };
+        command.SetAction(
+            (parseResult, cancellationToken) =>
+                new TrashCommand(
+                    CreateOptions(
+                        parseResult,
+                        immichUrl: parseResult.GetValue(requiredUrlOption),
+                        immichApiKey: parseResult.GetValue(requiredApiKeyOption),
+                        trashDbFile: parseResult.GetValue(requiredTrashDbOption)
+                    ),
+                    cancellationToken
+                ).ExecuteAsync()
+        );
+        return command;
+    }
+
     private Command CreateUndoCommand()
     {
         Command command = new("undo", "Undo media file processing") { _pathOption, _dryRunOption };
@@ -200,11 +257,16 @@ internal sealed class CommandLine
         ParseResult parseResult,
         FileInfo? dbPathOverride = null,
         FileInfo? outDbPathOverride = null,
-        DirectoryInfo? outPathOverride = null
+        DirectoryInfo? outPathOverride = null,
+        string? immichUrl = null,
+        string? immichApiKey = null,
+        FileInfo? trashDbFile = null
     ) =>
         new()
         {
-            Path = parseResult.GetValue(_pathOption)!,
+            Path =
+                parseResult.GetValue(_pathOption)
+                ?? new DirectoryInfo(Directory.GetCurrentDirectory()),
             Threads = parseResult.GetValue(_threadsOption) is int t and > 0
                 ? t
                 : Math.Min(Environment.ProcessorCount, 4),
@@ -222,6 +284,10 @@ internal sealed class CommandLine
             Rehash = parseResult.GetValue(_rehashOption),
             ShortVideoDuration = parseResult.GetValue(_durationOption),
             Reprocess = parseResult.GetValue(_reprocessOption),
+            ImmichUrl = immichUrl,
+            ImmichApiKey = immichApiKey,
+            TrashDbFile = trashDbFile ?? parseResult.GetValue(_trashDbFileOption),
+            SkipDbFile = parseResult.GetValue(_skipDbFileOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -296,13 +362,47 @@ internal sealed class CommandLine
         };
 
     private static Option<FileInfo?> CreateDbFileOption() =>
-        new("--db") { Description = "SQLite database file for deduplication tracking" };
+        new("--db") { Description = "SQLite database file for file state tracking" };
 
     private static Option<FileInfo?> CreateOutDbFileOption() =>
-        new("--outdb") { Description = "SQLite database file for target file hash caching" };
+        new("--outdb") { Description = "SQLite database file for target file state tracking" };
 
     private static Option<bool> CreateRehashOption() =>
         new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
+
+    private static Option<FileInfo?> CreateTrashDbFileOption()
+    {
+        Option<FileInfo?> option = new("--trashdb")
+        {
+            Description = "SQLite database with Immich trash hashes (read-only)",
+        };
+        option.Validators.Add(result =>
+        {
+            FileInfo? file = result.GetValue(option);
+            if (file is not null && !file.Exists)
+            {
+                result.AddError($"File does not exist: '{file.FullName}'");
+            }
+        });
+        return option;
+    }
+
+    private static Option<FileInfo?> CreateSkipDbFileOption()
+    {
+        Option<FileInfo?> option = new("--skipdb")
+        {
+            Description = "SQLite database with indexed files to be skipped",
+        };
+        option.Validators.Add(result =>
+        {
+            FileInfo? file = result.GetValue(option);
+            if (file is not null && !file.Exists)
+            {
+                result.AddError($"File does not exist: '{file.FullName}'");
+            }
+        });
+        return option;
+    }
 
     private static Option<bool> CreateReprocessOption() =>
         new("--reprocess")
@@ -409,6 +509,10 @@ internal sealed class CommandLine
         public required bool Rehash { get; init; }
         public required double ShortVideoDuration { get; init; }
         public required bool Reprocess { get; init; }
+        public required string? ImmichUrl { get; init; }
+        public required string? ImmichApiKey { get; init; }
+        public required FileInfo? TrashDbFile { get; init; }
+        public required FileInfo? SkipDbFile { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

@@ -27,7 +27,7 @@ internal sealed class IndexCommand(CommandLine.Options options, CancellationToke
                                     return await task.ExecuteAsync(files, cancellationToken)
                                         .ConfigureAwait(false);
                                 },
-                                cancellationToken
+                                cancellationToken: cancellationToken
                             )
                             .ConfigureAwait(false);
 

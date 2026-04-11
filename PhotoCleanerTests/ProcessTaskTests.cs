@@ -1048,6 +1048,10 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            ImmichUrl = null,
+            ImmichApiKey = null,
+            TrashDbFile = null,
+            SkipDbFile = null,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,

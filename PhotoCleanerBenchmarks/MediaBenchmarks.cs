@@ -54,10 +54,11 @@ public class MediaBenchmarks
         _database = new Database(dbPath);
         await _database.InitializeAsync();
 
-        _preInsertedHash = await Database.ComputeHashAsync(_jpegPath);
+        (_preInsertedHash, _) = await Database.ComputeHashesAsync(_jpegPath);
         FileRecord seedRecord = new(
             _jpegPath,
             _preInsertedHash,
+            null,
             _jpegFileSize,
             _jpegMtimeTicks,
             false
@@ -73,7 +74,8 @@ public class MediaBenchmarks
     }
 
     [Benchmark]
-    public async Task<string> Sha256Hash() => await Database.ComputeHashAsync(_jpegPath);
+    public async Task<(string, string)> ComputeHashes() =>
+        await Database.ComputeHashesAsync(_jpegPath);
 
     [Benchmark]
     public async Task<ExifToolJson?> ExifToolLoad() =>
@@ -106,6 +108,7 @@ public class MediaBenchmarks
         FileRecord record = new(
             path,
             $"bench_{counter:D10}",
+            null,
             _jpegFileSize,
             _jpegMtimeTicks,
             false
@@ -114,5 +117,5 @@ public class MediaBenchmarks
     }
 
     [Benchmark]
-    public async Task<bool> DbRead() => await _database.HashExistsAsync(_preInsertedHash);
+    public async Task<bool> DbRead() => await _database.Sha256ExistsAsync(_preInsertedHash);
 }

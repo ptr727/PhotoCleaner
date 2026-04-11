@@ -1,17 +1,16 @@
 namespace PhotoCleaner;
 
-internal static class DatabaseScope
+internal static class TrashDatabaseScope
 {
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Reliability",
         "CA2000:Dispose objects before losing scope",
-        Justification = "Database is disposed in the finally block"
+        Justification = "TrashDatabase is disposed in the finally block"
     )]
     internal static async Task<T> RunAsync<T>(
         FileInfo? dbFile,
-        Func<Database?, Task<T>> work,
+        Func<TrashDatabase?, Task<T>> work,
         bool readOnly = false,
-        string label = "database",
         CancellationToken cancellationToken = default
     )
     {
@@ -25,10 +24,10 @@ internal static class DatabaseScope
             _ = Directory.CreateDirectory(dbFile.DirectoryName!);
         }
 
-        Database database = new(dbFile.FullName, readOnly);
+        TrashDatabase database = new(dbFile.FullName, readOnly);
         try
         {
-            Log.Information("Using {Label} '{DbFile}'", label, dbFile.FullName);
+            Log.Information("Using trash database '{DbFile}'", dbFile.FullName);
             await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
             return await work(database).ConfigureAwait(false);
         }
@@ -40,9 +39,8 @@ internal static class DatabaseScope
 
     internal static async Task RunAsync(
         FileInfo? dbFile,
-        Func<Database?, Task> work,
+        Func<TrashDatabase?, Task> work,
         bool readOnly = false,
-        string label = "database",
         CancellationToken cancellationToken = default
     ) =>
         await RunAsync<object?>(
@@ -53,7 +51,6 @@ internal static class DatabaseScope
                     return null;
                 },
                 readOnly,
-                label,
                 cancellationToken
             )
             .ConfigureAwait(false);

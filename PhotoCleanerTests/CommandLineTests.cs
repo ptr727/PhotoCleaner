@@ -383,4 +383,128 @@ public sealed class CommandLineTests
 
         cli.Result.Errors.Should().NotBeEmpty();
     }
+
+    // -- trash command --------------------------------------------------------
+
+    [Fact]
+    public void TrashCommand_ValidArgs_Parses()
+    {
+        string dbPath = Path.GetTempFileName();
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "http://immich:2283",
+                "--apikey",
+                "test-key",
+                "--trashdb",
+                dbPath,
+            ]);
+
+            cli.Result.Errors.Should().BeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_MissingUrl_ValidationError()
+    {
+        string dbPath = Path.GetTempFileName();
+        try
+        {
+            CommandLine cli = new(["trash", "--apikey", "test-key", "--trashdb", dbPath]);
+
+            cli.Result.Errors.Should().NotBeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_InvalidUrl_ValidationError()
+    {
+        string dbPath = Path.GetTempFileName();
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "not-a-url",
+                "--apikey",
+                "test-key",
+                "--trashdb",
+                dbPath,
+            ]);
+
+            cli.Result.Errors.Should().NotBeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_MissingApiKey_ValidationError()
+    {
+        string dbPath = Path.GetTempFileName();
+        try
+        {
+            CommandLine cli = new(["trash", "--url", "http://immich:2283", "--trashdb", dbPath]);
+
+            cli.Result.Errors.Should().NotBeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_MissingTrashDb_ValidationError()
+    {
+        CommandLine cli = new(["trash", "--url", "http://immich:2283", "--apikey", "test-key"]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    // -- --trashdb / --skipdb file validation ----------------------------------
+
+    [Fact]
+    public void TrashDbOption_NonExistentFile_ValidationError()
+    {
+        CommandLine cli = new([
+            "organize",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--trashdb",
+            "/nonexistent/path/trash.db",
+        ]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void SkipDbOption_NonExistentFile_ValidationError()
+    {
+        CommandLine cli = new([
+            "organize",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--skipdb",
+            "/nonexistent/path/skip.db",
+        ]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
 }

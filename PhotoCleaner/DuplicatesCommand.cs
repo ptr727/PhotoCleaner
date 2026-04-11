@@ -26,32 +26,41 @@ internal sealed class DuplicatesCommand(
                     int totalCount = sourceCount + outCount;
 
                     (int indexed, int ignored, int deleted, int kept, int failed) =
-                        await DatabaseScope
+                        await TrashDatabaseScope
                             .RunAsync(
-                                options.DbFile,
-                                async database =>
+                                options.TrashDbFile,
+                                async trashDatabase =>
                                     await DatabaseScope
                                         .RunAsync(
-                                            options.OutDbFile,
-                                            async outDatabase =>
-                                            {
-                                                DuplicatesTask task = new(
-                                                    options,
-                                                    database!,
-                                                    outDatabase!,
-                                                    _skippedExtensions
-                                                );
-                                                return await task.ExecuteAsync(
-                                                        sourceFiles,
-                                                        outFiles,
-                                                        cancellationToken
+                                            options.DbFile,
+                                            async database =>
+                                                await DatabaseScope
+                                                    .RunAsync(
+                                                        options.OutDbFile,
+                                                        async outDatabase =>
+                                                        {
+                                                            DuplicatesTask task = new(
+                                                                options,
+                                                                database!,
+                                                                outDatabase!,
+                                                                trashDatabase,
+                                                                _skippedExtensions
+                                                            );
+                                                            return await task.ExecuteAsync(
+                                                                    sourceFiles,
+                                                                    outFiles,
+                                                                    cancellationToken
+                                                                )
+                                                                .ConfigureAwait(false);
+                                                        },
+                                                        cancellationToken: cancellationToken
                                                     )
-                                                    .ConfigureAwait(false);
-                                            },
-                                            cancellationToken
+                                                    .ConfigureAwait(false),
+                                            cancellationToken: cancellationToken
                                         )
                                         .ConfigureAwait(false),
-                                cancellationToken
+                                readOnly: true,
+                                cancellationToken: cancellationToken
                             )
                             .ConfigureAwait(false);
 

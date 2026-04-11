@@ -4,6 +4,7 @@ internal sealed class DuplicatesTask(
     CommandLine.Options options,
     Database database,
     Database outDatabase,
+    TrashDatabase? trashDatabase,
     SkippedExtensionTracker skippedExtensions
 )
 {
@@ -26,13 +27,27 @@ internal sealed class DuplicatesTask(
         CancellationToken cancellationToken = default
     )
     {
-        // Phase 1: hash source files and register them in the database
-        Log.Information("Indexing {FileCount} source files", sourceFiles.Count);
-        IndexTask indexTask = new(options, database, skippedExtensions);
-        (int inserted, int updated, int unchanged, int ignoredSrc, int indexFailed) =
-            await indexTask.ExecuteAsync(sourceFiles, cancellationToken).ConfigureAwait(false);
-        int indexed = inserted + updated + unchanged;
-        Log.Information("Indexed {FileCount} source files", indexed);
+        // Phase 1: hash source files and register them in the database (skip during dry run)
+        int indexed = 0;
+        int ignoredSrc = 0;
+        int indexFailed = 0;
+        if (options.DryRun)
+        {
+            Log.Information(
+                "Dry run: skipping source indexing, using existing database for {FileCount} source files",
+                sourceFiles.Count
+            );
+        }
+        else
+        {
+            Log.Information("Indexing {FileCount} source files", sourceFiles.Count);
+            IndexTask indexTask = new(options, database, skippedExtensions);
+            (int inserted, int updated, int unchanged, ignoredSrc, indexFailed) = await indexTask
+                .ExecuteAsync(sourceFiles, cancellationToken)
+                .ConfigureAwait(false);
+            indexed = inserted + updated + unchanged;
+            Log.Information("Indexed {FileCount} source files", indexed);
+        }
 
         // Phase 2: scan outpath files and delete those whose hash is in the source index
         int deleted = 0,
@@ -93,44 +108,94 @@ internal sealed class DuplicatesTask(
         FileRecord? cached = await outDatabase
             .GetByPathAsync(file, cancellationToken)
             .ConfigureAwait(false);
-        string hash = await Database
-            .ResolveHashAsync(file, cached, options.Rehash, cancellationToken)
+        (string sha256, string? resolvedSha1) = await Database
+            .ResolveHashesAsync(
+                file,
+                cached,
+                options.Rehash,
+                needsSha1: trashDatabase is not null,
+                cancellationToken
+            )
             .ConfigureAwait(false);
-        Log.Debug("File '{FilePath}' has hash '{Hash}'", file, hash);
+        string? sha1 = resolvedSha1 ?? cached?.Sha1;
+        Log.Debug("File '{FilePath}' has SHA-256 '{Sha256}'", file, sha256);
 
-        // Upsert into outdb for future cache hits
-        FileInfo info = new(file);
-        if (cached is null)
+        // Upsert into outdb for future cache hits (skip during dry run)
+        if (!options.DryRun)
         {
-            await outDatabase
-                .InsertAsync(
-                    new FileRecord(file, hash, info.Length, info.LastWriteTimeUtc.Ticks, false),
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-        }
-        else if (hash != cached.Hash)
-        {
-            await outDatabase
-                .UpdateHashAsync(
-                    file,
-                    hash,
-                    info.Length,
-                    info.LastWriteTimeUtc.Ticks,
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
+            FileInfo info = new(file);
+            if (cached is null)
+            {
+                await outDatabase
+                    .InsertAsync(
+                        new FileRecord(
+                            file,
+                            sha256,
+                            sha1,
+                            info.Length,
+                            info.LastWriteTimeUtc.Ticks,
+                            false
+                        ),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            else if (sha256 != cached.Sha256)
+            {
+                await outDatabase
+                    .UpdateHashesAsync(
+                        file,
+                        sha256,
+                        sha1,
+                        info.Length,
+                        info.LastWriteTimeUtc.Ticks,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            else if (
+                sha1 != cached.Sha1
+                || info.Length != cached.FileSize
+                || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
+            )
+            {
+                await outDatabase
+                    .UpdateMetadataAsync(
+                        file,
+                        sha1,
+                        info.Length,
+                        info.LastWriteTimeUtc.Ticks,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
         }
 
         bool isDuplicate = await database
-            .HashExistsAsync(hash, cancellationToken)
+            .Sha256ExistsAsync(sha256, cancellationToken)
             .ConfigureAwait(false);
-        if (!isDuplicate)
+
+        // Also check trash DB - delete files whose SHA-1 matches a trashed Immich asset
+        bool isTrashed = false;
+        if (!isDuplicate && trashDatabase is not null && sha1 is not null)
+        {
+            isTrashed = await trashDatabase
+                .Sha1ExistsAsync(sha1, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (!isDuplicate && !isTrashed)
         {
             return DuplicateCheckResult.Kept;
         }
 
-        Log.Information("Deleting duplicate '{FilePath}' with hash '{Hash}'", file, hash);
+        Log.Information(
+            isTrashed
+                ? "Deleting file trashed in Immich '{FilePath}' with SHA-1 '{Sha1}'"
+                : "Deleting duplicate '{FilePath}' with SHA-256 '{Sha256}'",
+            file,
+            isTrashed ? sha1 : sha256
+        );
         if (options.DryRun)
         {
             return DuplicateCheckResult.Deleted;
