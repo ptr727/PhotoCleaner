@@ -1012,6 +1012,83 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         kept.Concat(deferred).Should().HaveCount(5);
     }
 
+    // -- TrashDb: file matching trash hash is deleted from disk and DB --------
+
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_MatchingFile_DeletedFromDiskAndDb()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        string dbPath = Path.Combine(workDir, "Process.db");
+        string trashDbPath = Path.Combine(workDir, "Trash.db");
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            (string _, string sha1) = await Database.ComputeHashesAsync(filePath);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync();
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync();
+            await trashDb.InsertHashAsync(sha1);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(),
+                new FileInfo(filePath),
+                db,
+                trashDb,
+                [],
+                new SkippedExtensionTracker(),
+                default
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath).Should().BeFalse();
+            FileRecord? row = await db.GetByPathAsync(filePath);
+            row.Should().BeNull();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_NonMatchingFile_NotDeleted()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        string dbPath = Path.Combine(workDir, "Process.db");
+        string trashDbPath = Path.Combine(workDir, "Trash.db");
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync();
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync();
+            await trashDb.InsertHashAsync("0000000000000000000000000000000000000000");
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(),
+                new FileInfo(filePath),
+                db,
+                trashDb,
+                [],
+                new SkippedExtensionTracker(),
+                default
+            );
+
+            result.Should().NotBe(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- Helpers ---------------------------------------------------------------
 
     private static async Task SetContentIdentifierAsync(string filePath, string contentId) =>
@@ -1044,10 +1121,10 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             TagPath = false,
             Tags = null,
             DbFile = null,
-            OutDbFile = null,
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            MarkProcessed = false,
             ImmichUrl = null,
             ImmichApiKey = null,
             TrashDbFile = null,
@@ -1069,6 +1146,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         ProcessTask.ExecuteAsync(
             CreateOptions(dryRun: dryRun, skipBackup: skipBackup, rehash: rehash),
             new FileInfo(filePath),
+            null,
             null,
             [],
             new SkippedExtensionTracker(),

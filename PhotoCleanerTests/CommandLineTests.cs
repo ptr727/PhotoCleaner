@@ -88,53 +88,76 @@ public sealed class CommandLineTests
         options.Reprocess.Should().BeTrue();
     }
 
-    // -- Cleanup command ------------------------------------------------------
+    // -- MarkProcessed (--processed on index) ---------------------------------
 
     [Fact]
-    public void CleanupCommand_IsRegistered()
+    public void MarkProcessedOption_DefaultFalse()
     {
-        CommandLine cli = new(["cleanup", "--path", ExistingDir]);
+        CommandLine cli = new(["index", "--path", ExistingDir, "--db", "/tmp/test.db"]);
 
-        // No parse errors means the command is recognized
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
         cli.Result.Errors.Should().BeEmpty();
+        options.MarkProcessed.Should().BeFalse();
     }
 
     [Fact]
-    public void CleanupCommand_DryRunFlag_ParsedTrue()
+    public void MarkProcessedOption_Flag_ParsedTrue()
     {
-        CommandLine cli = new(["cleanup", "--path", ExistingDir, "--dryrun"]);
+        CommandLine cli = new([
+            "index",
+            "--path",
+            ExistingDir,
+            "--db",
+            "/tmp/test.db",
+            "--processed",
+        ]);
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
-        options.DryRun.Should().BeTrue();
+        cli.Result.Errors.Should().BeEmpty();
+        options.MarkProcessed.Should().BeTrue();
     }
 
+    // -- Process --trashdb ----------------------------------------------------
+
     [Fact]
-    public void CleanupCommand_SkipBackupNotAvailable_DefaultFalse()
+    public void ProcessTrashDbOption_ParsedCorrectly()
     {
-        // --skipbackup is only on the process command; cleanup should default to false
-        CommandLine cli = new(["cleanup", "--path", ExistingDir]);
+        // The validator requires the file to exist; use a real file.
+        string trashDbFile = Path.Combine(Path.GetTempPath(), $"trash_{Guid.NewGuid()}.db");
+        File.WriteAllBytes(trashDbFile, []);
+        try
+        {
+            CommandLine cli = new(["process", "--path", ExistingDir, "--trashdb", trashDbFile]);
 
-        CommandLine.Options options = cli.CreateOptions(cli.Result);
+            CommandLine.Options options = cli.CreateOptions(cli.Result);
 
-        options.SkipBackup.Should().BeFalse();
+            cli.Result.Errors.Should().BeEmpty();
+            options.TrashDbFile.Should().NotBeNull();
+            options.TrashDbFile.FullName.Should().Be(new FileInfo(trashDbFile).FullName);
+        }
+        finally
+        {
+            File.Delete(trashDbFile);
+        }
     }
 
     // -- Organize command -----------------------------------------------------
 
     [Fact]
-    public void OrganizeCommand_IsRegistered()
+    public void ImportCommand_IsRegistered()
     {
-        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+        CommandLine cli = new(["import", "--path", ExistingDir, "--outpath", ExistingDir]);
 
         cli.Result.Errors.Should().BeEmpty();
     }
 
     [Fact]
-    public void OrganizeCommand_DryRunFlag_ParsedTrue()
+    public void ImportCommand_DryRunFlag_ParsedTrue()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -152,7 +175,7 @@ public sealed class CommandLineTests
     [Fact]
     public void DeleteEmptyOption_DefaultFalse()
     {
-        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+        CommandLine cli = new(["import", "--path", ExistingDir, "--outpath", ExistingDir]);
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
@@ -163,7 +186,7 @@ public sealed class CommandLineTests
     public void DeleteEmptyOption_Flag_ParsedTrue()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -176,12 +199,34 @@ public sealed class CommandLineTests
         options.DeleteEmpty.Should().BeTrue();
     }
 
+    [Fact]
+    public void DeleteEmptyOption_Process_DefaultFalse()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        cli.Result.Errors.Should().BeEmpty();
+        options.DeleteEmpty.Should().BeFalse();
+    }
+
+    [Fact]
+    public void DeleteEmptyOption_Process_Flag_ParsedTrue()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir, "--deleteempty"]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        cli.Result.Errors.Should().BeEmpty();
+        options.DeleteEmpty.Should().BeTrue();
+    }
+
     // -- --format option ------------------------------------------------------
 
     [Fact]
     public void FormatOption_DefaultYearMonth()
     {
-        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+        CommandLine cli = new(["import", "--path", ExistingDir, "--outpath", ExistingDir]);
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
@@ -192,7 +237,7 @@ public sealed class CommandLineTests
     public void FormatOption_ValidDateFormat_ParsedOk()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -210,7 +255,7 @@ public sealed class CommandLineTests
     public void FormatOption_WithTimeComponent_ValidationError()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -223,10 +268,10 @@ public sealed class CommandLineTests
     }
 
     [Fact]
-    public void OrganizeCommand_ThreadsOption_ParsedCorrectly()
+    public void ImportCommand_ThreadsOption_ParsedCorrectly()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -244,7 +289,7 @@ public sealed class CommandLineTests
     public void FormatOption_InvalidFormatSpecifier_ValidationError()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -261,7 +306,7 @@ public sealed class CommandLineTests
     [Fact]
     public void MoveOption_DefaultFalse()
     {
-        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+        CommandLine cli = new(["import", "--path", ExistingDir, "--outpath", ExistingDir]);
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
@@ -272,7 +317,7 @@ public sealed class CommandLineTests
     public void MoveOption_Flag_ParsedTrue()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -290,7 +335,7 @@ public sealed class CommandLineTests
     [Fact]
     public void DbFileOption_DefaultNull()
     {
-        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
+        CommandLine cli = new(["import", "--path", ExistingDir, "--outpath", ExistingDir]);
 
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
@@ -302,7 +347,7 @@ public sealed class CommandLineTests
     {
         string dbPath = Path.Combine(Path.GetTempPath(), "photos.db");
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -314,55 +359,6 @@ public sealed class CommandLineTests
         CommandLine.Options options = cli.CreateOptions(cli.Result);
 
         options.DbFile!.FullName.Should().Be(dbPath);
-    }
-
-    // -- --outdb option -------------------------------------------------------
-
-    [Fact]
-    public void OutDbFileOption_DefaultNull()
-    {
-        CommandLine cli = new(["organize", "--path", ExistingDir, "--outpath", ExistingDir]);
-
-        CommandLine.Options options = cli.CreateOptions(cli.Result);
-
-        options.OutDbFile.Should().BeNull();
-    }
-
-    [Fact]
-    public void DuplicatesCommand_WithOutDb_Parses()
-    {
-        string dbPath = Path.Combine(Path.GetTempPath(), "source.db");
-        string outDbPath = Path.Combine(Path.GetTempPath(), "target.db");
-        CommandLine cli = new([
-            "duplicates",
-            "--path",
-            ExistingDir,
-            "--outpath",
-            ExistingDir,
-            "--db",
-            dbPath,
-            "--outdb",
-            outDbPath,
-        ]);
-
-        cli.Result.Errors.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void DuplicatesCommand_MissingOutDb_ValidationError()
-    {
-        string dbPath = Path.Combine(Path.GetTempPath(), "source.db");
-        CommandLine cli = new([
-            "duplicates",
-            "--path",
-            ExistingDir,
-            "--outpath",
-            ExistingDir,
-            "--db",
-            dbPath,
-        ]);
-
-        cli.Result.Errors.Should().NotBeEmpty();
     }
 
     // -- index command --------------------------------------------------------
@@ -480,7 +476,7 @@ public sealed class CommandLineTests
     public void TrashDbOption_NonExistentFile_ValidationError()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",
@@ -496,7 +492,7 @@ public sealed class CommandLineTests
     public void SkipDbOption_NonExistentFile_ValidationError()
     {
         CommandLine cli = new([
-            "organize",
+            "import",
             "--path",
             ExistingDir,
             "--outpath",

@@ -16,7 +16,7 @@ internal sealed class IndexTask(
     internal async Task<(
         IndexStatus status,
         string sha256,
-        string? sha1,
+        string sha1,
         bool wasProcessed
     )> IndexFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
@@ -25,13 +25,8 @@ internal sealed class IndexTask(
         FileRecord? cached = await database
             .GetByPathAsync(filePath, cancellationToken)
             .ConfigureAwait(false);
-        (string sha256, string? sha1) = await Database
-            .ResolveHashesAsync(
-                filePath,
-                cached,
-                options.Rehash,
-                cancellationToken: cancellationToken
-            )
+        (string sha256, string sha1) = await Database
+            .ResolveHashesAsync(filePath, cached, options.Rehash, cancellationToken)
             .ConfigureAwait(false);
         if (cached is null)
         {
@@ -44,12 +39,12 @@ internal sealed class IndexTask(
                         sha1,
                         info.Length,
                         info.LastWriteTimeUtc.Ticks,
-                        false
+                        options.MarkProcessed
                     ),
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-            return (IndexStatus.Inserted, sha256, sha1, false);
+            return (IndexStatus.Inserted, sha256, sha1, options.MarkProcessed);
         }
 
         if (sha256 != cached.Sha256)
@@ -69,13 +64,8 @@ internal sealed class IndexTask(
             return (IndexStatus.Updated, sha256, sha1, false);
         }
 
-        if (
-            sha1 != cached.Sha1
-            || info.Length != cached.FileSize
-            || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks
-        )
+        if (info.Length != cached.FileSize || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks)
         {
-            // Metadata changed (sha1 backfill, size/mtime refresh) - preserve is_processed
             Log.Debug("Updating metadata for '{FilePath}'", filePath);
             await database
                 .UpdateMetadataAsync(
@@ -94,7 +84,7 @@ internal sealed class IndexTask(
             );
         }
 
-        return (IndexStatus.Unchanged, sha256, sha1 ?? cached.Sha1, cached.IsProcessed);
+        return (IndexStatus.Unchanged, sha256, sha1, cached.IsProcessed);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage(

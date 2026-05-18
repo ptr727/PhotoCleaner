@@ -6,7 +6,10 @@ namespace PhotoCleanerTests;
 
 public sealed class IndexTaskTests
 {
-    private static CommandLine.Options CreateOptions(bool rehash = false) =>
+    private static CommandLine.Options CreateOptions(
+        bool rehash = false,
+        bool markProcessed = false
+    ) =>
         new()
         {
             Path = new DirectoryInfo(Path.GetTempPath()),
@@ -21,10 +24,10 @@ public sealed class IndexTaskTests
             TagPath = false,
             Tags = null,
             DbFile = null,
-            OutDbFile = null,
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            MarkProcessed = markProcessed,
             ImmichUrl = null,
             ImmichApiKey = null,
             TrashDbFile = null,
@@ -230,6 +233,75 @@ public sealed class IndexTaskTests
             File.Delete(dbPath);
             File.Delete(mediaFile);
             File.Delete(nonMediaFile);
+        }
+    }
+
+    [Fact]
+    public async Task IndexFileAsync_MarkProcessed_InsertsWithIsProcessedTrue()
+    {
+        string dbPath = TempDb();
+        string filePath = TempFile();
+        try
+        {
+            await using Database db = new(dbPath);
+            await db.InitializeAsync();
+            IndexTask task = new(
+                CreateOptions(markProcessed: true),
+                db,
+                new SkippedExtensionTracker()
+            );
+
+            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
+
+            status.Should().Be(IndexStatus.Inserted);
+            wasProcessed.Should().BeTrue();
+            FileRecord? row = await db.GetByPathAsync(filePath);
+            row.Should().NotBeNull();
+            row.IsProcessed.Should().BeTrue();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(filePath);
+        }
+    }
+
+    [Fact]
+    public async Task IndexFileAsync_MarkProcessed_PreservesExistingFlagOnUpdate()
+    {
+        // --processed only affects rows being INSERTED. Existing rows keep their flag
+        // (they get cleared by UpdateHashesAsync on a hash change, which is the existing
+        // behavior, but the --processed flag itself never alters rows during update).
+        string dbPath = TempDb();
+        string filePath = TempFile("original");
+        try
+        {
+            await using Database db = new(dbPath);
+            await db.InitializeAsync();
+
+            // Insert WITHOUT --processed (is_processed = 0).
+            IndexTask noFlag = new(CreateOptions(), db, new SkippedExtensionTracker());
+            await noFlag.IndexFileAsync(filePath);
+
+            // Re-run WITH --processed; the file is unchanged so this should be Unchanged
+            // and the existing row's is_processed should remain 0 (not flipped to 1).
+            IndexTask withFlag = new(
+                CreateOptions(markProcessed: true),
+                db,
+                new SkippedExtensionTracker()
+            );
+            (IndexStatus status, _, _, bool wasProcessed) = await withFlag.IndexFileAsync(filePath);
+
+            status.Should().Be(IndexStatus.Unchanged);
+            wasProcessed.Should().BeFalse();
+            FileRecord? row = await db.GetByPathAsync(filePath);
+            row.Should().NotBeNull();
+            row.IsProcessed.Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(filePath);
         }
     }
 

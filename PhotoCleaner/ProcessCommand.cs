@@ -21,31 +21,40 @@ internal sealed class ProcessCommand(
                 "Processing",
                 async () =>
                 {
-                    await DatabaseScope
+                    await TrashDatabaseScope
                         .RunAsync(
-                            options.DbFile,
-                            async database =>
-                            {
-                                // Rename duplicate mixed case files
-                                bool foundConflicts = true;
-                                while (foundConflicts)
-                                {
-                                    (IReadOnlyList<string> files, _totalCount) =
-                                        FileEnumerator.Enumerate(
-                                            options.Path,
-                                            options.Threads,
-                                            cancellationToken
-                                        );
-                                    _fileNames = [.. files];
-                                    foundConflicts = FixCaseConflicts();
-                                }
+                            options.TrashDbFile,
+                            async trashDatabase =>
+                                await DatabaseScope
+                                    .RunAsync(
+                                        options.DbFile,
+                                        async database =>
+                                        {
+                                            // Rename duplicate mixed case files
+                                            bool foundConflicts = true;
+                                            while (foundConflicts)
+                                            {
+                                                (IReadOnlyList<string> files, _totalCount) =
+                                                    FileEnumerator.Enumerate(
+                                                        options.Path,
+                                                        options.Threads,
+                                                        cancellationToken
+                                                    );
+                                                _fileNames = [.. files];
+                                                foundConflicts = FixCaseConflicts();
+                                            }
 
-                                // Process files
-                                while (!_fileNames.IsEmpty)
-                                {
-                                    await ExecuteProcessAsync(database).ConfigureAwait(false);
-                                }
-                            },
+                                            // Process files
+                                            while (!_fileNames.IsEmpty)
+                                            {
+                                                await ExecuteProcessAsync(database, trashDatabase)
+                                                    .ConfigureAwait(false);
+                                            }
+                                        },
+                                        cancellationToken: cancellationToken
+                                    )
+                                    .ConfigureAwait(false),
+                            readOnly: true,
                             cancellationToken: cancellationToken
                         )
                         .ConfigureAwait(false);
@@ -54,28 +63,22 @@ internal sealed class ProcessCommand(
 
                     _skippedExtensions.LogWarnings();
 
-                    if (_skippedCount > 0)
+                    if (options.DeleteEmpty)
                     {
-                        Log.Information(
-                            "Skipped {SkippedCount} already processed files",
-                            _skippedCount
+                        int deletedDirs = DirectoryCleaner.DeleteEmptyDirectories(
+                            options.Path,
+                            options.DryRun
                         );
+                        Log.Information("Deleted {DeletedDirCount} empty directories", deletedDirs);
                     }
 
-                    if (_modifiedCount > 0)
-                    {
-                        Log.Information("Modified {ModifiedCount} files", _modifiedCount);
-                    }
-
-                    if (_deletedCount > 0)
-                    {
-                        Log.Information("Deleted {DeletedCount} files", _deletedCount);
-                    }
-
-                    if (_failedCount > 0)
-                    {
-                        Log.Warning("Failed {FailedCount} files", _failedCount);
-                    }
+                    Log.Information(
+                        "Skipped {SkippedCount} already processed files",
+                        _skippedCount
+                    );
+                    Log.Information("Modified {ModifiedCount} files", _modifiedCount);
+                    Log.Information("Deleted {DeletedCount} files", _deletedCount);
+                    Log.Information("Failed {FailedCount} files", _failedCount);
                 }
             )
             .ConfigureAwait(false);
@@ -85,7 +88,7 @@ internal sealed class ProcessCommand(
         "CA1031:Do not catch general exception types",
         Justification = "Per-file catch-all logs the file path and continues processing remaining files"
     )]
-    private async Task ExecuteProcessAsync(Database? database)
+    private async Task ExecuteProcessAsync(Database? database, TrashDatabase? trashDatabase)
     {
         // Separate files that share a stem (different extensions) so they
         // are never processed in parallel - prevents one thread from
@@ -113,6 +116,7 @@ internal sealed class ProcessCommand(
                                     options,
                                     new FileInfo(fileName),
                                     database,
+                                    trashDatabase,
                                     reProcessNames,
                                     _skippedExtensions,
                                     ct

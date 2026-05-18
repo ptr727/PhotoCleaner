@@ -19,25 +19,22 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   GIF to MP4 (H.264/AAC); re-encodes PCM audio to AAC in MOV and MP4 files while preserving
   the video stream. All source metadata (including `ContentIdentifier` and other QuickTime tags)
   is copied to the converted file using `exiftool -TagsFromFile`.
-- **Organizes into date folders** (via `organize` command): Copies (default) or moves supported
+- **Imports into date folders** (via `import` command): Copies (default) or moves supported
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
   Falls back to a deterministic `0001/01` bucket when no date is found. Supports a custom
-  `--format` string (default `yyyy/MM/dd`) validated as a date-only pattern. Optional SQLite
-  deduplication via `--db` tracks source file hashes so re-runs skip already organized files.
-  `--tagpath` writes the source sub-directory path components as `XMP:Subject` tags on the
-  destination file. `--tags` applies explicit comma-separated `XMP:Subject` tags to every
-  organized file. `--datepath` infers and writes EXIF/QuickTime creation dates from filenames
-  or directory path structures when metadata is absent (opt-in, applied before the file is moved
-  to a date-based directory so the source path is still available).
-- **Deletes duplicates** (via `duplicates` command): Hashes all files in a source directory
-  and registers them in a SQLite DB, then deletes any file from the target directory whose
-  SHA-256 hash matches a source file, or whose SHA-1 matches a hash in an optional Immich
-  trash database (`--trashdb`). Source files are never touched. The DB persists across runs,
-  enabling incremental duplicate detection as the source collection grows.
+  `--format` string (default `yyyy/MM/dd`) validated as a date-only pattern. SQLite
+  deduplication via `--db` (Import.db) tracks source file hashes keyed by source path so
+  re-runs skip already-imported files. `--tagpath` writes the source sub-directory path
+  components as `XMP:Subject` tags on the destination file. `--tags` applies explicit
+  comma-separated `XMP:Subject` tags to every imported file. `--datepath` infers and writes
+  EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
+  absent (opt-in, applied before the file is moved to a date-based directory so the source
+  path is still available).
 - **Syncs Immich trash hashes** (via `trash` command): Connects to an Immich server via its
   REST API, fetches all trashed asset checksums (SHA-1), and stores them in a local SQLite
-  database. This trash DB can then be used with `organize --trashdb` to skip files that were
-  already imported and trashed in Immich, preventing re-import of known duplicates.
+  database. This trash DB can then be used with `import --trashdb` to skip files that were
+  already imported and trashed in Immich, and with `process --trashdb` to delete files trashed
+  in Immich after upload, preventing re-import of known duplicates.
 - **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
   render correctly in older applications.
 
@@ -61,9 +58,7 @@ Usage:
 Commands:
   process     Process media files
   undo        Undo media file processing
-  cleanup     Delete files not in the supported media list
-  organize    Organize media files into date-based subdirectories
-  duplicates  Delete files in --outpath whose content matches a file in --path or a hash in --trashdb
+  import      Import media files into date-based subdirectories
   index       Index files into the database for deduplication tracking
   trash       Sync trashed asset hashes from Immich
 
@@ -85,10 +80,12 @@ Options:
   --dryrun                      Perform a dry run without making changes
   --threads <threads>           Number of parallel threads [default: 4]
   --skipbackup                  Skip creating backup files (disables undo)
+  --deleteempty                 Delete empty subdirectories under the target directory after the command completes
   --db <db>                     SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
   --duration <duration>         Maximum duration in seconds below which a video is considered a short clip and deleted [default: 1]
   --reprocess                   Re-process files even if already marked as processed in the database
+  --trashdb <trashdb>           SQLite database with Immich trash hashes (read-only). Files matching are deleted from disk and the DB
 ```
 
 ```text
@@ -102,19 +99,9 @@ Options:
 ```
 
 ```text
-$> PhotoCleaner cleanup --help
+$> PhotoCleaner import --help
 Description:
-  Delete files not in the supported media list
-
-Options:
-  --path <path> (REQUIRED)      The directory path to process
-  --dryrun                      Perform a dry run without making changes
-```
-
-```text
-$> PhotoCleaner organize --help
-Description:
-  Organize media files into date-based subdirectories
+  Import media files into date-based subdirectories
 
 Options:
   --path <path> (REQUIRED)       The directory path to process
@@ -122,7 +109,7 @@ Options:
   --threads <threads>            Number of parallel threads [default: 4]
   --outpath <outpath> (REQUIRED) Output directory for organized files
   --format <format>              Date format for output subdirectory names [default: yyyy/MM/dd]
-  --deleteempty                  Delete empty source subdirectories after organizing
+  --deleteempty                  Delete empty subdirectories under the target directory after the command completes
   --move                         Move files instead of copying (default: copy)
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
   --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
@@ -131,22 +118,6 @@ Options:
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
   --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
   --skipdb <skipdb>              SQLite database with indexed files to be skipped (read-only)
-```
-
-```text
-$> PhotoCleaner duplicates --help
-Description:
-  Delete files in --outpath whose content matches a file in --path or a hash in --trashdb
-
-Options:
-  --path <path> (REQUIRED)       The directory path to process
-  --dryrun                       Perform a dry run without making changes
-  --threads <threads>            Number of parallel threads [default: 4]
-  --outpath <outpath> (REQUIRED) Target directory to scan for duplicates
-  --db <db> (REQUIRED)           SQLite database file for source file state tracking
-  --outdb <outdb> (REQUIRED)     SQLite database file for target file state tracking
-  --rehash                       Force rehashing of all files, ignoring size/mtime cache
-  --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
 ```
 
 ```text
@@ -159,6 +130,7 @@ Options:
   --threads <threads>           Number of parallel threads [default: 4]
   --db <db> (REQUIRED)          SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
+  --processed                   Mark newly inserted rows as already processed (use when seeding a Process.db)
 ```
 
 ```text
@@ -179,66 +151,86 @@ Options:
 - `--threads` - defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
 - `--skipbackup` - opt-in (`process` only); skips all `.bak` file creation. The `undo`
   command cannot reverse a run made with this flag.
-- `--outpath` - required for `organize`; target directory (created on demand).
-- `--format` - optional (`organize` only); a C# date format string used to name date
+- `--outpath` - required for `import`; target directory (created on demand).
+- `--format` - optional (`import` only); a C# date format string used to name date
   subdirectories (default `"yyyy/MM/dd"`). Must be date-only - time components are rejected.
   Files with no EXIF date land in a `"0001/01/01"` fallback bucket.
-- `--deleteempty` - optional (`organize` only); after all files are organized, deletes empty
-  child subdirectories from each source `--path` (deepest first). The source root itself is
-  never deleted. Useful for cleaning up directory trees left behind after organizing with
-  `--move`.
-- `--move` - optional (`organize` only); moves files instead of copying. Default behavior is
+- `--deleteempty` - optional (`import`, `process`); after the command completes, deletes
+  empty child subdirectories from the target directory (deepest first). For `import` the
+  target is `--outpath`; for `process` it is `--path` (which is operated on in-place). The
+  target root itself is never deleted. Useful for cleaning up directory trees left behind
+  after `process` deletes files (live photos, originals when `--skipbackup`) or after
+  pruning organized output.
+- `--move` - optional (`import` only); moves files instead of copying. Default behavior is
   to copy, which preserves the source files. Use `--move` when the source directory is
-  temporary or when used alongside `--deleteempty` to clean up after organizing.
-- `--tagpath` - optional (`organize` only); splits the source sub-directory path relative to
+  temporary.
+- `--tagpath` - optional (`import` only); splits the source sub-directory path relative to
   `--path` into tokens and writes each token as an `XMP:Subject` tag on the destination file
   using exiftool. Files at the root of `--path` receive no tags. Tags are applied with a
   remove-then-add pattern (`-XMP:Subject-= / -XMP:Subject+=`) so existing tags are preserved
   and duplicates are not created. Only file types that support XMP writes are tagged.
-- `--tags` - optional (`organize` only); a comma-separated list of `XMP:Subject` tags applied to
+- `--tags` - optional (`import` only); a comma-separated list of `XMP:Subject` tags applied to
   every organized file (e.g. `--tags "vacation,family trip,2018"`). Tags are applied using the
   same remove-then-add pattern as `--tagpath`. Can be combined with `--tagpath` - both sets of
   tags are merged. Only file types that support XMP writes are tagged.
-- `--datepath` - optional (`organize` only); when a file has no embedded creation date, infers
+- `--datepath` - optional (`import` only); when a file has no embedded creation date, infers
   one from the filename or directory path structure (via `DateFromPath`) and writes it to the
   destination file before restoring mtime. Opt-in because writing to files is destructive and
-  the source path context is only available during `organize` (before files move to date-based
+  the source path context is only available during `import` (before files move to date-based
   directories).
-- `--db <path>` - optional for `organize` and `process`, **required** for `duplicates` and
-  `index`; path to a SQLite database file. Uses a single `files` table (`path` PRIMARY KEY,
-  `sha256`, `sha1`, `file_size`, `mtime_ticks`, `is_processed`). For `organize`: files are hashed,
-  checked against the DB by hash; new files are copied/moved and recorded by destination path.
-  For `process`: files are looked up by path and skipped when already processed; processes and
-  re-hashes when file content changes. For `duplicates` and `index`: source files are indexed;
-  target files whose hash is found in the DB are deleted (duplicates only). The DB file is
-  created automatically on first use. **Breaking change**: databases from earlier versions
-  (with `organized_files`, `processed_files`, or `source_files` tables) are incompatible;
-  delete the old file before first use.
-- `--outdb <path>` - **required** for `duplicates`; path to a SQLite database file for
-  caching target file hashes. Uses the same schema and size/mtime caching as `--db` so
-  unchanged target files skip SHA-256 recomputation on re-runs. The outdb from a duplicates
-  run can be reused as the `--db` for a subsequent `process` run on the same directory,
-  avoiding redundant hashing across workflow steps. Created automatically on first use.
-- `--trashdb <path>` - **required** for `trash`, optional for `organize` and `duplicates`;
-  path to a SQLite database with Immich trash hashes. For `trash`: hashes are fetched from the
-  Immich API and written to the database. For `organize`: files matching a trash hash are
-  skipped (read-only). For `duplicates`: matching files are deleted (read-only).
-- `--skipdb <path>` - optional for `organize`; path to a SQLite database with indexed files
+- `--db <path>` - optional for `import` and `process`, **required** for `index`; path to a
+  SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
+  `file_size`, `mtime_ticks`, `is_processed`). The schema is the same for every command, but
+  the **meaning of the `path` column depends on which command writes the row**, so each
+  pipeline stage gets its own DB file:
+  - **Import.db** (`import --db Import.db`): rows are keyed by SOURCE path. `sha256` is the
+    source content hash. Dedup query: skip a source whose `sha256` is already in this DB.
+  - **Process.db** (`process --db Process.db`): rows are keyed by DEST path. `sha256` is the
+    current dest content hash. `is_processed = 1` means the dest file's pipeline ran to completion.
+    `--reprocess` ignores the flag.
+
+  The DB file is created automatically on first use. **The two stages MUST use separate DB files**:
+  if `import` and `process` shared one DB, `process` would overwrite the source-content hashes
+  that `import` wrote (because `import` mutates the dest file via XMP tag injection, so the dest
+  hash diverges from the source hash; `process` then re-hashes the dest and clobbers the row).
+  This was a real bug; the per-stage layout is the fix.
+- `--trashdb <path>` - **required** for `trash`, optional for `import` and `process`; path
+  to a SQLite database with Immich trash hashes.
+  - For `trash`: hashes are fetched from the Immich API and written to the database.
+  - For `import`: files matching a trash hash are skipped (read-only). This is the durable
+    "do not re-import" record beyond Immich's own ~30-day trash retention. Without it, a file
+    the user trashed > 30 days ago can come back the next time icloudpd re-downloads it, because
+    Immich no longer has the hash to deduplicate against on re-upload.
+    Limitation: `import` compares the **source-file** SHA-1 against the trash DB. When
+    `import` rewrites the destination via `--tags`, `--tagpath`, or `--datepath`, the dest file's
+    SHA-1 differs from the source SHA-1. The hash Immich stored on a prior upload (and therefore
+    the hash that ends up in the trash DB) is the rewritten dest SHA-1, so the source-side trash
+    check will not match. Those files are caught by `process --trashdb` instead, which hashes the
+    dest file directly.
+  - For `process`: files matching a trash hash are deleted from disk and from Process.db. This
+    cleans up files trashed in Immich after upload, before the next `immich-cli` upload would
+    re-upload them. Also acts as the safety net for files that `import --trashdb` could not
+    match because of the source-vs-dest SHA-1 drift described above.
+- `--skipdb <path>` - optional for `import`; path to a SQLite database with indexed files
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
 - `--url <url>` - **required** for `trash`; the Immich server URL (e.g. `http://immich:2283`).
 - `--apikey <key>` - **required** for `trash`; the Immich API key. Create one in Immich under
   Account Settings > API Keys.
-- `--rehash` - optional (`process`, `organize`, `duplicates`, `index`); forces SHA-256
-  recomputation for every file, bypassing the size/mtime cache. SHA-1 is also recomputed when
-  `--trashdb` is in use. Use when file content may have changed without the modification
-  timestamp being updated.
+- `--rehash` - optional (`process`, `import`, `index`); forces SHA-256 recomputation for
+  every file, bypassing the size/mtime cache. SHA-1 is also recomputed when `--trashdb` is
+  in use. Use when file content may have changed without the modification timestamp being
+  updated.
 - `--duration` - optional (`process` only); overrides the short-video deletion threshold
   (default `1.0` seconds). Videos in a live-photo-compatible format whose duration is <= this
   value are always deleted. Must be `> 0`.
 - `--reprocess` - optional (`process` only); when set, ignores the `is_processed` flag in
   the database and processes every file regardless of prior run history. Useful after changing
   pipeline settings (e.g. `--duration`) without wiping the database.
+- `--processed` - optional (`index` only); marks newly inserted rows with `is_processed = 1`.
+  Use this when seeding a Process.db from existing files so a subsequent `process` run treats
+  them as already processed and only touches new arrivals. The flag does not flip the bit on
+  rows that already exist in the DB.
 
 ### Examples
 
@@ -258,53 +250,37 @@ PhotoCleaner undo --path /home/user/Photos
 # Preview what undo would do without modifying files
 PhotoCleaner undo --path /home/user/Photos --dryrun
 
-# Remove all non-media files (.bak artefacts, .DS_Store, Thumbs.db, etc.)
-PhotoCleaner cleanup --path /home/user/Photos
+# Import (copy) media into date-based subdirectories - source files are kept
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized
 
-# Preview what cleanup would remove without deleting anything
-PhotoCleaner cleanup --path /home/user/Photos --dryrun
-
-# Organize (copy) media into date-based subdirectories - source files are kept
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized
-
-# Organize with a custom date format (creates e.g. 2024/06/2024-06-15/ subdirectories)
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/yyyy-MM-dd"
+# Import with a custom date format (creates e.g. 2024/06/2024-06-15/ subdirectories)
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/yyyy-MM-dd"
 
 # Preview what organize would do without changing anything
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --dryrun
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --dryrun
 
 # Move instead of copy (source files are removed)
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --move
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --move
 
-# Organize and remove empty source subdirectories afterward (use with --move)
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --move --deleteempty
+# Import and remove empty subdirectories from the target afterward
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --deleteempty
 
-# Organize with path-based XMP:Subject tagging (sub-directory names become tags)
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --tagpath
+# Import with path-based XMP:Subject tagging (sub-directory names become tags)
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --tagpath
 
-# Organize inferring missing EXIF dates from the source path
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --datepath
+# Import inferring missing EXIF dates from the source path
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --datepath
 
-# Organize with explicit XMP:Subject tags applied to every file
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --tags "vacation,family trip"
+# Import with explicit XMP:Subject tags applied to every file
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --tags "vacation,family trip"
 
-# Organize with both path tagging, explicit tags, and date inference
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --tagpath --tags "2018" --datepath
+# Import with both path tagging, explicit tags, and date inference
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --tagpath --tags "2018" --datepath
 
-# Organize with deduplication: only copy files not already in the database
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Intermediate --db /data/photos.db
+# Import with deduplication: only copy files not already in the database
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Intermediate --db /data/photos.db
 
-# Delete files in /target that already exist (by content) in /source
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/source.db --outdb /data/target.db
-
-# Preview duplicate deletion without removing anything
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/source.db --outdb /data/target.db --dryrun
-
-# Incremental: index source once, then check multiple target directories over time
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import1 --db /data/source.db --outdb /data/import1.db
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Import2 --db /data/source.db --outdb /data/import2.db
-
-# Index a directory into the database (stand-alone, without running duplicates)
+# Index a directory into the database (stand-alone, no other processing)
 PhotoCleaner index --path /home/user/Source --db /data/dedup.db
 
 # Re-index forcing hash recomputation (useful after file content changes without mtime update)
@@ -313,18 +289,15 @@ PhotoCleaner index --path /home/user/Source --db /data/dedup.db --rehash
 # Sync Immich trash hashes into a local database
 PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /data/trash.db
 
-# Organize and skip files that were trashed in Immich (prevents re-import)
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --db /data/photos.db --trashdb /data/trash.db
+# Import and skip files that were trashed in Immich (prevents re-import)
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --db /data/photos.db --trashdb /data/trash.db
 
-# Organize and skip files already in another collection (read-only reference)
-PhotoCleaner organize --path /home/user/Photos --outpath /home/user/Organized --skipdb /data/existing-collection.db
-
-# Delete duplicates and files trashed in Immich from a target directory
-PhotoCleaner duplicates --path /home/user/Source --outpath /home/user/Target --db /data/source.db --outdb /data/target.db --trashdb /data/trash.db
+# Import and skip files already in another collection (read-only reference)
+PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --skipdb /data/existing-collection.db
 
 # Full workflow with Immich trash integration
 PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --trashdb /data/trash.db
-PhotoCleaner organize --path /home/user/iCloud --outpath /home/user/Intermediate --db /data/photos.db --trashdb /data/trash.db
+PhotoCleaner import --path /home/user/iCloud --outpath /home/user/Intermediate --db /data/photos.db --trashdb /data/trash.db
 PhotoCleaner process --path /home/user/Intermediate --db /data/process.db
 ```
 
@@ -372,19 +345,9 @@ directories for backup files and applying a two-pass algorithm:
 (e.g. `photo.JPEG` -> `photo.jpg` when `photo.jpg` was absent) create no backup and cannot be
 undone by this command.
 
-## Cleanup Flow
+## Import Flow
 
-The `cleanup` command deletes every file in the target directories whose extension is **not** in
-the supported media list. This removes processing artefacts (`.bak`, `.bak1`, `.bak.out`),
-system junk (`.DS_Store`, `Thumbs.db`), and any other non-media files. Backup artefacts are
-logged as warnings before deletion; other files are logged as informational.
-
-Run `cleanup` after verifying `process` results, or use `process --skipbackup` followed by
-`cleanup` for a no-artefact workflow.
-
-## Organize Flow
-
-The `organize` command copies (default) or moves every supported media file in the source
+The `import` command copies (default) or moves every supported media file in the source
 directories to `outpath/date/filename`:
 
 1. **Date inference** (opt-in via `--datepath`): when no embedded creation date is found,
@@ -399,9 +362,12 @@ directories to `outpath/date/filename`:
      (counted as "trashed in Immich").
    - `--skipdb`: if the file matches a record in the reference DB, the file is skipped
      (counted as "skipped by reference"). This is a read-only check - no records are written.
-   - `--db`: if the SHA-256 is already present (from a previous organize run), the file is
-     skipped (counted as "skipped"). Otherwise, the file is copied/moved and a record is
-     inserted keyed by the destination path. The DB file is created automatically on first use.
+   - `--db` (Import.db): if the source SHA-256 is already present (from a previous import
+     run), the file is skipped (counted as "skipped"). Otherwise, the file is copied/moved and
+     a record is inserted **keyed by the SOURCE path** (not the dest path) with the source
+     hash, size, and mtime. This is the load-bearing detail: rows in Import.db identify
+     sources, not destinations, so subsequent runs of `process`/`index` against a separate
+     Process.db cannot clobber the dedup key. The DB file is created automatically on first use.
 3. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
    `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
    is found - those files land in a `"0001/01/01"` bucket (with the default `yyyy/MM/dd` format),
@@ -417,38 +383,16 @@ directories to `outpath/date/filename`:
 7. **Collision handling**: if a file with the same name already exists in the destination,
    `_1`, `_2`, ... suffixes are appended (e.g. `photo_1.jpg`). A warning is logged.
 8. **Unsupported files**: non-media files are counted as ignored and left in place.
-9. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are organized,
-   iterates each source directory and deletes empty child subdirectories deepest-first.
-   The source root itself is never deleted. Typically combined with `--move`.
+9. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are imported,
+   iterates `--outpath` and deletes empty child subdirectories deepest-first. The target
+   root itself is never deleted.
 
 Run with `--dryrun` to preview the planned operations without touching the file system.
-
-## Duplicates Flow
-
-The `duplicates` command removes files from a target directory whose content already exists in
-a source directory (identified by SHA-256 hash) or whose SHA-1 matches an Immich trash hash
-(via optional `--trashdb`). Source files are never modified.
-
-1. **Phase 1 - Index sources**: hashes every supported media file in `--path` and inserts
-   each record into the unified `files` table of the SQLite DB using `INSERT OR IGNORE` on
-   the path primary key. Re-indexing the same source is idempotent; new source files added
-   later are picked up on the next run. Size/mtime caching (bypassed by `--rehash`) avoids
-   recomputing SHA-256 for unchanged files.
-2. **Phase 2 - Scan target**: hashes every supported media file in `--outpath` using
-   size/mtime caching from `--outdb` (unchanged files skip rehashing), upserts each record
-   into the outdb, and checks each hash against the source DB via the hash index. If
-   `--trashdb` is provided, files whose SHA-1 matches a trash hash are also deleted. Files
-   with unique hashes (not in source DB or trash DB) are kept. The outdb can be reused as
-   `--db` for a subsequent `process` run on the same directory.
-3. **Unsupported files**: non-media files (by extension) are skipped in both phases and left
-   untouched.
-
-Run with `--dryrun` to report how many files would be deleted without removing any.
 
 ## Trash Flow
 
 The `trash` command syncs trashed asset checksums from an Immich server into a local SQLite
-database. This enables the `organize` and `duplicates` commands to skip or delete files that
+database. This enables the `import` and `process` commands to skip or delete files that
 were already imported and trashed in Immich.
 
 1. **Connect**: authenticates to the Immich server using the `--url` and `--apikey` options.
@@ -477,7 +421,7 @@ docker build -f Docker/Dockerfile -t photocleaner:latest .
 ```
 
 Mount host directories as volumes so the container can access media files.
-All `--path`, `--outpath`, `--db`, `--outdb`, `--trashdb`, and `--skipdb` arguments refer to paths inside the container:
+All `--path`, `--outpath`, `--db`, `--trashdb`, and `--skipdb` arguments refer to paths inside the container:
 
 ```bash
 # Show help (default when no arguments are passed)
@@ -495,29 +439,18 @@ docker run --rm -v /host/photos:/data \
 docker run --rm -v /host/photos:/data \
     photocleaner:latest undo --path /data
 
-# Cleanup non-media files
-docker run --rm -v /host/photos:/data \
-    photocleaner:latest cleanup --path /data
-
-# Organize into date-based subdirectories (copy, source preserved)
+# Import into date-based subdirectories (copy, source preserved)
 docker run --rm \
     -v /host/photos:/source \
     -v /host/organized:/organized \
     photocleaner:latest organize --path /source --outpath /organized
 
-# Organize with deduplication DB (mount a persistent directory for the DB file)
+# Import with deduplication DB (mount a persistent directory for the DB file)
 docker run --rm \
     -v /host/photos:/source \
     -v /host/organized:/organized \
     -v /host/db:/db \
     photocleaner:latest organize --path /source --outpath /organized --db /db/photos.db
-
-# Delete duplicates: remove files from /target that already exist in /source
-docker run --rm \
-    -v /host/source:/source \
-    -v /host/target:/target \
-    -v /host/db:/db \
-    photocleaner:latest duplicates --path /source --outpath /target --db /db/source.db --outdb /db/target.db
 
 # Index a directory into the database
 docker run --rm \
@@ -530,7 +463,7 @@ docker run --rm \
     -v /host/db:/db \
     photocleaner:latest trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /db/trash.db
 
-# Organize with trash skip (prevents re-importing files trashed in Immich)
+# Import with trash skip (prevents re-importing files trashed in Immich)
 docker run --rm \
     -v /host/photos:/source \
     -v /host/organized:/organized \

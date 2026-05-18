@@ -23,6 +23,7 @@ internal sealed class CommandLine
     private readonly Option<bool> _rehashOption = CreateRehashOption();
     private readonly Option<double> _durationOption = CreateDurationOption();
     private readonly Option<bool> _reprocessOption = CreateReprocessOption();
+    private readonly Option<bool> _markProcessedOption = CreateMarkProcessedOption();
     private readonly Option<FileInfo?> _trashDbFileOption = CreateTrashDbFileOption();
     private readonly Option<FileInfo?> _skipDbFileOption = CreateSkipDbFileOption();
 
@@ -53,9 +54,7 @@ internal sealed class CommandLine
         };
         command.Subcommands.Add(CreateProcessCommand());
         command.Subcommands.Add(CreateUndoCommand());
-        command.Subcommands.Add(CreateCleanupCommand());
-        command.Subcommands.Add(CreateOrganizeCommand());
-        command.Subcommands.Add(CreateDuplicatesCommand());
+        command.Subcommands.Add(CreateImportCommand());
         command.Subcommands.Add(CreateIndexCommand());
         command.Subcommands.Add(CreateTrashCommand());
 
@@ -70,10 +69,12 @@ internal sealed class CommandLine
             _dryRunOption,
             _threadsOption,
             _skipBackupOption,
+            _deleteEmptyOption,
             _dbFileOption,
             _rehashOption,
             _durationOption,
             _reprocessOption,
+            _trashDbFileOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
@@ -83,24 +84,12 @@ internal sealed class CommandLine
         return command;
     }
 
-    private Command CreateCleanupCommand()
+    private Command CreateImportCommand()
     {
-        Command command = new("cleanup", "Delete files not in the supported media list")
-        {
-            _pathOption,
-            _dryRunOption,
-        };
-        command.SetAction(
-            (parseResult, cancellationToken) =>
-                new CleanupCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
-        );
-
-        return command;
-    }
-
-    private Command CreateOrganizeCommand()
-    {
-        Command command = new("organize", "Organize media files into date-based subdirectories")
+        Command command = new(
+            "import",
+            "Import media files from source into date-based subdirectories under --outpath"
+        )
         {
             _pathOption,
             _dryRunOption,
@@ -119,52 +108,7 @@ internal sealed class CommandLine
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
-                new OrganizeCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
-        );
-        return command;
-    }
-
-    private Command CreateDuplicatesCommand()
-    {
-        Option<FileInfo?> requiredDbOption = CreateDbFileOption();
-        requiredDbOption.Required = true;
-
-        Option<FileInfo?> requiredOutDbOption = CreateOutDbFileOption();
-        requiredOutDbOption.Required = true;
-
-        // Duplicates requires the outpath to exist (it enumerates files in it at runtime).
-        // Use a local option with AcceptExistingOnly() so bad paths fail at parse time.
-        Option<DirectoryInfo> outPathOption = new Option<DirectoryInfo>("--outpath")
-        {
-            Description = "Target directory to scan for duplicates (must exist)",
-            Required = true,
-        }.AcceptExistingOnly();
-
-        Command command = new(
-            "duplicates",
-            "Delete files in --outpath whose content matches a file in --path or a hash in --trashdb"
-        )
-        {
-            _pathOption,
-            _dryRunOption,
-            _threadsOption,
-            outPathOption,
-            requiredDbOption,
-            requiredOutDbOption,
-            _rehashOption,
-            _trashDbFileOption,
-        };
-        command.SetAction(
-            (parseResult, cancellationToken) =>
-                new DuplicatesCommand(
-                    CreateOptions(
-                        parseResult,
-                        parseResult.GetValue(requiredDbOption),
-                        parseResult.GetValue(requiredOutDbOption),
-                        parseResult.GetValue(outPathOption)
-                    ),
-                    cancellationToken
-                ).ExecuteAsync()
+                new ImportCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
         );
         return command;
     }
@@ -180,6 +124,7 @@ internal sealed class CommandLine
             _threadsOption,
             requiredDbOption,
             _rehashOption,
+            _markProcessedOption,
         };
         command.SetAction(
             (parseResult, cancellationToken) =>
@@ -256,7 +201,6 @@ internal sealed class CommandLine
     internal Options CreateOptions(
         ParseResult parseResult,
         FileInfo? dbPathOverride = null,
-        FileInfo? outDbPathOverride = null,
         DirectoryInfo? outPathOverride = null,
         string? immichUrl = null,
         string? immichApiKey = null,
@@ -280,10 +224,10 @@ internal sealed class CommandLine
             TagPath = parseResult.GetValue(_tagPathOption),
             Tags = parseResult.GetValue(_tagsOption),
             DbFile = dbPathOverride ?? parseResult.GetValue(_dbFileOption),
-            OutDbFile = outDbPathOverride,
             Rehash = parseResult.GetValue(_rehashOption),
             ShortVideoDuration = parseResult.GetValue(_durationOption),
             Reprocess = parseResult.GetValue(_reprocessOption),
+            MarkProcessed = parseResult.GetValue(_markProcessedOption),
             ImmichUrl = immichUrl,
             ImmichApiKey = immichApiKey,
             TrashDbFile = trashDbFile ?? parseResult.GetValue(_trashDbFileOption),
@@ -341,7 +285,8 @@ internal sealed class CommandLine
     private static Option<bool> CreateDeleteEmptyOption() =>
         new("--deleteempty")
         {
-            Description = "Delete empty source subdirectories after organizing",
+            Description =
+                "Delete empty subdirectories under the target directory after the command completes",
         };
 
     private static Option<bool> CreateMoveOption() =>
@@ -363,9 +308,6 @@ internal sealed class CommandLine
 
     private static Option<FileInfo?> CreateDbFileOption() =>
         new("--db") { Description = "SQLite database file for file state tracking" };
-
-    private static Option<FileInfo?> CreateOutDbFileOption() =>
-        new("--outdb") { Description = "SQLite database file for target file state tracking" };
 
     private static Option<bool> CreateRehashOption() =>
         new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
@@ -408,6 +350,13 @@ internal sealed class CommandLine
         new("--reprocess")
         {
             Description = "Re-process files even if already marked as processed in the database",
+        };
+
+    private static Option<bool> CreateMarkProcessedOption() =>
+        new("--processed")
+        {
+            Description =
+                "Mark newly inserted rows as already processed (use when seeding a Process.db from existing files)",
         };
 
     private static Option<double> CreateDurationOption()
@@ -505,10 +454,10 @@ internal sealed class CommandLine
         public required bool TagPath { get; init; }
         public required string? Tags { get; init; }
         public required FileInfo? DbFile { get; init; }
-        public required FileInfo? OutDbFile { get; init; }
         public required bool Rehash { get; init; }
         public required double ShortVideoDuration { get; init; }
         public required bool Reprocess { get; init; }
+        public required bool MarkProcessed { get; init; }
         public required string? ImmichUrl { get; init; }
         public required string? ImmichApiKey { get; init; }
         public required FileInfo? TrashDbFile { get; init; }

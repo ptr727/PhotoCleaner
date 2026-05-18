@@ -6,7 +6,7 @@ using Serilog.Events;
 
 namespace PhotoCleanerTests;
 
-public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
+public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     : IClassFixture<TempDirectoryFixture>,
         IAsyncLifetime
 {
@@ -45,10 +45,10 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             TagPath = tagPath,
             Tags = null,
             DbFile = null,
-            OutDbFile = null,
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
+            MarkProcessed = false,
             ImmichUrl = null,
             ImmichApiKey = null,
             TrashDbFile = null,
@@ -63,16 +63,13 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
 
     private static string TempDir()
     {
-        string dir = Path.Combine(
-            Path.GetTempPath(),
-            $"OrganizeTaskTest_{Path.GetRandomFileName()}"
-        );
+        string dir = Path.Combine(Path.GetTempPath(), $"ImportTaskTest_{Path.GetRandomFileName()}");
         Directory.CreateDirectory(dir);
         return dir;
     }
 
     private static string TempDb() =>
-        Path.Combine(Path.GetTempPath(), $"OrganizeTaskTest_{Path.GetRandomFileName()}.db");
+        Path.Combine(Path.GetTempPath(), $"ImportTaskTest_{Path.GetRandomFileName()}.db");
 
     private static void Touch(string path) => File.WriteAllBytes(path, []);
 
@@ -94,7 +91,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string txt = Path.Combine(srcDir, "notes.txt");
             Touch(txt);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -142,7 +139,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(srcDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, dryRun: true),
                 database: null,
                 skipDatabase: null,
@@ -191,7 +188,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -240,7 +237,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             // No EXIF date set -> falls back to DateTime.MinValue
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -295,7 +292,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await File.AppendAllTextAsync(jpg2, "extra", TestContext.Current.CancellationToken);
             long jpg2Size = new FileInfo(jpg2).Length;
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -349,7 +346,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             DateTime originalMtime = new(2020, 6, 15, 12, 0, 0, DateTimeKind.Utc);
             File.SetLastWriteTimeUtc(jpg, originalMtime);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -397,7 +394,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:03:10 08:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, move: true),
                 database: null,
                 skipDatabase: null,
@@ -445,7 +442,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:03:10 08:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -477,24 +474,25 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    // -- DeleteEmpty: empty subdirectories are removed after move -------------
+    // -- DeleteEmpty: empty target subdirectories are removed -----------------
 
     [Fact]
-    public async Task ExecuteAsync_DeleteEmpty_RemovesEmptySubdirectories()
+    public async Task ExecuteAsync_DeleteEmpty_RemovesEmptyTargetSubdirectories()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
         try
         {
-            // Create nested structure: srcDir/sub/nested/ with one photo in sub/
-            string subDir = Path.Combine(srcDir, "sub");
-            string nestedDir = Path.Combine(subDir, "nested");
-            Directory.CreateDirectory(nestedDir);
+            // Pre-create empty subdirectories in the target so we can confirm they get cleaned.
+            string emptyA = Path.Combine(outDir, "empty-a");
+            string emptyNested = Path.Combine(outDir, "empty-b", "nested");
+            Directory.CreateDirectory(emptyA);
+            Directory.CreateDirectory(emptyNested);
 
-            string jpg = Path.Combine(subDir, "photo.jpg");
+            string jpg = Path.Combine(srcDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, deleteEmpty: true, move: true),
                 database: null,
                 skipDatabase: null,
@@ -517,10 +515,12 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
 
             organized.Should().Be(1);
             failed.Should().Be(0);
-            deletedDirs.Should().Be(2); // nested/ then sub/
-            Directory.Exists(nestedDir).Should().BeFalse();
-            Directory.Exists(subDir).Should().BeFalse();
-            Directory.Exists(srcDir).Should().BeTrue(); // root itself is not deleted
+            deletedDirs.Should().Be(3); // empty-a, empty-b/nested, empty-b
+            Directory.Exists(emptyA).Should().BeFalse();
+            Directory.Exists(emptyNested).Should().BeFalse();
+            Directory.Exists(Path.Combine(outDir, "empty-b")).Should().BeFalse();
+            Directory.Exists(outDir).Should().BeTrue(); // target root itself is not deleted
+            Directory.Exists(srcDir).Should().BeTrue(); // source root is not touched
         }
         finally
         {
@@ -558,7 +558,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 )
             );
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: db,
                 skipDatabase: null,
@@ -606,7 +606,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, format: "yyyy/MM"),
                 database: null,
                 skipDatabase: null,
@@ -658,7 +658,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await using Database db = new(dbPath);
             await db.InitializeAsync();
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: db,
                 skipDatabase: null,
@@ -686,6 +686,142 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Exists(Path.Combine(outDir, "2024-06", "photo.jpg")).Should().BeTrue();
             bool recorded = await db.Sha256ExistsAsync(sha256);
             recorded.Should().BeTrue();
+
+            // The DB row identifies the SOURCE file we imported (not the destination),
+            // so the dedup lookup keeps working even if the destination is later mutated
+            // (e.g. by tag injection or process re-hash).
+            FileRecord? row = await db.GetByPathAsync(jpg);
+            row.Should().NotBeNull();
+            row.Sha256.Should().Be(sha256);
+            row.FileSize.Should().Be(new FileInfo(jpg).Length);
+            row.MtimeTicks.Should().Be(new FileInfo(jpg).LastWriteTimeUtc.Ticks);
+            FileRecord? destRow = await db.GetByPathAsync(
+                Path.Combine(outDir, "2024-06", "photo.jpg")
+            );
+            destRow.Should().BeNull();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    // -- Database: tag-mutated dest does not affect the source-keyed row ------
+
+    [Fact]
+    public async Task ExecuteAsync_TagPathMutatesDest_SourceRowIsUntouched()
+    {
+        // Models the central design property: import inserts a row keyed by SOURCE path,
+        // even though the destination file gets mutated by tag injection. Because no
+        // command writes to the source path's row through normal use, dedup remains stable.
+        string srcDir = TempDir();
+        // Put the file in a sub-directory so --tagpath actually has tokens to apply
+        // (ComputePathTags returns [] for files at the root of --path).
+        string srcSubDir = Path.Combine(srcDir, "vacation");
+        Directory.CreateDirectory(srcSubDir);
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            string jpg = Path.Combine(srcSubDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+            await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
+            (string srcSha256, string _) = await Database.ComputeHashesAsync(jpg);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync();
+
+            ImportTask task = new(
+                CreateOptions(outDir, tagPath: true),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+            organized.Should().Be(1);
+
+            // The dest file on disk has had XMP tags written and now hashes to something
+            // different from the source.
+            string dest = Path.Combine(outDir, "2024-06", "photo.jpg");
+            File.Exists(dest).Should().BeTrue();
+            (string destSha256, _) = await Database.ComputeHashesAsync(dest);
+            destSha256.Should().NotBe(srcSha256);
+
+            // The DB row is keyed by the SOURCE path and stores the SOURCE hash.
+            FileRecord? srcRow = await db.GetByPathAsync(jpg);
+            srcRow.Should().NotBeNull();
+            srcRow.Sha256.Should().Be(srcSha256);
+
+            // No row was inserted for the dest path. Process operating on /Processed with a
+            // separate Process.db is what tracks the dest state; import never writes there.
+            FileRecord? destRow = await db.GetByPathAsync(dest);
+            destRow.Should().BeNull();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    // -- Database: import twice with same source -> no duplicate --------------
+
+    [Fact]
+    public async Task ExecuteAsync_ImportTwice_SecondRunSkipsAndCreatesNoDuplicate()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+            await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync();
+
+            ImportTask first = new(
+                CreateOptions(outDir),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized1, _, int skipped1, _, _, int failed1, _) = await first.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+            organized1.Should().Be(1);
+            skipped1.Should().Be(0);
+            failed1.Should().Be(0);
+
+            ImportTask second = new(
+                CreateOptions(outDir),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized2, _, int skipped2, _, _, int failed2, _) = await second.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized2.Should().Be(0);
+            skipped2.Should().Be(1);
+            failed2.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "2024-06", "photo_1.jpg")).Should().BeFalse();
         }
         finally
         {
@@ -731,7 +867,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, tagPath: true),
                 database: null,
                 skipDatabase: null,
@@ -768,7 +904,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, tagPath: true),
                 database: null,
                 skipDatabase: null,
@@ -807,7 +943,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await SetXmpSubjectAsync(jpg, "trip");
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, tagPath: true),
                 database: null,
                 skipDatabase: null,
@@ -845,7 +981,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await SetXmpSubjectAsync(jpg, "existingtag");
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, tagPath: true),
                 database: null,
                 skipDatabase: null,
@@ -883,7 +1019,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -920,7 +1056,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, dryRun: true, tagPath: true),
                 database: null,
                 skipDatabase: null,
@@ -965,7 +1101,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(datedDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, datePath: true),
                 database: null,
                 skipDatabase: null,
@@ -1013,7 +1149,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, datePath: true),
                 database: null,
                 skipDatabase: null,
@@ -1050,7 +1186,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(datedDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -1086,7 +1222,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(datedDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir, dryRun: true, datePath: true),
                 database: null,
                 skipDatabase: null,
@@ -1132,7 +1268,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
             SkippedExtensionTracker skippedExtensions = new();
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -1186,7 +1322,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await trashDb.InitializeAsync();
             await trashDb.InsertHashAsync(sha1);
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -1240,7 +1376,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
             await trashDb.InitializeAsync();
             await trashDb.InsertHashAsync("0000000000000000000000000000000000000000");
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: null,
@@ -1303,7 +1439,7 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 )
             );
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: skipDb,
@@ -1360,14 +1496,14 @@ public sealed class OrganizeTaskTests(TempDirectoryFixture fixture)
                 new FileRecord(
                     "/dummy/other.jpg",
                     "0000000000000000000000000000000000000000000000000000000000000000",
-                    null,
+                    "0000000000000000000000000000000000000000",
                     1,
                     0,
                     false
                 )
             );
 
-            OrganizeTask task = new(
+            ImportTask task = new(
                 CreateOptions(outDir),
                 database: null,
                 skipDatabase: skipDb,

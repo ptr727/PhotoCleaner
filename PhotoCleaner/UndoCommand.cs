@@ -21,21 +21,9 @@ internal sealed class UndoCommand(CommandLine.Options options, CancellationToken
                     );
 
                     Log.Information("Total {TotalCount} files", totalCount);
-
-                    if (restored > 0)
-                    {
-                        Log.Information("Restored {RestoredCount} files", restored);
-                    }
-
-                    if (deleted > 0)
-                    {
-                        Log.Information("Deleted {DeletedCount} files", deleted);
-                    }
-
-                    if (failed > 0)
-                    {
-                        Log.Warning("Failed {FailedCount} files", failed);
-                    }
+                    Log.Information("Restored {RestoredCount} files", restored);
+                    Log.Information("Deleted {DeletedCount} files", deleted);
+                    Log.Information("Failed {FailedCount} files", failed);
 
                     return Task.CompletedTask;
                 }

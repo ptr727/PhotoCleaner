@@ -10,7 +10,14 @@ public sealed class DatabaseTests
         Path.Combine(Path.GetTempPath(), $"db_{Path.GetRandomFileName()}.db");
 
     private static FileRecord MakeRecord(string path, string sha256) =>
-        new(path, sha256, null, 1024L, DateTime.UtcNow.Ticks, false);
+        new(
+            path,
+            sha256,
+            "0000000000000000000000000000000000000000",
+            1024L,
+            DateTime.UtcNow.Ticks,
+            false
+        );
 
     [Fact]
     public async Task InitializeAsync_NewFile_CreatesTable()
@@ -417,78 +424,6 @@ public sealed class DatabaseTests
 
             bool exists = await db.Sha1ExistsAsync("nonexistent");
             exists.Should().BeFalse();
-        }
-        finally
-        {
-            File.Delete(dbPath);
-        }
-    }
-
-    [Fact]
-    public async Task UpdateSha1Async_BackfillsSha1()
-    {
-        string dbPath = TempDb();
-        try
-        {
-            await using Database db = new(dbPath);
-            await db.InitializeAsync();
-            string path = "/source/photo.jpg";
-            await db.InsertAsync(MakeRecord(path, "sha256val"));
-
-            FileRecord? before = await db.GetByPathAsync(path);
-            before.Should().NotBeNull();
-            before.Sha1.Should().BeNull();
-
-            await db.UpdateSha1Async(path, "backfilled-sha1");
-
-            FileRecord? after = await db.GetByPathAsync(path);
-            after.Should().NotBeNull();
-            after.Sha1.Should().Be("backfilled-sha1");
-            after.Sha256.Should().Be("sha256val"); // unchanged
-        }
-        finally
-        {
-            File.Delete(dbPath);
-        }
-    }
-
-    [Fact]
-    public async Task InitializeAsync_LegacyHashColumn_MigratesSchema()
-    {
-        string dbPath = TempDb();
-        try
-        {
-            // Create a legacy DB with 'hash' column (no sha1)
-            await using SqliteConnection conn = new($"Data Source={dbPath};Pooling=False");
-            await conn.OpenAsync();
-            using SqliteCommand createCmd = conn.CreateCommand();
-            createCmd.CommandText = """
-                CREATE TABLE files (
-                    path         TEXT NOT NULL PRIMARY KEY,
-                    hash         TEXT NOT NULL,
-                    file_size    INTEGER NOT NULL,
-                    mtime_ticks  INTEGER NOT NULL,
-                    is_processed INTEGER NOT NULL DEFAULT 0
-                );
-                CREATE INDEX idx_files_hash ON files (hash)
-                """;
-            _ = await createCmd.ExecuteNonQueryAsync();
-
-            // Insert a legacy record
-            using SqliteCommand insertCmd = conn.CreateCommand();
-            insertCmd.CommandText =
-                "INSERT INTO files (path, hash, file_size, mtime_ticks, is_processed) VALUES ('/test.jpg', 'legacyhash', 100, 0, 0)";
-            _ = await insertCmd.ExecuteNonQueryAsync();
-            await conn.CloseAsync();
-
-            // Open with Database - should migrate
-            await using Database db = new(dbPath);
-            await db.InitializeAsync();
-
-            FileRecord? record = await db.GetByPathAsync("/test.jpg");
-            record.Should().NotBeNull();
-            record.Sha256.Should().Be("legacyhash");
-            record.Sha1.Should().BeNull();
         }
         finally
         {

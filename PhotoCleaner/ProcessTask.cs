@@ -8,6 +8,7 @@ internal sealed class ProcessTask(
     CommandLine.Options options,
     FileInfo fileInfo,
     Database? database,
+    TrashDatabase? trashDatabase,
     ConcurrentBag<string> reProcessNames,
     SkippedExtensionTracker skippedExtensions,
     CancellationToken cancellationToken
@@ -63,6 +64,7 @@ internal sealed class ProcessTask(
         CommandLine.Options options,
         FileInfo fileInfo,
         Database? database,
+        TrashDatabase? trashDatabase,
         ConcurrentBag<string> reProcessNames,
         SkippedExtensionTracker skippedExtensions,
         CancellationToken cancellationToken = default
@@ -72,6 +74,7 @@ internal sealed class ProcessTask(
             options,
             fileInfo,
             database,
+            trashDatabase,
             reProcessNames,
             skippedExtensions,
             cancellationToken
@@ -101,7 +104,7 @@ internal sealed class ProcessTask(
         if (database is not null)
         {
             IndexTask indexTask = new(options, database, skippedExtensions);
-            (IndexStatus status, string sha256, string? _, bool wasProcessed) = await indexTask
+            (IndexStatus status, string sha256, string sha1, bool wasProcessed) = await indexTask
                 .IndexFileAsync(fileInfo.FullName, cancellationToken)
                 .ConfigureAwait(false);
             preProcessHash = sha256;
@@ -110,6 +113,19 @@ internal sealed class ProcessTask(
                 fileInfo.FullName,
                 preProcessHash
             );
+
+            // Trash check: delete files whose SHA-1 matches an Immich-trashed asset.
+            // The user explicitly threw these away in Immich; uploading them again on the
+            // next immich-cli run would be wasted work, so prune them here while we are
+            // already touching every file. Persist deletion in Process.db so re-runs are no-ops.
+            if (
+                trashDatabase is not null
+                && await TryDeleteIfTrashedAsync(sha1).ConfigureAwait(false)
+            )
+            {
+                return ProcessResult.Deleted;
+            }
+
             if (status == IndexStatus.Unchanged && wasProcessed && !options.Reprocess)
             {
                 Log.Information(
@@ -156,6 +172,46 @@ internal sealed class ProcessTask(
         }
 
         return result;
+    }
+
+    private async Task<bool> TryDeleteIfTrashedAsync(string sha1)
+    {
+        bool trashed = await trashDatabase!
+            .Sha1ExistsAsync(sha1, cancellationToken)
+            .ConfigureAwait(false);
+        if (!trashed)
+        {
+            return false;
+        }
+
+        Log.Information(
+            "Deleting file trashed in Immich '{FilePath}' with SHA-1 '{Sha1}'",
+            fileInfo.FullName,
+            sha1
+        );
+        if (options.DryRun)
+        {
+            return true;
+        }
+
+        try
+        {
+            File.Delete(fileInfo.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error(ex, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
+            return false;
+        }
+
+        if (database is not null)
+        {
+            await database
+                .DeleteByPathAsync(fileInfo.FullName, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return true;
     }
 
     private bool RenameMixedCaseExtensions()

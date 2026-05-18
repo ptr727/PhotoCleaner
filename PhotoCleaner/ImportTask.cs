@@ -3,7 +3,7 @@ using CliWrap.Buffered;
 
 namespace PhotoCleaner;
 
-internal sealed class OrganizeTask(
+internal sealed class ImportTask(
     CommandLine.Options options,
     Database? database,
     Database? skipDatabase,
@@ -33,9 +33,9 @@ internal sealed class OrganizeTask(
         ".tiff",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    internal enum OrganizeResult
+    internal enum ImportResult
     {
-        Organized,
+        Imported,
         Ignored,
         Skipped,
         SkippedBySkipDb,
@@ -49,7 +49,7 @@ internal sealed class OrganizeTask(
         Justification = "Per-file catch-all logs the file path and continues processing remaining files"
     )]
     internal async Task<(
-        int organized,
+        int imported,
         int ignored,
         int skipped,
         int skipDbSkipped,
@@ -62,13 +62,13 @@ internal sealed class OrganizeTask(
         CancellationToken cancellationToken = default
     )
     {
-        int organized = 0,
+        int imported = 0,
             ignored = 0,
             skipped = 0,
             skipDbSkipped = 0,
             trashSkipped = 0,
             failed = 0;
-        Log.Information("Organizing {FileCount} files", allFiles.Count);
+        Log.Information("Importing {FileCount} files", allFiles.Count);
         await Parallel
             .ForEachAsync(
                 allFiles,
@@ -81,19 +81,16 @@ internal sealed class OrganizeTask(
                 {
                     try
                     {
-                        _ = await OrganizeFileAsync(file, sourceDir, ct)
-                            .ConfigureAwait(false) switch
+                        _ = await ImportFileAsync(file, sourceDir, ct).ConfigureAwait(false) switch
                         {
-                            OrganizeResult.Organized => Interlocked.Increment(ref organized),
-                            OrganizeResult.Ignored => Interlocked.Increment(ref ignored),
-                            OrganizeResult.Skipped => Interlocked.Increment(ref skipped),
-                            OrganizeResult.SkippedBySkipDb => Interlocked.Increment(
+                            ImportResult.Imported => Interlocked.Increment(ref imported),
+                            ImportResult.Ignored => Interlocked.Increment(ref ignored),
+                            ImportResult.Skipped => Interlocked.Increment(ref skipped),
+                            ImportResult.SkippedBySkipDb => Interlocked.Increment(
                                 ref skipDbSkipped
                             ),
-                            OrganizeResult.TrashedInImmich => Interlocked.Increment(
-                                ref trashSkipped
-                            ),
-                            OrganizeResult.Failed => Interlocked.Increment(ref failed),
+                            ImportResult.TrashedInImmich => Interlocked.Increment(ref trashSkipped),
+                            ImportResult.Failed => Interlocked.Increment(ref failed),
                             _ => throw new NotImplementedException(),
                         };
                     }
@@ -103,53 +100,57 @@ internal sealed class OrganizeTask(
                     }
                     catch (Exception ex)
                     {
-                        Log.Error(ex, "Failed to organize '{FilePath}'", file);
+                        Log.Error(ex, "Failed to import '{FilePath}'", file);
                         _ = Interlocked.Increment(ref failed);
                     }
                 }
             )
             .ConfigureAwait(false);
 
-        int deletedDirs = options.DeleteEmpty ? DeleteEmptyDirectories(sourceDir) : 0;
-        return (organized, ignored, skipped, skipDbSkipped, trashSkipped, failed, deletedDirs);
+        int deletedDirs = options.DeleteEmpty
+            ? DirectoryCleaner.DeleteEmptyDirectories(options.OutPath!, options.DryRun)
+            : 0;
+        return (imported, ignored, skipped, skipDbSkipped, trashSkipped, failed, deletedDirs);
     }
 
-    private async Task<OrganizeResult> OrganizeFileAsync(
+    private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
         CancellationToken cancellationToken = default
     )
     {
-        Log.Information("Organizing '{FilePath}'", file);
+        Log.Information("Importing '{FilePath}'", file);
 
         // Skip non-media files
         if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file)))
         {
             Log.Warning("Skipping non-media file: '{FilePath}'", file);
             skippedExtensions.Track(Path.GetExtension(file));
-            return OrganizeResult.Ignored;
+            return ImportResult.Ignored;
         }
 
         string? sha256 = null;
         string? sha1 = null;
         if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
+            // Source-side hash caching: when the source file is already recorded in the import DB
+            // and its size/mtime match disk, ResolveHashesAsync returns the cached hashes without
+            // rehashing. The cache is keyed by source path because import inserts source paths.
+            FileRecord? cached = database is null
+                ? null
+                : await database.GetByPathAsync(file, cancellationToken).ConfigureAwait(false);
             Log.Debug("Hashing '{FilePath}'", file);
-            (string resolvedSha256, string? resolvedSha1) = await Database
-                .ResolveHashesAsync(
-                    file,
-                    null,
-                    options.Rehash,
-                    needsSha1: trashDatabase is not null,
-                    cancellationToken
-                )
+            (string resolvedSha256, string resolvedSha1) = await Database
+                .ResolveHashesAsync(file, cached, options.Rehash, cancellationToken)
                 .ConfigureAwait(false);
             sha256 = resolvedSha256;
             sha1 = resolvedSha1;
             Log.Debug("File '{FilePath}' has SHA-256 '{Sha256}'", file, sha256);
 
-            // Check trash DB first - skip files that were trashed in Immich
-            if (trashDatabase is not null && sha1 is not null)
+            // Trash check is mandatory and runs FIRST. The Trash.db is the durable record of
+            // "user threw this away in Immich" beyond Immich's 30-day trash retention. Skipping
+            // here is the only thing preventing re-import after Immich purges its own trash.
+            if (trashDatabase is not null)
             {
                 bool trashed = await trashDatabase
                     .Sha1ExistsAsync(sha1, cancellationToken)
@@ -161,7 +162,7 @@ internal sealed class OrganizeTask(
                         file,
                         sha1
                     );
-                    return OrganizeResult.TrashedInImmich;
+                    return ImportResult.TrashedInImmich;
                 }
             }
 
@@ -178,11 +179,11 @@ internal sealed class OrganizeTask(
                         file,
                         sha256
                     );
-                    return OrganizeResult.SkippedBySkipDb;
+                    return ImportResult.SkippedBySkipDb;
                 }
             }
 
-            // Check dedup DB - skip files already organized
+            // Dedup: skip files already imported (matched by source content hash).
             if (database is not null)
             {
                 bool exists = await database
@@ -191,11 +192,11 @@ internal sealed class OrganizeTask(
                 if (exists)
                 {
                     Log.Information(
-                        "Skipping already organized '{FilePath}' with SHA-256 '{Sha256}'",
+                        "Skipping already imported '{FilePath}' with SHA-256 '{Sha256}'",
                         file,
                         sha256
                     );
-                    return OrganizeResult.Skipped;
+                    return ImportResult.Skipped;
                 }
             }
         }
@@ -262,7 +263,7 @@ internal sealed class OrganizeTask(
         );
         if (options.DryRun)
         {
-            return OrganizeResult.Organized;
+            return ImportResult.Imported;
         }
 
         try
@@ -309,18 +310,19 @@ internal sealed class OrganizeTask(
             // Restore source mtime last - after any exiftool writes
             File.SetLastWriteTimeUtc(finalDest, sourceInfo.LastWriteTimeUtc);
 
-            if (database is not null && sha256 is not null)
+            // Record the SOURCE in the import DB. The row identifies the source file we
+            // imported, not the destination. Lookups are by source content hash (sha256).
+            if (database is not null && sha256 is not null && sha1 is not null)
             {
-                Log.Debug("Inserting '{FilePath}' with SHA-256 '{Sha256}'", finalDest, sha256);
-                FileInfo destInfo = new(finalDest);
+                Log.Debug("Inserting source '{SourcePath}' with SHA-256 '{Sha256}'", file, sha256);
                 await database
                     .InsertAsync(
                         new FileRecord(
-                            finalDest,
+                            file,
                             sha256,
                             sha1,
-                            destInfo.Length,
-                            destInfo.LastWriteTimeUtc.Ticks,
+                            sourceInfo.Length,
+                            sourceInfo.LastWriteTimeUtc.Ticks,
                             false
                         ),
                         cancellationToken
@@ -328,7 +330,7 @@ internal sealed class OrganizeTask(
                     .ConfigureAwait(false);
             }
 
-            return OrganizeResult.Organized;
+            return ImportResult.Imported;
         }
         catch (OperationCanceledException)
         {
@@ -359,49 +361,8 @@ internal sealed class OrganizeTask(
                 file,
                 finalDest
             );
-            return OrganizeResult.Failed;
+            return ImportResult.Failed;
         }
-    }
-
-    private int DeleteEmptyDirectories(DirectoryInfo sourceDir)
-    {
-        int count = 0;
-        {
-            // Order deepest-first so children are removed before their parents
-            List<string> subdirs =
-            [
-                .. Directory
-                    .EnumerateDirectories(sourceDir.FullName, "*", SearchOption.AllDirectories)
-                    .OrderByDescending(d => d.Count(c => c == Path.DirectorySeparatorChar)),
-            ];
-
-            foreach (string dir in subdirs)
-            {
-                if (Directory.EnumerateFileSystemEntries(dir).Any())
-                {
-                    continue;
-                }
-
-                Log.Information("Deleting empty directory: '{DirectoryPath}'", dir);
-                if (options.DryRun)
-                {
-                    count++;
-                    continue;
-                }
-
-                try
-                {
-                    Directory.Delete(dir);
-                    count++;
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    Log.Warning(ex, "Failed to delete empty directory: '{DirectoryPath}'", dir);
-                }
-            }
-        }
-
-        return count;
     }
 
     private string BuildDestinationPath(

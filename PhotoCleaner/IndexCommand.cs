@@ -32,33 +32,12 @@ internal sealed class IndexCommand(CommandLine.Options options, CancellationToke
                             .ConfigureAwait(false);
 
                     Log.Information("Total {TotalCount} files", totalCount);
-
-                    if (inserted > 0)
-                    {
-                        Log.Information("Inserted {InsertedCount} new files", inserted);
-                    }
-
-                    if (updated > 0)
-                    {
-                        Log.Information("Updated {UpdatedCount} changed files", updated);
-                    }
-
-                    if (unchanged > 0)
-                    {
-                        Log.Information("Unchanged {UnchangedCount} files", unchanged);
-                    }
-
-                    if (ignored > 0)
-                    {
-                        Log.Information("Ignored {IgnoredCount} non-media files", ignored);
-                    }
-
+                    Log.Information("Inserted {InsertedCount} new files", inserted);
+                    Log.Information("Updated {UpdatedCount} changed files", updated);
+                    Log.Information("Unchanged {UnchangedCount} files", unchanged);
+                    Log.Information("Ignored {IgnoredCount} non-media files", ignored);
                     _skippedExtensions.LogWarnings();
-
-                    if (failed > 0)
-                    {
-                        Log.Warning("Failed {FailedCount} files", failed);
-                    }
+                    Log.Information("Failed {FailedCount} files", failed);
                 }
             )
             .ConfigureAwait(false);
