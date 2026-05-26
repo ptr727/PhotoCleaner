@@ -223,10 +223,13 @@ internal sealed class ProcessCommand(
         ConcurrentBag<string> deferred
     ) SplitExtensionConflicts(ConcurrentBag<string> fileNames)
     {
-        // Group files by directory + stem (filename without extension).
-        // When multiple files share the same stem (e.g. IMG.DNG + IMG.jpg),
+        // Group media files by directory + stem (filename without extension).
+        // When multiple media files share the same stem (e.g. IMG.DNG + IMG.jpg),
         // keep only one per group and defer the rest so they are never
-        // processed in parallel.
+        // processed in parallel. Non-media files (e.g. PhotoCleaner.Process.db,
+        // PhotoCleaner.Process.log) bypass conflict detection - they are skipped
+        // by ProcessTask and cannot race with media-file pipeline steps.
+        ConcurrentBag<string> filtered = [];
         ConcurrentBag<string> deferred = [];
         Dictionary<string, List<string>> stemMap = new(
             fileNames.Count,
@@ -234,6 +237,11 @@ internal sealed class ProcessCommand(
         );
         foreach (string fileName in fileNames)
         {
+            if (!MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(fileName)))
+            {
+                filtered.Add(fileName);
+                continue;
+            }
             string stem = Path.Combine(
                 Path.GetDirectoryName(fileName) ?? string.Empty,
                 Path.GetFileNameWithoutExtension(fileName)
@@ -248,7 +256,6 @@ internal sealed class ProcessCommand(
             }
         }
 
-        ConcurrentBag<string> filtered = [];
         foreach (KeyValuePair<string, List<string>> entry in stemMap)
         {
             filtered.Add(entry.Value[0]);

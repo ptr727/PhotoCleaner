@@ -1012,6 +1012,108 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         kept.Concat(deferred).Should().HaveCount(5);
     }
 
+    [Fact]
+    public void SplitExtensionConflicts_NonMediaSameStem_NoConflict()
+    {
+        ConcurrentBag<string> files =
+        [
+            "/photos/PhotoCleaner.Process.db",
+            "/photos/PhotoCleaner.Process.log",
+        ];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(2);
+        deferred.Should().BeEmpty();
+        kept.Should()
+            .BeEquivalentTo([
+                "/photos/PhotoCleaner.Process.db",
+                "/photos/PhotoCleaner.Process.log",
+            ]);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_MediaWithMultipleDots_GroupsByLastExtension()
+    {
+        ConcurrentBag<string> files = ["/photos/IMG.2024.dng", "/photos/IMG.2024.jpg"];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(1);
+        deferred.Should().HaveCount(1);
+        kept.Concat(deferred)
+            .Should()
+            .BeEquivalentTo(["/photos/IMG.2024.dng", "/photos/IMG.2024.jpg"]);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_NoExtensionFiles_NoConflict()
+    {
+        ConcurrentBag<string> files = ["/photos/README", "/photos/LICENSE"];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(2);
+        deferred.Should().BeEmpty();
+        kept.Should().BeEquivalentTo(["/photos/README", "/photos/LICENSE"]);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_MediaAndNonMediaSameStem_NoConflict()
+    {
+        ConcurrentBag<string> files = ["/photos/IMG_0001.jpg", "/photos/IMG_0001.txt"];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(2);
+        deferred.Should().BeEmpty();
+        kept.Should().BeEquivalentTo(["/photos/IMG_0001.jpg", "/photos/IMG_0001.txt"]);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_HiddenDotFile_NotMisclassified()
+    {
+        ConcurrentBag<string> files = ["/photos/.gitignore"];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(1);
+        deferred.Should().BeEmpty();
+        kept.Should().BeEquivalentTo(["/photos/.gitignore"]);
+    }
+
+    [Fact]
+    public void SplitExtensionConflicts_MixedMediaAndNonMediaMultiDot_OnlyMediaConflict()
+    {
+        ConcurrentBag<string> files =
+        [
+            "/photos/IMG.jpg",
+            "/photos/IMG.dng",
+            "/photos/PhotoCleaner.Process.db",
+            "/photos/PhotoCleaner.Process.log",
+        ];
+
+        (ConcurrentBag<string> kept, ConcurrentBag<string> deferred) =
+            ProcessCommand.SplitExtensionConflicts(files);
+
+        kept.Should().HaveCount(3);
+        deferred.Should().HaveCount(1);
+        kept.Concat(deferred)
+            .Should()
+            .BeEquivalentTo([
+                "/photos/IMG.jpg",
+                "/photos/IMG.dng",
+                "/photos/PhotoCleaner.Process.db",
+                "/photos/PhotoCleaner.Process.log",
+            ]);
+        deferred.First().Should().BeOneOf("/photos/IMG.jpg", "/photos/IMG.dng");
+    }
+
     // -- TrashDb: file matching trash hash is deleted from disk and DB --------
 
     [Fact]
