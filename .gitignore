@@ -12,3 +12,6 @@
 
 BenchmarkDotNet.Artifacts/
 [Pp]ublish/
+
+# Coverage (dotnet test --collect / Codecov)
+coverage/
