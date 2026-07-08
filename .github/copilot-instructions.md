@@ -3,11 +3,13 @@
 > For coding style, formatting rules, and conventions, see [`CODESTYLE.md`](../CODESTYLE.md).
 
 ## Project Overview
+
 PhotoCleaner is a .NET 10 console application that processes media files in preparation for import into photo management systems (Lightroom, Immich, PhotoPrims). It analyzes and transforms media files through validation, modification, and verification phases.
 
 ## Architecture & Data Flow
 
 ### Project Structure
+
 - **Docker/**: Docker configuration
   - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final); installs `exiftool` and `ffmpeg` in the final stage
 - **PhotoCleaner/**: Main console application
@@ -65,6 +67,7 @@ if (!RenameMismatchedMimeExtensions()
 ```
 
 ### State Management Pattern
+
 - **Primary Constructor Parameters**: Command and task classes use C# 12 primary constructors. All task classes take `CommandLine.Options options` as their first parameter, plus any non-option runtime params (e.g., `Database`, shared collections). Command classes take `(CommandLine.Options options, CancellationToken cancellationToken)` and pass `options` directly to task constructors.
 - **Command/Task Separation**: Command classes (e.g., `ProcessCommand`) handle orchestration (file enumeration, DB lifecycle, result logging); task classes (e.g., `ProcessTask`) handle per-file business logic
 - **Composable Infrastructure**: `CommandRunner`, `DatabaseScope`, and `FileEnumerator` are static helpers freely composed by command classes - no inheritance hierarchy
@@ -76,16 +79,19 @@ if (!RenameMismatchedMimeExtensions()
 ## Key Patterns & Conventions
 
 ### External Tool Execution Pattern
+
 ```csharp
 BufferedCommandResult result = await Cli.Wrap("exiftool")
     .WithArguments(["-groupNames", "-json", _fileInfo.FullName])
     .ExecuteBufferedAsync();
 ```
+
 - Always use array syntax for arguments: `["-arg1", "value"]`
 - Use `BufferedCommandResult` for output capture, `CommandResult` for fire-and-forget
 - JSON trimming pattern: `result.StandardOutput.Trim(' ', '\n', '\r', ' ', '[', ']')`
 
 ### Media File Processing Conventions
+
 - **FrozenSet Extensions**: Define supported extensions as `FrozenSet<string>` with `StringComparer.OrdinalIgnoreCase` (e.g., `s_remuxExtensions`, `s_jpegExtensions`)
 - **Case-Insensitive Matching**: Use FrozenSet `.Contains()` directly without `.ToLower()` - comparer handles case-insensitivity
 - **File Type Categorization**: Group operations by file type requirements (remux vs re-encode vs audio-only)
@@ -93,6 +99,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Skipped Extension Tracking**: Commands that filter files by `MediaUtilities.SupportedExtensions` pass a shared `SkippedExtensionTracker` instance to their task classes. The tracker collects unknown extensions (thread-safe via `Track()`), and the command calls `LogWarnings()` after processing to log them sorted. Used by `process`, `import`, and `index` commands.
 
 ### EXIF/Metadata Handling
+
 - Uses `ExifToolJson` class with `JsonPropertyName` attributes for precise metadata field mapping
 - Date validation prioritizes `EXIF:DateTimeOriginal` over `QuickTime:CreateDate`
 - Custom `IsDateSet()` and `GetDateString()` methods handle metadata extraction logic
@@ -100,6 +107,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
   group names (both occur in the wild for ISOBMFF files) returning whichever is set
 
 ### Date Inference System (DateFromPath.cs)
+
 - **Static Internal Methods**: All methods are `internal static` for testability with `InternalsVisibleTo`
 - **DateFromPath.InferCreatedDate()**: Main entry point - tries filename first, then path fallback
 - **DateFromPath.ExtractDateFromFilename()**: Supports multiple filename patterns:
@@ -111,6 +119,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **DateFromPath.IsDateValid()**: Validates dates within 1900-current year range
 
 ### Command Line Interface (CommandLine.cs)
+
 - **System.CommandLine Integration**: Uses modern .NET command line parsing
 - **Five subcommands**: `process`, `undo`, `import`, `index`, `trash` - each with their own option set
 - **Required `--path` Parameter**: Single directory path using `Option<DirectoryInfo>`. Validated with `AcceptExistingOnly()`
@@ -134,6 +143,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting commands, and tooling.
 
 ### Dependencies
+
 - **CliWrap**: External process execution
 - **System.CommandLine**: Modern CLI argument parsing and validation
 - **System.Text.Json**: High-performance JSON with source generation
@@ -143,6 +153,7 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **xUnit**: Testing framework for PhotoCleanerTests project
 
 ### Test Architecture
+
 - **PhotoCleanerTests Project**: 300 comprehensive tests covering all functionality
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
 - **Test Categories**:
@@ -155,12 +166,14 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 ## Critical Implementation Details
 
 ### Video Conversion Logic
+
 - **Three-tier approach**: Remux (.mts, .m2ts, .mkv) -> Re-encode (.wmv, .avi, .3gp, .gif) -> Audio-only (.mov/.mp4 with PCM)
 - **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion; `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) is written alongside the backup containing the full output path - this is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was already taken. When `options.SkipBackup` is true, no `.bak` or `.bak.out` files are created - the original is deleted after conversion.
 - **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source.bak> <output> -all:all -overwrite_original` copies all source metadata to the output file. `ffmpeg -map_metadata` is not used - it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` handles cross-format date mapping, so no separate date-setting step is needed after conversion.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
 ### Live Photo Detection
+
 - **Short videos** (duration <= `options.ShortVideoDuration`, default `1.0s`; overridable via `--duration`): always deleted regardless of companion file
 - **Companion file search** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file by:
   1. Direct basename match (`IMG_1234.mov` -> `IMG_1234.heic`)
@@ -169,6 +182,7 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **Long videos** (>= `LiveVideoDuration` = 4.0s): always kept even with a matching companion; a warning is logged
 
 ### Undo Architecture (UndoTask.cs)
+
 - **Backup naming**: `X.bak` (first), `X.bak1`, `X.bak2`, ... (subsequent runs of `process`)
 - **`FileEnumerator.Enumerate()`** enumerates all files including `.bak*` files before calling `Execute()`
 - **Two-pass algorithm** in `UndoTask.Execute()`:
@@ -186,14 +200,17 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 - **Known limitation**: extension renames to a previously non-existent filename create no backup and cannot be undone
 
 ### Error Handling Strategy
+
 - Console output uses structured prefixes: `WARNING:`, `INFORMATION:`
 - External command failures throw `CommandExecutionException`
 - Methods return `false` to skip file processing rather than throwing exceptions
 
 ## File Processing Extensions
+
 Supported: `.3gp`, `.arw`, `.avi`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.m2ts`, `.mkv`, `.mov`, `.mp4`, `.mts`, `.nef`, `.orf`, `.png`, `.rw2`, `.tif`, `.tiff`, `.wmv`
 
 ## Command Line Usage
+
 ```bash
 # Basic usage
 PhotoCleaner process --path /photos
@@ -273,16 +290,19 @@ PhotoCleaner trash --help
 ```
 
 ## JSON Source Generation
+
 Uses `SourceGenerationContext` for AOT-compatible JSON serialization of `ExifToolJson` metadata.
 Uses `ImmichJsonContext` for AOT-compatible JSON serialization of Immich API models.
 
 ## Testing Strategy
+
 - **Direct Method Testing**: Uses `InternalsVisibleTo` for compile-time safe method calls
 - **Comprehensive Coverage**: Tests all filename patterns, path structures, date validation, and CLI parsing
 - **Integration Testing**: Validates end-to-end date inference and command line interface logic
 - **No Reflection**: All tests use direct method calls for better performance and maintainability
 
 ### Command Line Testing Patterns
+
 - **CreateTestCommand() Helper**: Uses `CommandLine.CreateRootCommand()` directly for single source of truth
 - **Type-based Option Extraction**: Identifies options by type (`Option<List<DirectoryInfo>>`, `Option<bool>`, `Option<int>`) using 4-tuple destructuring
 - **Real Directory Testing**: Uses `Directory.GetCurrentDirectory()` for path validation tests
