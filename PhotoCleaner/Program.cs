@@ -21,6 +21,7 @@ internal sealed class Program
             Log.Logger = LoggerFactory.Create(
                 commandLine.CreateOptions(commandLine.Result).LogOptions
             );
+            ptr727.Utilities.LogOptions.SetFactory(LoggerFactory.CreateLoggerFactory());
 
             // Invoke command
             Log.Logger.LogOverrideContext().Information("Starting: {Args}", args);

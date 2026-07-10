@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 
 namespace PhotoCleaner;
@@ -169,22 +168,14 @@ internal sealed class TrashCommand(
             throw new InvalidOperationException("Immich API key is required (--apikey)");
         }
 
-        HttpClient client = new(HttpClientFactory.GetResilienceHandler(), disposeHandler: false)
-        {
-            BaseAddress = new Uri(options.ImmichUrl.TrimEnd('/') + "/"),
-            Timeout = TimeSpan.FromSeconds(120),
-        };
-        client.DefaultRequestHeaders.Add("x-api-key", options.ImmichApiKey);
-        string version = AssemblyInfo.InformationalVersion;
-        int plusIndex = version.IndexOf('+', StringComparison.Ordinal);
-        if (plusIndex >= 0)
-        {
-            version = version[..plusIndex];
-        }
-
-        client.DefaultRequestHeaders.UserAgent.Add(
-            new ProductInfoHeaderValue(AssemblyInfo.AppName, version)
+        HttpClient client = ptr727.Utilities.HttpClientFactory.CreateClient(
+            new ptr727.Utilities.HttpClientOptions
+            {
+                BaseAddress = new Uri(options.ImmichUrl.TrimEnd('/') + "/"),
+                Timeout = TimeSpan.FromSeconds(120),
+            }
         );
+        client.DefaultRequestHeaders.Add("x-api-key", options.ImmichApiKey);
         return client;
     }
 
