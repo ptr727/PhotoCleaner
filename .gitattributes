@@ -1,5 +1,9 @@
-# Leave line endings alone
-# git config --global core.autocrlf false
-# git add --renormalize .
-# git ls-files --eol
+# Default: do not normalize line endings (`* -text`); .editorconfig end_of_line rules guide what the editor writes.
+# The exception pins below are git enforcement - they force LF for execution-sensitive classes regardless of editor.
 * -text
+
+# Scripts and extensionless executables must stay LF - a CRLF shebang breaks execution.
+*.sh text eol=lf
+
+# Husky.Net ships an extensionless pre-commit hook with a /bin/sh shebang; pin it to LF so a CRLF cannot break execution.
+.husky/pre-commit text eol=lf
