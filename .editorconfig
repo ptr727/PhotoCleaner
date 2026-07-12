@@ -36,8 +36,13 @@ indent_size = 2
 end_of_line = crlf
 indent_size = 2
 
+# Workflow YAML is LF: Dependabot and Actions rewrite it with LF, so declaring LF keeps it consistent instead of
+# mixed. git still leaves endings alone (`* -text`). This and CI (editorconfig-checker) enforce it. Other YAML is CRLF.
+[.github/workflows/*.{yml,yaml}]
+end_of_line = lf
+
 # Json files
-[*.json]
+[*.{json,jsonc}]
 end_of_line = crlf
 
 # Linux scripts
