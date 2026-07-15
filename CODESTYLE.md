@@ -56,14 +56,15 @@ Available VS Code tasks (use via `run_task` tool):
 
 ### Markdown Files
 
-1. **Linting**: All `.md` files must be linted with the VS Code `markdownlint` extension (local only; no CI)
+1. **Linting**: All `.md` files must be linted with the VS Code `markdownlint` extension; CI enforces the same check
 2. **Zero warnings**: Markdown linting must be error and warning free
 
 ### Spelling
 
 1. **CSpell**: All spelling checks must be error free using the CSpell VS Code integration
-2. **Accepted spellings**: Words must be correctly spelled in US or UK English
+2. **Accepted spellings**: Words must be correctly spelled in US English
 3. **Allowed exceptions**: Project-specific terms must be added to the workspace CSpell config
+4. **CI scope**: CI spell-checks `README.md` and `HISTORY.md` only (the files every visitor sees); broad live checking across all files stays the editor extension's job
 
 ## Coding Standards and Conventions
 
