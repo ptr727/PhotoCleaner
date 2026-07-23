@@ -513,20 +513,20 @@ dotnet husky add pre-commit -c "dotnet husky run"
 
 ### Update
 
-#### Windows
+#### Update Windows
 
 ```shell
 winget upgrade --all --accept-package-agreements --include-unknown
 ```
 
-#### Linux
+#### Update Linux
 
 ```shell
 apt update
 apt upgrade
 ```
 
-#### .NET Tools
+#### Update .NET Tools
 
 ```shell
 dotnet tool restore
