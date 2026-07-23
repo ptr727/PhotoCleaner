@@ -39,13 +39,13 @@ The result must be exactly two rulesets named `develop` and `main` - a missing r
 
 ## Secrets
 
-Confirm each name [`spec/secrets.json`][secrets] requires exists in the stores its mechanism claims, and no forbidden name is present (names only; values are not readable). The baseline App pair lives in both the Actions and Dependabot stores; `CODECOV_TOKEN` is claimed in the Actions store.
+Confirm each name [`spec/secrets.json`][secrets] requires exists in the stores its mechanism claims, and no forbidden name is present (names only; values are not readable). The baseline App pair and the Docker Hub pair live in both the Actions and Dependabot stores; `CODECOV_TOKEN` is claimed in the Actions store.
 
 ```sh
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 for store in actions dependabot; do
   names=$(gh api "repos/$repo/$store/secrets" --jq '.secrets[].name')
-  want="CODEGEN_APP_CLIENT_ID CODEGEN_APP_PRIVATE_KEY"
+  want="CODEGEN_APP_CLIENT_ID CODEGEN_APP_PRIVATE_KEY DOCKER_HUB_USERNAME DOCKER_HUB_ACCESS_TOKEN"
   [ "$store" = "actions" ] && want="$want CODECOV_TOKEN"
   for s in $want; do
     grep -qx "$s" <<<"$names" && echo "$store/$s: present" || echo "$store/$s: MISSING (defect)"
