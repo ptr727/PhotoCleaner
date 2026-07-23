@@ -38,7 +38,9 @@ jobs:
       # actions: write lets the reusable github-release job delete its release-asset-* transfer artifacts (D5.1).
       actions: write
     with:
-      ref: ${{ github.ref_name }}
+      # Pin to the exact triggering commit (not the moving branch tip) so get-version, the builds, and the release
+      # tag all use one commit even if the branch advances mid-run. branch stays the logical name for config/tags.
+      ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
       smoke: false
       github: true
