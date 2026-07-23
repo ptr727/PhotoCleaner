@@ -91,7 +91,10 @@ public sealed class UndoTaskTests
             Touch(Path.Combine(dir, "photo.jpg"));
             string[] files = Directory.GetFiles(dir);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(files);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                files,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(0);
             deleted.Should().Be(0);
@@ -115,9 +118,10 @@ public sealed class UndoTaskTests
             string bakPath = Path.Combine(dir, "img.mp4.bak");
             WriteContent(bakPath);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                bakPath,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [bakPath],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1);
             deleted.Should().Be(0);
@@ -144,9 +148,10 @@ public sealed class UndoTaskTests
             Touch(filePath);
             WriteContent(bakPath);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                bakPath,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [bakPath],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1);
             deleted.Should().Be(0);
@@ -173,9 +178,10 @@ public sealed class UndoTaskTests
             Touch(mp4Path);
             WriteContent(movBak);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                movBak,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [movBak],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1);
             deleted.Should().Be(1); // img.mp4 deleted
@@ -206,10 +212,10 @@ public sealed class UndoTaskTests
             WriteContent(mp4Bak);
             WriteContent(movBak);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                mp4Bak,
-                movBak,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [mp4Bak, movBak],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1); // img.mov restored
             deleted.Should().BeGreaterThanOrEqualTo(2); // img.mp4 + img.mp4.bak deleted
@@ -243,11 +249,10 @@ public sealed class UndoTaskTests
             WriteContent(mp4Bak1);
             WriteContent(movBak);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                mp4Bak,
-                mp4Bak1,
-                movBak,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [mp4Bak, mp4Bak1, movBak],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1);
             deleted.Should().BeGreaterThanOrEqualTo(3); // img.mp4 + img.mp4.bak + img.mp4.bak1
@@ -279,7 +284,7 @@ public sealed class UndoTaskTests
 
             (int restored, int deleted, int failed) = new UndoTask(
                 CreateOptions(dryRun: true)
-            ).Execute([movBak]);
+            ).Execute([movBak], cancellationToken: TestContext.Current.CancellationToken);
 
             // Counts are still reported
             restored.Should().Be(1);
@@ -314,10 +319,10 @@ public sealed class UndoTaskTests
             WriteContent(bakPath);
             WriteContent(bak1Path);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                bakPath,
-                bak1Path,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [bakPath, bak1Path],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1);
             failed.Should().Be(0);
@@ -345,7 +350,10 @@ public sealed class UndoTaskTests
             Touch(heicPath);
             WriteContent(movBak);
 
-            _ = new UndoTask(CreateOptions()).Execute([movBak]);
+            _ = new UndoTask(CreateOptions()).Execute(
+                [movBak],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             File.Exists(heicPath).Should().BeTrue();
         }
@@ -373,9 +381,10 @@ public sealed class UndoTaskTests
             WriteContent(gifBak);
             File.WriteAllText(companionPath, uniquifiedMp4);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                gifBak,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [gifBak],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1);
             deleted.Should().Be(2); // img_1.mp4 + img.gif.bak.out
@@ -409,7 +418,7 @@ public sealed class UndoTaskTests
 
             (int restored, int deleted, int failed) = new UndoTask(
                 CreateOptions(dryRun: true)
-            ).Execute([gifBak]);
+            ).Execute([gifBak], cancellationToken: TestContext.Current.CancellationToken);
 
             restored.Should().Be(1);
             deleted.Should().Be(2);
@@ -440,10 +449,10 @@ public sealed class UndoTaskTests
             Touch(bakPath); // 0 bytes - corrupted
             WriteContent(bak1Path); // valid content
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                bakPath,
-                bak1Path,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [bakPath, bak1Path],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(1);
             failed.Should().Be(0);
@@ -468,9 +477,10 @@ public sealed class UndoTaskTests
             Touch(filePath); // original still intact
             Touch(bakPath); // 0 bytes - corrupted, no alternative
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                bakPath,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [bakPath],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(0);
             failed.Should().Be(1);
@@ -496,10 +506,10 @@ public sealed class UndoTaskTests
             Touch(bakPath); // 0 bytes
             Touch(bak1Path); // 0 bytes
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute([
-                bakPath,
-                bak1Path,
-            ]);
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [bakPath, bak1Path],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             restored.Should().Be(0);
             failed.Should().Be(1);

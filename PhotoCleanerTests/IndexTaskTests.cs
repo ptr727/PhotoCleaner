@@ -58,18 +58,24 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             (IndexStatus status, string sha256, string? sha1, bool wasProcessed) =
-                await task.IndexFileAsync(filePath);
+                await task.IndexFileAsync(
+                    filePath,
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
 
             status.Should().Be(IndexStatus.Inserted);
             sha256.Should().NotBeNullOrEmpty();
             sha1.Should().NotBeNullOrEmpty();
             wasProcessed.Should().BeFalse();
 
-            bool exists = await db.Sha256ExistsAsync(sha256);
+            bool exists = await db.Sha256ExistsAsync(
+                sha256,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists.Should().BeTrue();
         }
         finally
@@ -87,15 +93,21 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             // First call inserts
-            await task.IndexFileAsync(filePath);
+            await task.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             // Second call with same file should return Unchanged
             (IndexStatus status, string sha256, string? sha1, bool wasProcessed) =
-                await task.IndexFileAsync(filePath);
+                await task.IndexFileAsync(
+                    filePath,
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
 
             status.Should().Be(IndexStatus.Unchanged);
             sha256.Should().NotBeNullOrEmpty();
@@ -117,26 +129,45 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             // Insert and mark as processed
-            await task.IndexFileAsync(filePath);
-            await db.SetProcessedAsync(filePath);
+            await task.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await db.SetProcessedAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            FileRecord? before = await db.GetByPathAsync(filePath);
+            FileRecord? before = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             before!.IsProcessed.Should().BeTrue();
 
             // Overwrite file with new content and touch mtime
-            await File.WriteAllBytesAsync(filePath, Encoding.UTF8.GetBytes("completely different"));
+            await File.WriteAllBytesAsync(
+                filePath,
+                Encoding.UTF8.GetBytes("completely different"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             File.SetLastWriteTimeUtc(filePath, DateTime.UtcNow.AddSeconds(1));
 
-            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
+            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             status.Should().Be(IndexStatus.Updated);
             wasProcessed.Should().BeFalse();
 
-            FileRecord? after = await db.GetByPathAsync(filePath);
+            FileRecord? after = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             after!.IsProcessed.Should().BeFalse(); // reset by UpdateHashesAsync
         }
         finally
@@ -154,13 +185,22 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
-            await task.IndexFileAsync(filePath);
-            await db.SetProcessedAsync(filePath);
+            await task.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await db.SetProcessedAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
+            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             status.Should().Be(IndexStatus.Unchanged);
             wasProcessed.Should().BeTrue();
@@ -180,11 +220,14 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             // Insert with no-rehash first
             IndexTask noRehashTask = new(CreateOptions(), db, new SkippedExtensionTracker());
-            (_, string firstHash, _, _) = await noRehashTask.IndexFileAsync(filePath);
+            (_, string firstHash, _, _) = await noRehashTask.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             // Rehash task forces recomputation - result should be same hash (file unchanged)
             // but the code path goes through ComputeHashesAsync
@@ -194,7 +237,8 @@ public sealed class IndexTaskTests
                 new SkippedExtensionTracker()
             );
             (IndexStatus status, string rehashResult, _, _) = await rehashTask.IndexFileAsync(
-                filePath
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
             );
 
             status.Should().Be(IndexStatus.Unchanged); // hash same, so Unchanged
@@ -216,11 +260,14 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             (int inserted, int updated, int unchanged, int ignored, int failed) =
-                await task.ExecuteAsync([mediaFile, nonMediaFile]);
+                await task.ExecuteAsync(
+                    [mediaFile, nonMediaFile],
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
 
             inserted.Should().Be(1);
             updated.Should().Be(0);
@@ -244,18 +291,24 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             IndexTask task = new(
                 CreateOptions(markProcessed: true),
                 db,
                 new SkippedExtensionTracker()
             );
 
-            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(filePath);
+            (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             status.Should().Be(IndexStatus.Inserted);
             wasProcessed.Should().BeTrue();
-            FileRecord? row = await db.GetByPathAsync(filePath);
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             row.Should().NotBeNull();
             row.IsProcessed.Should().BeTrue();
         }
@@ -277,11 +330,14 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             // Insert WITHOUT --processed (is_processed = 0).
             IndexTask noFlag = new(CreateOptions(), db, new SkippedExtensionTracker());
-            await noFlag.IndexFileAsync(filePath);
+            await noFlag.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             // Re-run WITH --processed; the file is unchanged so this should be Unchanged
             // and the existing row's is_processed should remain 0 (not flipped to 1).
@@ -290,11 +346,17 @@ public sealed class IndexTaskTests
                 db,
                 new SkippedExtensionTracker()
             );
-            (IndexStatus status, _, _, bool wasProcessed) = await withFlag.IndexFileAsync(filePath);
+            (IndexStatus status, _, _, bool wasProcessed) = await withFlag.IndexFileAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             status.Should().Be(IndexStatus.Unchanged);
             wasProcessed.Should().BeFalse();
-            FileRecord? row = await db.GetByPathAsync(filePath);
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             row.Should().NotBeNull();
             row.IsProcessed.Should().BeFalse();
         }
@@ -315,19 +377,32 @@ public sealed class IndexTaskTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
 
             // Pre-insert changedFile and unchangedFile
-            await task.IndexFileAsync(changedFile);
-            await task.IndexFileAsync(unchangedFile);
+            await task.IndexFileAsync(
+                changedFile,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await task.IndexFileAsync(
+                unchangedFile,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             // Modify changedFile so hash changes
-            await File.WriteAllBytesAsync(changedFile, Encoding.UTF8.GetBytes("modified"));
+            await File.WriteAllBytesAsync(
+                changedFile,
+                Encoding.UTF8.GetBytes("modified"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             File.SetLastWriteTimeUtc(changedFile, DateTime.UtcNow.AddSeconds(1));
 
             (int inserted, int updated, int unchanged, int ignored, int failed) =
-                await task.ExecuteAsync([newFile, changedFile, unchangedFile]);
+                await task.ExecuteAsync(
+                    [newFile, changedFile, unchangedFile],
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
 
             inserted.Should().Be(1); // newFile
             updated.Should().Be(1); // changedFile

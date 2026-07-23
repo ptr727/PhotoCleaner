@@ -1,6 +1,6 @@
 # PhotoCleaner
 
-Release history for PhotoCleaner.
+A .NET console application that processes and prepares media files for import into photo management systems such as Lightroom, Immich, and PhotoPrism.
 
 ## Release History
 

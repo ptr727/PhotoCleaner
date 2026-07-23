@@ -1,7 +1,7 @@
 namespace PhotoCleanerBenchmarks;
 
 [MemoryDiagnoser]
-public class MediaBenchmarks
+public class MediaBenchmarks : IAsyncDisposable
 {
     private string _tempDir = string.Empty;
     private string _jpegPath = string.Empty;
@@ -54,11 +54,11 @@ public class MediaBenchmarks
         _database = new Database(dbPath);
         await _database.InitializeAsync();
 
-        (_preInsertedHash, _) = await Database.ComputeHashesAsync(_jpegPath);
+        (_preInsertedHash, string sha1) = await Database.ComputeHashesAsync(_jpegPath);
         FileRecord seedRecord = new(
             _jpegPath,
             _preInsertedHash,
-            null,
+            sha1,
             _jpegFileSize,
             _jpegMtimeTicks,
             false
@@ -69,8 +69,22 @@ public class MediaBenchmarks
     [GlobalCleanup]
     public async Task Cleanup()
     {
-        await _database.DisposeAsync();
-        Directory.Delete(_tempDir, recursive: true);
+        await DisposeAsync();
+        if (_tempDir.Length > 0 && Directory.Exists(_tempDir))
+        {
+            Directory.Delete(_tempDir, recursive: true);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_database is not null)
+        {
+            await _database.DisposeAsync();
+            _database = null!;
+        }
+
+        GC.SuppressFinalize(this);
     }
 
     [Benchmark]
@@ -108,7 +122,7 @@ public class MediaBenchmarks
         FileRecord record = new(
             path,
             $"bench_{counter:D10}",
-            null,
+            $"bench_sha1_{counter:D10}",
             _jpegFileSize,
             _jpegMtimeTicks,
             false

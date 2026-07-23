@@ -165,7 +165,9 @@ internal sealed class TrashCommand(
 
         if (string.IsNullOrWhiteSpace(options.ImmichApiKey))
         {
-            throw new InvalidOperationException("Immich API key is required (--apikey)");
+            throw new InvalidOperationException(
+                "Immich API key is required (--apikey or --apikey-file)"
+            );
         }
 
         HttpClient client = ptr727.Utilities.HttpClientFactory.CreateClient(

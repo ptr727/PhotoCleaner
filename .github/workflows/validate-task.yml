@@ -61,7 +61,7 @@ jobs:
 
       - name: Check C# formatting step
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           dotnet tool restore
           dotnet csharpier check .
 

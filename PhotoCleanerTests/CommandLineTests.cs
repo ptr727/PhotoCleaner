@@ -470,6 +470,173 @@ public sealed class CommandLineTests
         cli.Result.Errors.Should().NotBeEmpty();
     }
 
+    [Fact]
+    public void TrashCommand_ApiKeyFile_Parses()
+    {
+        string dbPath = Path.GetTempFileName();
+        string keyFile = Path.GetTempFileName();
+        File.WriteAllText(keyFile, "file-key\n");
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "http://immich:2283",
+                "--apikey-file",
+                keyFile,
+                "--trashdb",
+                dbPath,
+            ]);
+
+            cli.Result.Errors.Should().BeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(keyFile);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_ApiKeyFileNonExistent_ValidationError()
+    {
+        string dbPath = Path.GetTempFileName();
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "http://immich:2283",
+                "--apikey-file",
+                "/nonexistent/path/immich_api_key.txt",
+                "--trashdb",
+                dbPath,
+            ]);
+
+            cli.Result.Errors.Should().NotBeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_BothApiKeyAndFile_ValidationError()
+    {
+        string dbPath = Path.GetTempFileName();
+        string keyFile = Path.GetTempFileName();
+        File.WriteAllText(keyFile, "file-key");
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "http://immich:2283",
+                "--apikey",
+                "inline-key",
+                "--apikey-file",
+                keyFile,
+                "--trashdb",
+                dbPath,
+            ]);
+
+            cli.Result.Errors.Should().NotBeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(keyFile);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_EmptyApiKeyFile_ValidationError()
+    {
+        string dbPath = Path.GetTempFileName();
+        string keyFile = Path.GetTempFileName();
+        File.WriteAllText(keyFile, "   \n");
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "http://immich:2283",
+                "--apikey-file",
+                keyFile,
+                "--trashdb",
+                dbPath,
+            ]);
+
+            cli.Result.Errors.Should().NotBeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(keyFile);
+        }
+    }
+
+    // -- API key resolution ---------------------------------------------------
+
+    [Fact]
+    public void ResolveApiKey_InlineKey_ReturnsKey() =>
+        CommandLine.ResolveApiKey("inline-key", null).Should().Be("inline-key");
+
+    [Fact]
+    public void ResolveApiKey_FileTrimmed_ReturnsContents()
+    {
+        string keyFile = Path.GetTempFileName();
+        File.WriteAllText(keyFile, "  file-key\n");
+        try
+        {
+            CommandLine.ResolveApiKey(null, new FileInfo(keyFile)).Should().Be("file-key");
+        }
+        finally
+        {
+            File.Delete(keyFile);
+        }
+    }
+
+    [Fact]
+    public void ReadApiKeyFile_UnreadableFile_ReturnsNull()
+    {
+        if (!OperatingSystem.IsWindows() && !Environment.IsPrivilegedProcess)
+        {
+            string keyFile = Path.GetTempFileName();
+            File.WriteAllText(keyFile, "file-key");
+            File.SetUnixFileMode(keyFile, UnixFileMode.None);
+            try
+            {
+                CommandLine.ReadApiKeyFile(new FileInfo(keyFile)).Should().BeNull();
+            }
+            finally
+            {
+                File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                File.Delete(keyFile);
+            }
+        }
+        else
+        {
+            Assert.Skip("Requires Unix file modes and a non-privileged process");
+        }
+    }
+
+    [Fact]
+    public void ResolveApiKey_FilePreferredOverInline_ReturnsFileContents()
+    {
+        string keyFile = Path.GetTempFileName();
+        File.WriteAllText(keyFile, "file-key");
+        try
+        {
+            CommandLine.ResolveApiKey("inline-key", new FileInfo(keyFile)).Should().Be("file-key");
+        }
+        finally
+        {
+            File.Delete(keyFile);
+        }
+    }
+
     // -- --trashdb / --skipdb file validation ----------------------------------
 
     [Fact]

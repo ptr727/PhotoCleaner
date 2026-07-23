@@ -26,14 +26,14 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             await using SqliteConnection conn = new($"Data Source={dbPath};Pooling=False");
-            await conn.OpenAsync();
+            await conn.OpenAsync(TestContext.Current.CancellationToken);
             using SqliteCommand cmd = conn.CreateCommand();
             cmd.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='files'";
-            object? result = await cmd.ExecuteScalarAsync();
+            object? result = await cmd.ExecuteScalarAsync(TestContext.Current.CancellationToken);
             Convert.ToInt64(result).Should().Be(1);
         }
         finally
@@ -49,10 +49,10 @@ public sealed class DatabaseTests
         try
         {
             await using Database db1 = new(dbPath);
-            await db1.InitializeAsync();
+            await db1.InitializeAsync(TestContext.Current.CancellationToken);
 
             await using Database db2 = new(dbPath);
-            Func<Task> act = () => db2.InitializeAsync();
+            Func<Task> act = () => db2.InitializeAsync(TestContext.Current.CancellationToken);
             await act.Should().NotThrowAsync();
         }
         finally
@@ -68,9 +68,12 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            bool exists = await db.Sha256ExistsAsync("nonexistenthash");
+            bool exists = await db.Sha256ExistsAsync(
+                "nonexistenthash",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists.Should().BeFalse();
         }
         finally
@@ -86,11 +89,17 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             string sha256 = "abc123";
-            await db.InsertAsync(MakeRecord("/source/photo.jpg", sha256));
+            await db.InsertAsync(
+                MakeRecord("/source/photo.jpg", sha256),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            bool exists = await db.Sha256ExistsAsync(sha256);
+            bool exists = await db.Sha256ExistsAsync(
+                sha256,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists.Should().BeTrue();
         }
         finally
@@ -106,15 +115,25 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             string path = "/source/photo.jpg";
-            await db.InsertAsync(MakeRecord(path, "hash1"));
+            await db.InsertAsync(
+                MakeRecord(path, "hash1"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            Func<Task> act = () => db.InsertAsync(MakeRecord(path, "hash2"));
+            Func<Task> act = () =>
+                db.InsertAsync(
+                    MakeRecord(path, "hash2"),
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
             await act.Should().NotThrowAsync();
 
             // First insert wins due to INSERT OR IGNORE
-            FileRecord? record = await db.GetByPathAsync(path);
+            FileRecord? record = await db.GetByPathAsync(
+                path,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             record.Should().NotBeNull();
             record.Sha256.Should().Be("hash1");
         }
@@ -131,9 +150,12 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            FileRecord? record = await db.GetByPathAsync("/missing/path.jpg");
+            FileRecord? record = await db.GetByPathAsync(
+                "/missing/path.jpg",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             record.Should().BeNull();
         }
         finally
@@ -149,15 +171,21 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             string path = "/source/photo.jpg";
             string sha256 = "abc456";
             string sha1 = "def789";
             long fileSize = 2048L;
             long mtimeTicks = DateTime.UtcNow.Ticks;
-            await db.InsertAsync(new FileRecord(path, sha256, sha1, fileSize, mtimeTicks, false));
+            await db.InsertAsync(
+                new FileRecord(path, sha256, sha1, fileSize, mtimeTicks, false),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            FileRecord? record = await db.GetByPathAsync(path);
+            FileRecord? record = await db.GetByPathAsync(
+                path,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             record.Should().NotBeNull();
             record.Path.Should().Be(path);
             record.Sha256.Should().Be(sha256);
@@ -179,16 +207,32 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             string path = "/source/photo.jpg";
-            await db.InsertAsync(new FileRecord(path, "oldsha256", "oldsha1", 1024L, 0L, false));
-            await db.SetProcessedAsync(path);
+            await db.InsertAsync(
+                new FileRecord(path, "oldsha256", "oldsha1", 1024L, 0L, false),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await db.SetProcessedAsync(
+                path,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             long newSize = 2048L;
             long newTicks = DateTime.UtcNow.Ticks;
-            await db.UpdateHashesAsync(path, "newsha256", "newsha1", newSize, newTicks);
+            await db.UpdateHashesAsync(
+                path,
+                "newsha256",
+                "newsha1",
+                newSize,
+                newTicks,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            FileRecord? record = await db.GetByPathAsync(path);
+            FileRecord? record = await db.GetByPathAsync(
+                path,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             record.Should().NotBeNull();
             record.Sha256.Should().Be("newsha256");
             record.Sha1.Should().Be("newsha1");
@@ -209,13 +253,22 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             string path = "/source/photo.jpg";
-            await db.InsertAsync(MakeRecord(path, "hash1"));
+            await db.InsertAsync(
+                MakeRecord(path, "hash1"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            await db.SetProcessedAsync(path);
+            await db.SetProcessedAsync(
+                path,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            FileRecord? record = await db.GetByPathAsync(path);
+            FileRecord? record = await db.GetByPathAsync(
+                path,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             record.Should().NotBeNull();
             record.IsProcessed.Should().BeTrue();
         }
@@ -231,7 +284,11 @@ public sealed class DatabaseTests
         string file = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(file, Encoding.UTF8.GetBytes("hello photo"));
+            await File.WriteAllBytesAsync(
+                file,
+                Encoding.UTF8.GetBytes("hello photo"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             FileInfo info = new(file);
             FileRecord cached = new(
                 file,
@@ -245,7 +302,8 @@ public sealed class DatabaseTests
             (string sha256, string? sha1) = await Database.ResolveHashesAsync(
                 file,
                 cached,
-                rehash: false
+                rehash: false,
+                cancellationToken: TestContext.Current.CancellationToken
             );
             sha256.Should().Be("cached-sha256-value");
             sha1.Should().Be("cached-sha1-value");
@@ -262,7 +320,11 @@ public sealed class DatabaseTests
         string file = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(file, Encoding.UTF8.GetBytes("hello photo"));
+            await File.WriteAllBytesAsync(
+                file,
+                Encoding.UTF8.GetBytes("hello photo"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             FileInfo info = new(file);
             // Cached record has wrong size
             FileRecord cached = new(
@@ -277,9 +339,13 @@ public sealed class DatabaseTests
             (string sha256, string? sha1) = await Database.ResolveHashesAsync(
                 file,
                 cached,
-                rehash: false
+                rehash: false,
+                cancellationToken: TestContext.Current.CancellationToken
             );
-            (string expectedSha256, string expectedSha1) = await Database.ComputeHashesAsync(file);
+            (string expectedSha256, string expectedSha1) = await Database.ComputeHashesAsync(
+                file,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             sha256.Should().Be(expectedSha256);
             sha1.Should().Be(expectedSha1);
             sha256.Should().NotBe("stale-sha256");
@@ -296,7 +362,11 @@ public sealed class DatabaseTests
         string file = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(file, Encoding.UTF8.GetBytes("hello photo"));
+            await File.WriteAllBytesAsync(
+                file,
+                Encoding.UTF8.GetBytes("hello photo"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             FileInfo info = new(file);
             // Cached record matches size and mtime exactly
             FileRecord cached = new(
@@ -312,9 +382,13 @@ public sealed class DatabaseTests
             (string sha256, string? sha1) = await Database.ResolveHashesAsync(
                 file,
                 cached,
-                rehash: true
+                rehash: true,
+                cancellationToken: TestContext.Current.CancellationToken
             );
-            (string expectedSha256, string expectedSha1) = await Database.ComputeHashesAsync(file);
+            (string expectedSha256, string expectedSha1) = await Database.ComputeHashesAsync(
+                file,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             sha256.Should().Be(expectedSha256);
             sha1.Should().Be(expectedSha1);
             sha256.Should().NotBe("stale-sha256");
@@ -331,10 +405,20 @@ public sealed class DatabaseTests
         string file = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(file, Encoding.UTF8.GetBytes("hello photo"));
+            await File.WriteAllBytesAsync(
+                file,
+                Encoding.UTF8.GetBytes("hello photo"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            (string sha256a, string sha1a) = await Database.ComputeHashesAsync(file);
-            (string sha256b, string sha1b) = await Database.ComputeHashesAsync(file);
+            (string sha256a, string sha1a) = await Database.ComputeHashesAsync(
+                file,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            (string sha256b, string sha1b) = await Database.ComputeHashesAsync(
+                file,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             sha256a.Should().Be(sha256b);
             sha1a.Should().Be(sha1b);
         }
@@ -351,11 +435,25 @@ public sealed class DatabaseTests
         string file2 = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(file1, Encoding.UTF8.GetBytes("content A"));
-            await File.WriteAllBytesAsync(file2, Encoding.UTF8.GetBytes("content B"));
+            await File.WriteAllBytesAsync(
+                file1,
+                Encoding.UTF8.GetBytes("content A"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await File.WriteAllBytesAsync(
+                file2,
+                Encoding.UTF8.GetBytes("content B"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            (string sha256a, string sha1a) = await Database.ComputeHashesAsync(file1);
-            (string sha256b, string sha1b) = await Database.ComputeHashesAsync(file2);
+            (string sha256a, string sha1a) = await Database.ComputeHashesAsync(
+                file1,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            (string sha256b, string sha1b) = await Database.ComputeHashesAsync(
+                file2,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             sha256a.Should().NotBe(sha256b);
             sha1a.Should().NotBe(sha1b);
         }
@@ -373,14 +471,22 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
-            await db.InsertAsync(MakeRecord("/source/photo.jpg", "hash-a"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertAsync(
+                MakeRecord("/source/photo.jpg", "hash-a"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             Task<bool>[] tasks =
             [
                 .. Enumerable
                     .Range(0, 10)
-                    .Select(i => db.Sha256ExistsAsync(i % 2 == 0 ? "hash-a" : "hash-missing")),
+                    .Select(i =>
+                        db.Sha256ExistsAsync(
+                            i % 2 == 0 ? "hash-a" : "hash-missing",
+                            cancellationToken: TestContext.Current.CancellationToken
+                        )
+                    ),
             ];
             bool[] results = await Task.WhenAll(tasks);
             results.Count(r => r).Should().Be(5);
@@ -399,12 +505,16 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             await db.InsertAsync(
-                new FileRecord("/source/photo.jpg", "sha256val", "sha1val", 1024L, 0L, false)
+                new FileRecord("/source/photo.jpg", "sha256val", "sha1val", 1024L, 0L, false),
+                cancellationToken: TestContext.Current.CancellationToken
             );
 
-            bool exists = await db.Sha1ExistsAsync("sha1val");
+            bool exists = await db.Sha1ExistsAsync(
+                "sha1val",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists.Should().BeTrue();
         }
         finally
@@ -420,9 +530,12 @@ public sealed class DatabaseTests
         try
         {
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            bool exists = await db.Sha1ExistsAsync("nonexistent");
+            bool exists = await db.Sha1ExistsAsync(
+                "nonexistent",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists.Should().BeFalse();
         }
         finally
@@ -437,8 +550,15 @@ public sealed class DatabaseTests
         string file = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(file, Encoding.UTF8.GetBytes("hello photo"));
-            (string sha256, string sha1) = await Database.ComputeHashesAsync(file);
+            await File.WriteAllBytesAsync(
+                file,
+                Encoding.UTF8.GetBytes("hello photo"),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            (string sha256, string sha1) = await Database.ComputeHashesAsync(
+                file,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             sha256.Should().HaveLength(64); // SHA-256 is 32 bytes = 64 hex chars
             sha256.Should().MatchRegex("^[0-9a-f]+$");
