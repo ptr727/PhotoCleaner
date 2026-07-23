@@ -3,6 +3,8 @@
 [Bb]in/
 [Oo]bj/
 
+[Pp]ublish/
+
 .idea
 .vs
 .artifacts
@@ -11,7 +13,6 @@
 .claude
 
 BenchmarkDotNet.Artifacts/
-[Pp]ublish/
-
-# Coverage (dotnet test --collect / Codecov)
 coverage/
+
+secrets/

@@ -140,7 +140,8 @@ Description:
 
 Options:
   --url <url> (REQUIRED)         Immich server URL (e.g. http://immich:2283)
-  --apikey <apikey> (REQUIRED)   Immich API key
+  --apikey <apikey>              Immich API key (mutually exclusive with --apikey-file)
+  --apikey-file <apikey-file>    File containing the Immich API key (mutually exclusive with --apikey)
   --trashdb <trashdb> (REQUIRED) SQLite database to store Immich trash hashes
 ```
 
@@ -215,8 +216,11 @@ Options:
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
 - `--url <url>` - **required** for `trash`; the Immich server URL (e.g. `http://immich:2283`).
-- `--apikey <key>` - **required** for `trash`; the Immich API key. Create one in Immich under
-  Account Settings > API Keys.
+- `--apikey <key>` / `--apikey-file <path>` - the Immich API key for `trash`; supply it via
+  exactly one of these two mutually exclusive options (one is required). Create the key in Immich
+  under Account Settings > API Keys. `--apikey` passes the key inline; `--apikey-file` points to a
+  file whose trimmed contents are the key, keeping the secret out of shell history and process
+  arguments. The file must exist and be non-empty.
 - `--rehash` - optional (`process`, `import`, `index`); forces SHA-256 recomputation for
   every file, bypassing the size/mtime cache. SHA-1 is also recomputed when `--trashdb` is
   in use. Use when file content may have changed without the modification timestamp being
@@ -288,6 +292,9 @@ PhotoCleaner index --path /home/user/Source --db /data/dedup.db --rehash
 
 # Sync Immich trash hashes into a local database
 PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /data/trash.db
+
+# Sync using an API key read from a file (keeps the secret out of shell history/process args)
+PhotoCleaner trash --url http://immich:2283 --apikey-file /secrets/immich_api_key.txt --trashdb /data/trash.db
 
 # Import and skip files that were trashed in Immich (prevents re-import)
 PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --db /data/photos.db --trashdb /data/trash.db
@@ -395,7 +402,8 @@ The `trash` command syncs trashed asset checksums from an Immich server into a l
 database. This enables the `import` and `process` commands to skip or delete files that
 were already imported and trashed in Immich.
 
-1. **Connect**: authenticates to the Immich server using the `--url` and `--apikey` options.
+1. **Connect**: authenticates to the Immich server using the `--url` and the API key from either
+   `--apikey` or `--apikey-file`.
 2. **Fetch**: paginates through `POST /api/search/metadata` with a `trashedAfter` filter to
    retrieve all trashed assets. Each page returns up to 1000 assets.
 3. **Store**: converts each asset's Base64-encoded SHA-1 checksum to lowercase hex and inserts

@@ -155,11 +155,22 @@ internal sealed class CommandLine
                 result.AddError("--url must be a valid absolute http or https URL.");
             }
         });
-        Option<string> requiredApiKeyOption = new("--apikey")
+        Option<string?> apiKeyOption = new("--apikey")
         {
-            Description = "Immich API key",
-            Required = true,
+            Description = "Immich API key (mutually exclusive with --apikey-file)",
         };
+        Option<FileInfo?> apiKeyFileOption = new("--apikey-file")
+        {
+            Description = "File containing the Immich API key (mutually exclusive with --apikey)",
+        };
+        apiKeyFileOption.Validators.Add(result =>
+        {
+            FileInfo? file = result.GetValue(apiKeyFileOption);
+            if (file is not null && !file.Exists)
+            {
+                result.AddError($"File does not exist: '{file.FullName}'");
+            }
+        });
         Option<FileInfo?> requiredTrashDbOption = new("--trashdb")
         {
             Description = "SQLite database to store Immich trash hashes",
@@ -169,22 +180,67 @@ internal sealed class CommandLine
         Command command = new("trash", "Sync trashed asset hashes from Immich")
         {
             requiredUrlOption,
-            requiredApiKeyOption,
+            apiKeyOption,
+            apiKeyFileOption,
             requiredTrashDbOption,
         };
+        command.Validators.Add(result =>
+        {
+            bool hasApiKey = !string.IsNullOrWhiteSpace(result.GetValue(apiKeyOption));
+            FileInfo? apiKeyFile = result.GetValue(apiKeyFileOption);
+            bool hasApiKeyFile = apiKeyFile is not null;
+
+            if (hasApiKey && hasApiKeyFile)
+            {
+                result.AddError("Specify only one of --apikey or --apikey-file, not both.");
+            }
+            else if (!hasApiKey && !hasApiKeyFile)
+            {
+                result.AddError("One of --apikey or --apikey-file is required.");
+            }
+            else if (
+                hasApiKeyFile
+                && apiKeyFile!.Exists
+                && string.IsNullOrWhiteSpace(ReadApiKeyFile(apiKeyFile))
+            )
+            {
+                result.AddError(
+                    $"API key file is empty or cannot be read: '{apiKeyFile.FullName}'"
+                );
+            }
+        });
         command.SetAction(
             (parseResult, cancellationToken) =>
                 new TrashCommand(
                     CreateOptions(
                         parseResult,
                         immichUrl: parseResult.GetValue(requiredUrlOption),
-                        immichApiKey: parseResult.GetValue(requiredApiKeyOption),
+                        immichApiKey: ResolveApiKey(
+                            parseResult.GetValue(apiKeyOption),
+                            parseResult.GetValue(apiKeyFileOption)
+                        ),
                         trashDbFile: parseResult.GetValue(requiredTrashDbOption)
                     ),
                     cancellationToken
                 ).ExecuteAsync()
         );
         return command;
+    }
+
+    internal static string? ResolveApiKey(string? apiKey, FileInfo? apiKeyFile) =>
+        apiKeyFile is not null ? ReadApiKeyFile(apiKeyFile) : apiKey;
+
+    internal static string? ReadApiKeyFile(FileInfo apiKeyFile)
+    {
+        try
+        {
+            return apiKeyFile.Exists ? File.ReadAllText(apiKeyFile.FullName).Trim() : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error(ex, "Failed to read API key file '{FilePath}'", apiKeyFile.FullName);
+            return null;
+        }
     }
 
     private Command CreateUndoCommand()

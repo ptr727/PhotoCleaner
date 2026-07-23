@@ -16,7 +16,7 @@
                 "trash",
                 "--url=https://immich.home.insanegenius.net/",
                 "--trashdb=/data/media/PhotoCleaner/Trash.db",
-                "--apikey=foo",
+                "--apikey-file=${workspaceFolder}/secrets/immich_api_key.txt",
                 "--loglevel=verbose",
                 "--logfile=/data/media/PhotoCleaner/Trash.log",
                 "--logclear=true"
