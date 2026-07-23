@@ -552,7 +552,10 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Exists(companionPath).Should().BeTrue();
 
             string trackedOutput = (
-                await File.ReadAllTextAsync(companionPath).ConfigureAwait(false)
+                await File.ReadAllTextAsync(
+                    companionPath,
+                    cancellationToken: TestContext.Current.CancellationToken
+                )
             ).Trim();
             string expectedUnique = Path.Combine(
                 workDir,
@@ -1126,13 +1129,19 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         {
             string filePath = Path.Combine(workDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-            (string _, string sha1) = await Database.ComputeHashesAsync(filePath);
+            (string _, string sha1) = await Database.ComputeHashesAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             await using TrashDatabase trashDb = new(trashDbPath);
-            await trashDb.InitializeAsync();
-            await trashDb.InsertHashAsync(sha1);
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                sha1,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
                 CreateOptions(),
@@ -1141,12 +1150,15 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 trashDb,
                 [],
                 new SkippedExtensionTracker(),
-                default
+                TestContext.Current.CancellationToken
             );
 
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
             File.Exists(filePath).Should().BeFalse();
-            FileRecord? row = await db.GetByPathAsync(filePath);
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             row.Should().BeNull();
         }
         finally
@@ -1167,10 +1179,13 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
 
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             await using TrashDatabase trashDb = new(trashDbPath);
-            await trashDb.InitializeAsync();
-            await trashDb.InsertHashAsync("0000000000000000000000000000000000000000");
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                "0000000000000000000000000000000000000000",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
                 CreateOptions(),
@@ -1179,7 +1194,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 trashDb,
                 [],
                 new SkippedExtensionTracker(),
-                default
+                TestContext.Current.CancellationToken
             );
 
             result.Should().NotBe(ProcessTask.ProcessResult.Deleted);

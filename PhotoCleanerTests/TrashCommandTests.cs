@@ -144,13 +144,19 @@ public sealed class TrashCommandTests
             await command.ExecuteAsync();
 
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
-            long count = await db.GetCountAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(2);
 
-            bool exists1 = await db.Sha1ExistsAsync(Convert.ToHexStringLower(sha1a));
+            bool exists1 = await db.Sha1ExistsAsync(
+                Convert.ToHexStringLower(sha1a),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists1.Should().BeTrue();
-            bool exists2 = await db.Sha1ExistsAsync(Convert.ToHexStringLower(sha1b));
+            bool exists2 = await db.Sha1ExistsAsync(
+                Convert.ToHexStringLower(sha1b),
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists2.Should().BeTrue();
         }
         finally
@@ -187,8 +193,8 @@ public sealed class TrashCommandTests
             await command.ExecuteAsync();
 
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
-            long count = await db.GetCountAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(2);
 
             handler.RequestCount.Should().Be(3); // 3 requests: page 1, 2, 3 (empty)
@@ -220,8 +226,8 @@ public sealed class TrashCommandTests
             await command.ExecuteAsync();
 
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
-            long count = await db.GetCountAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(0);
         }
         finally
@@ -257,8 +263,8 @@ public sealed class TrashCommandTests
             await command.ExecuteAsync();
 
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
-            long count = await db.GetCountAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(1); // INSERT OR IGNORE deduplicates
         }
         finally

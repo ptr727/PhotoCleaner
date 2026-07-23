@@ -601,22 +601,24 @@ public sealed class CommandLineTests
     [Fact]
     public void ReadApiKeyFile_UnreadableFile_ReturnsNull()
     {
-        Assert.SkipWhen(
-            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
-            "Requires Unix file modes and a non-privileged process"
-        );
-
-        string keyFile = Path.GetTempFileName();
-        File.WriteAllText(keyFile, "file-key");
-        File.SetUnixFileMode(keyFile, UnixFileMode.None);
-        try
+        if (!OperatingSystem.IsWindows() && !Environment.IsPrivilegedProcess)
         {
-            CommandLine.ReadApiKeyFile(new FileInfo(keyFile)).Should().BeNull();
+            string keyFile = Path.GetTempFileName();
+            File.WriteAllText(keyFile, "file-key");
+            File.SetUnixFileMode(keyFile, UnixFileMode.None);
+            try
+            {
+                CommandLine.ReadApiKeyFile(new FileInfo(keyFile)).Should().BeNull();
+            }
+            finally
+            {
+                File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                File.Delete(keyFile);
+            }
         }
-        finally
+        else
         {
-            File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            File.Delete(keyFile);
+            Assert.Skip("Requires Unix file modes and a non-privileged process");
         }
     }
 

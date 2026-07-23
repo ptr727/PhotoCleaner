@@ -1,15 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AnalysisLevel>latest-all</AnalysisLevel>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <IsAotCompatible>true</IsAotCompatible>
     <InformationalVersion>1.0.0-pre</InformationalVersion>
-    <IsPackable>false</IsPackable>
-    <Nullable>enable</Nullable>
     <OutputType>Exe</OutputType>
     <PublishAot>false</PublishAot>
     <RootNamespace>PhotoCleaner</RootNamespace>
-    <TargetFramework>net10.0</TargetFramework>
     <Version>1.0.0</Version>
   </PropertyGroup>
   <PropertyGroup Condition="'$(PublishAot)' == 'true'">

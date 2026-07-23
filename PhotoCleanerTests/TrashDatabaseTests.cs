@@ -14,9 +14,9 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            long count = await db.GetCountAsync();
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(0);
         }
         finally
@@ -32,10 +32,10 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db1 = new(dbPath);
-            await db1.InitializeAsync();
+            await db1.InitializeAsync(TestContext.Current.CancellationToken);
 
             await using TrashDatabase db2 = new(dbPath);
-            Func<Task> act = () => db2.InitializeAsync();
+            Func<Task> act = () => db2.InitializeAsync(TestContext.Current.CancellationToken);
             await act.Should().NotThrowAsync();
         }
         finally
@@ -51,11 +51,17 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            await db.InsertHashAsync("abc123def456");
+            await db.InsertHashAsync(
+                "abc123def456",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            bool exists = await db.Sha1ExistsAsync("abc123def456");
+            bool exists = await db.Sha1ExistsAsync(
+                "abc123def456",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists.Should().BeTrue();
         }
         finally
@@ -71,9 +77,12 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            bool exists = await db.Sha1ExistsAsync("nonexistent");
+            bool exists = await db.Sha1ExistsAsync(
+                "nonexistent",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             exists.Should().BeFalse();
         }
         finally
@@ -89,13 +98,20 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            await db.InsertHashAsync("abc123");
-            Func<Task> act = () => db.InsertHashAsync("abc123");
+            await db.InsertHashAsync(
+                "abc123",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            Func<Task> act = () =>
+                db.InsertHashAsync(
+                    "abc123",
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
             await act.Should().NotThrowAsync();
 
-            long count = await db.GetCountAsync();
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(1);
         }
         finally
@@ -111,13 +127,22 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            await db.InsertHashAsync("hash1");
-            await db.InsertHashAsync("hash2");
-            await db.InsertHashAsync("hash3");
+            await db.InsertHashAsync(
+                "hash1",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await db.InsertHashAsync(
+                "hash2",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await db.InsertHashAsync(
+                "hash3",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            long count = await db.GetCountAsync();
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(3);
         }
         finally
@@ -133,14 +158,20 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            await db.InsertHashAsync("hash1");
-            await db.InsertHashAsync("hash2");
+            await db.InsertHashAsync(
+                "hash1",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await db.InsertHashAsync(
+                "hash2",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            await db.ClearAsync();
+            await db.ClearAsync(TestContext.Current.CancellationToken);
 
-            long count = await db.GetCountAsync();
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(0);
         }
         finally
@@ -156,14 +187,22 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
-            await db.InsertHashAsync("hash-a");
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertHashAsync(
+                "hash-a",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             Task<bool>[] tasks =
             [
                 .. Enumerable
                     .Range(0, 10)
-                    .Select(i => db.Sha1ExistsAsync(i % 2 == 0 ? "hash-a" : "hash-missing")),
+                    .Select(i =>
+                        db.Sha1ExistsAsync(
+                            i % 2 == 0 ? "hash-a" : "hash-missing",
+                            cancellationToken: TestContext.Current.CancellationToken
+                        )
+                    ),
             ];
             bool[] results = await Task.WhenAll(tasks);
             results.Count(r => r).Should().Be(5);
@@ -182,7 +221,7 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             List<(string Sha1Hex, string? OriginalFileName)> batch =
             [
@@ -190,14 +229,45 @@ public sealed class TrashDatabaseTests
                 ("bbb222", "photo2.jpg"),
                 ("ccc333", null),
             ];
-            await db.InsertHashesAsync(batch);
+            await db.InsertHashesAsync(
+                batch,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            long count = await db.GetCountAsync();
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(3);
-            (await db.Sha1ExistsAsync("aaa111")).Should().BeTrue();
-            (await db.Sha1ExistsAsync("bbb222")).Should().BeTrue();
-            (await db.Sha1ExistsAsync("ccc333")).Should().BeTrue();
-            (await db.Sha1ExistsAsync("ddd444")).Should().BeFalse();
+            (
+                await db.Sha1ExistsAsync(
+                    "aaa111",
+                    cancellationToken: TestContext.Current.CancellationToken
+                )
+            )
+                .Should()
+                .BeTrue();
+            (
+                await db.Sha1ExistsAsync(
+                    "bbb222",
+                    cancellationToken: TestContext.Current.CancellationToken
+                )
+            )
+                .Should()
+                .BeTrue();
+            (
+                await db.Sha1ExistsAsync(
+                    "ccc333",
+                    cancellationToken: TestContext.Current.CancellationToken
+                )
+            )
+                .Should()
+                .BeTrue();
+            (
+                await db.Sha1ExistsAsync(
+                    "ddd444",
+                    cancellationToken: TestContext.Current.CancellationToken
+                )
+            )
+                .Should()
+                .BeFalse();
         }
         finally
         {
@@ -212,7 +282,7 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             List<(string Sha1Hex, string? OriginalFileName)> batch =
             [
@@ -220,9 +290,12 @@ public sealed class TrashDatabaseTests
                 ("aaa111", "photo1_dup.jpg"),
                 ("bbb222", "photo2.jpg"),
             ];
-            await db.InsertHashesAsync(batch);
+            await db.InsertHashesAsync(
+                batch,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            long count = await db.GetCountAsync();
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(2); // duplicate ignored
         }
         finally
@@ -238,11 +311,14 @@ public sealed class TrashDatabaseTests
         try
         {
             await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            await db.InsertHashesAsync([]);
+            await db.InsertHashesAsync(
+                [],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            long count = await db.GetCountAsync();
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
             count.Should().Be(0);
         }
         finally

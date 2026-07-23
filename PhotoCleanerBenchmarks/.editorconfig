@@ -1,0 +1,10 @@
+root = false
+
+# C# files
+[*.cs]
+
+# BenchmarkDotNet requires public, unsealed benchmark classes
+dotnet_diagnostic.CA1515.severity = none
+
+# Benchmark harness code has no synchronization context (not library code)
+dotnet_diagnostic.CA2007.severity = none

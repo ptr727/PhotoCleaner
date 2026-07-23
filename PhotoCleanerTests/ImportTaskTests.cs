@@ -543,9 +543,12 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
             // Pre-record the file's hash so it appears already organized
-            (string sha256, string sha1) = await Database.ComputeHashesAsync(jpg);
+            (string sha256, string sha1) = await Database.ComputeHashesAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             FileInfo info = new(jpg);
             await db.InsertAsync(
                 new FileRecord(
@@ -555,7 +558,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                     info.Length,
                     info.LastWriteTimeUtc.Ticks,
                     false
-                )
+                ),
+                cancellationToken: TestContext.Current.CancellationToken
             );
 
             ImportTask task = new(
@@ -654,9 +658,12 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
-            (string sha256, string _) = await Database.ComputeHashesAsync(jpg);
+            (string sha256, string _) = await Database.ComputeHashesAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             ImportTask task = new(
                 CreateOptions(outDir),
@@ -684,19 +691,26 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             skipped.Should().Be(0);
             failed.Should().Be(0);
             File.Exists(Path.Combine(outDir, "2024-06", "photo.jpg")).Should().BeTrue();
-            bool recorded = await db.Sha256ExistsAsync(sha256);
+            bool recorded = await db.Sha256ExistsAsync(
+                sha256,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             recorded.Should().BeTrue();
 
             // The DB row identifies the SOURCE file we imported (not the destination),
             // so the dedup lookup keeps working even if the destination is later mutated
             // (e.g. by tag injection or process re-hash).
-            FileRecord? row = await db.GetByPathAsync(jpg);
+            FileRecord? row = await db.GetByPathAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             row.Should().NotBeNull();
             row.Sha256.Should().Be(sha256);
             row.FileSize.Should().Be(new FileInfo(jpg).Length);
             row.MtimeTicks.Should().Be(new FileInfo(jpg).LastWriteTimeUtc.Ticks);
             FileRecord? destRow = await db.GetByPathAsync(
-                Path.Combine(outDir, "2024-06", "photo.jpg")
+                Path.Combine(outDir, "2024-06", "photo.jpg"),
+                cancellationToken: TestContext.Current.CancellationToken
             );
             destRow.Should().BeNull();
         }
@@ -728,10 +742,13 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             string jpg = Path.Combine(srcSubDir, "photo.jpg");
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
-            (string srcSha256, string _) = await Database.ComputeHashesAsync(jpg);
+            (string srcSha256, string _) = await Database.ComputeHashesAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             ImportTask task = new(
                 CreateOptions(outDir, tagPath: true),
@@ -751,17 +768,26 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             // different from the source.
             string dest = Path.Combine(outDir, "2024-06", "photo.jpg");
             File.Exists(dest).Should().BeTrue();
-            (string destSha256, _) = await Database.ComputeHashesAsync(dest);
+            (string destSha256, _) = await Database.ComputeHashesAsync(
+                dest,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             destSha256.Should().NotBe(srcSha256);
 
             // The DB row is keyed by the SOURCE path and stores the SOURCE hash.
-            FileRecord? srcRow = await db.GetByPathAsync(jpg);
+            FileRecord? srcRow = await db.GetByPathAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             srcRow.Should().NotBeNull();
             srcRow.Sha256.Should().Be(srcSha256);
 
             // No row was inserted for the dest path. Process operating on /Processed with a
             // separate Process.db is what tracks the dest state; import never writes there.
-            FileRecord? destRow = await db.GetByPathAsync(dest);
+            FileRecord? destRow = await db.GetByPathAsync(
+                dest,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             destRow.Should().BeNull();
         }
         finally
@@ -787,7 +813,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
 
             await using Database db = new(dbPath);
-            await db.InitializeAsync();
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             ImportTask first = new(
                 CreateOptions(outDir),
@@ -1126,7 +1152,10 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             failed.Should().Be(0);
             string dest = Path.Combine(outDir, "2021-05", "photo.jpg");
             File.Exists(dest).Should().BeTrue();
-            ExifToolJson? meta = await MediaUtilities.GetExifToolJsonAsync(dest);
+            ExifToolJson? meta = await MediaUtilities.GetExifToolJsonAsync(
+                dest,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             meta!.IsDateSet().Should().BeTrue();
         }
         finally
@@ -1317,10 +1346,16 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
             // Compute SHA-1 and seed the trash DB
-            (string _, string sha1) = await Database.ComputeHashesAsync(jpg);
+            (string _, string sha1) = await Database.ComputeHashesAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             await using TrashDatabase trashDb = new(trashDbPath);
-            await trashDb.InitializeAsync();
-            await trashDb.InsertHashAsync(sha1);
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                sha1,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             ImportTask task = new(
                 CreateOptions(outDir),
@@ -1373,8 +1408,11 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
 
             // Seed trash DB with a different hash
             await using TrashDatabase trashDb = new(trashDbPath);
-            await trashDb.InitializeAsync();
-            await trashDb.InsertHashAsync("0000000000000000000000000000000000000000");
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                "0000000000000000000000000000000000000000",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
             ImportTask task = new(
                 CreateOptions(outDir),
@@ -1424,9 +1462,12 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
 
             // Compute SHA-256 and seed the skip DB
-            (string sha256, string sha1) = await Database.ComputeHashesAsync(jpg);
+            (string sha256, string sha1) = await Database.ComputeHashesAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
             await using Database skipDb = new(skipDbPath);
-            await skipDb.InitializeAsync();
+            await skipDb.InitializeAsync(TestContext.Current.CancellationToken);
             FileInfo info = new(jpg);
             await skipDb.InsertAsync(
                 new FileRecord(
@@ -1436,7 +1477,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                     info.Length,
                     info.LastWriteTimeUtc.Ticks,
                     false
-                )
+                ),
+                cancellationToken: TestContext.Current.CancellationToken
             );
 
             ImportTask task = new(
@@ -1490,7 +1532,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
 
             // Seed skip DB with a different hash so the file is not skipped
             await using Database skipDb = new(skipDbPath);
-            await skipDb.InitializeAsync();
+            await skipDb.InitializeAsync(TestContext.Current.CancellationToken);
             FileInfo info = new(jpg);
             await skipDb.InsertAsync(
                 new FileRecord(
@@ -1500,7 +1542,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                     1,
                     0,
                     false
-                )
+                ),
+                cancellationToken: TestContext.Current.CancellationToken
             );
 
             ImportTask task = new(

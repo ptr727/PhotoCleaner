@@ -57,7 +57,6 @@ end_of_line = crlf
 [*.cs]
 end_of_line = crlf
 dotnet_diagnostic.IDE0055.severity = none
-dotnet_analyzer_diagnostic.severity = suggestion
 csharp_indent_block_contents = true
 csharp_indent_braces = false
 csharp_indent_case_contents = true
