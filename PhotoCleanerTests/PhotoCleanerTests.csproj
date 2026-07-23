@@ -4,23 +4,23 @@
     <RootNamespace>PhotoCleanerTests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AwesomeAssertions" Version="9.5.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
-    <!-- Pin the native SQLite bundle above the transitive 2.1.11 to resolve GHSA-2m69-gcr7-jv3q -->
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.4" />
-    <PackageReference Include="CliWrap" Version="3.10.2" />
-    <PackageReference Include="Serilog" Version="4.4.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
-    <PackageReference Include="coverlet.collector" Version="10.0.1">
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Direct reference overrides the vulnerable transitive SQLitePCLRaw (GHSA-2m69-gcr7-jv3q); version in Directory.Packages.props -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <PackageReference Include="CliWrap" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="coverlet.collector">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="xunit.v3" Version="3.2.2" />
-    <PackageReference Include="xunit.analyzers" Version="1.27.0">
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.analyzers">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" PrivateAssets="All" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="All" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../PhotoCleaner/PhotoCleaner.csproj" />

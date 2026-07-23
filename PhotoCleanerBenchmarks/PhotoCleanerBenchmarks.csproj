@@ -4,8 +4,8 @@
     <RootNamespace>PhotoCleanerBenchmarks</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
-    <PackageReference Include="CliWrap" Version="3.10.2" />
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="CliWrap" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../PhotoCleaner/PhotoCleaner.csproj" />
