@@ -29,18 +29,35 @@ jobs:
     uses: ./.github/workflows/validate-task.yml
     secrets: inherit
 
+  # Reduced, never-published build of the release targets (executable subset + amd64 Docker image, no push) so a
+  # PR exercises the reusable build pipeline. smoke: true hard-disables every publish path in build-release-task.
+  smoke-build:
+    name: Smoke build job
+    if: ${{ !github.event.deleted }}
+    uses: ./.github/workflows/build-release-task.yml
+    secrets: inherit
+    with:
+      smoke: true
+      github: false
+      dockerhub: false
+      branch: ${{ github.ref_name }}
+
   # Single required status check. Its name is the ruleset-bound context - do not rename without updating the
   # ruleset in lockstep. Must succeed, not merely not-fail.
   check-workflow-status:
     name: Check pull request workflow status job
     runs-on: ubuntu-latest
-    needs: [validate]
+    needs: [validate, smoke-build]
     if: ${{ always() && !github.event.deleted }}
     steps:
       - name: Check workflow results step
         run: |
-          set -euo pipefail
-          if [[ "${{ needs.validate.result }}" != "success" ]]; then
-            echo "::error::Job 'validate' did not succeed (${{ needs.validate.result }})."
-            exit 1
-          fi
+          set -Eeuo pipefail
+          for result in "validate:${{ needs.validate.result }}" "smoke-build:${{ needs.smoke-build.result }}"; do
+            name="${result%%:*}"
+            value="${result#*:}"
+            if [[ "$value" != "success" ]]; then
+              echo "::error::Job '$name' did not succeed ($value)."
+              exit 1
+            fi
+          done
