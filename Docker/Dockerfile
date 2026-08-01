@@ -35,7 +35,7 @@ FROM mcr.microsoft.com/dotnet/runtime:10.0-alpine AS final
 ARG LABEL_VERSION="1.0.0.0"
 LABEL name="PhotoCleaner" \
       version="${LABEL_VERSION}" \
-      description="Pre-process media files for photo management systems" \
+      description="An application that prepares photos and videos for import into photo managers." \
       maintainer="ptr727"
 
 # exiftool: EXIF metadata reader/writer (pulls in Perl)

@@ -1,9 +1,9 @@
 # PhotoCleaner
 
-A .NET console application that processes and prepares media files for import into photo management systems such as Lightroom, Immich, and PhotoPrism.
+An application that prepares photos and videos for import into photo managers.
 
 ## Release History
 
-Formal release notes have not been published yet.
+**Version: 1.0**:
 
-This file is reserved for future PhotoCleaner release history entries.
+- First published release, carrying the multi-arch Docker image and the GitHub release with the Linux and Windows executables attached.

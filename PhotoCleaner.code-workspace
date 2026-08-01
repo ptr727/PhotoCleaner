@@ -33,13 +33,13 @@
     "extensions": {
         "recommendations": [
             "davidanson.vscode-markdownlint",
-            "gruntfuggly.todo-tree",
             "ms-dotnettools.csdevkit",
             "streetsidesoftware.code-spell-checker",
             "editorconfig.editorconfig",
             "csharpier.csharpier-vscode",
             "github.vscode-github-actions",
-            "eamodio.gitlens"
+            "eamodio.gitlens",
+            "fanaticpythoner.better-todo-tree"
         ]
     }
 }

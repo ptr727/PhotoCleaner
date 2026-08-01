@@ -1,6 +1,6 @@
 # PhotoCleaner
 
-Pre-process media files for import into photo management systems such as Lightroom, Immich, and PhotoPrism.
+An application that prepares photos and videos for import into photo managers.
 
 ## Documentation
 

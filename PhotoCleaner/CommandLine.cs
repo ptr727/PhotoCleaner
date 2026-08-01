@@ -45,7 +45,7 @@ internal sealed class CommandLine
     internal RootCommand CreateRootCommand()
     {
         RootCommand command = new(
-            "PhotoCleaner - Pre-process media files for photo management systems."
+            "PhotoCleaner - An application that prepares photos and videos for import into photo managers."
         )
         {
             _logLevelOption,
