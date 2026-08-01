@@ -1,12 +1,12 @@
 # AUDIT.md
 
-How this repository audits itself against its committed baseline and reports drift. This is the repo-scoped adaptation of the fleet-wide AUDIT.md kept at the fleet hub (carried per the [repo-config downstream carry][repo-config-readme]); the hub's fleet-wide audit remains authoritative. The ground truth here is the committed [`repo-config/`][repo-config] payloads and [`spec/secrets.json`][secrets]; the prose authorities are [`AGENTS.md`][agents], [`CODESTYLE.md`][codestyle], and [`WORKFLOW.md`][workflow].
+How this repository audits itself against its committed baseline and reports drift. This is the repo-scoped adaptation of the fleet-wide AUDIT.md kept at the fleet hub (carried per the [repo-config downstream carry][repo-config-readme]); the hub's fleet-wide audit remains authoritative. The ground truth here is the committed [`repo-config/`][repo-config] payloads and [`spec/secrets.json`][secrets]; the prose authorities are [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], and [`WORKFLOW.md`][workflow].
 
 The audit is read-only: it diffs live state against the committed baseline and reports findings; it never applies changes. The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**, **defect**, and the applicable/absent rule.
 
 ## Scope
 
-This is a release-model repo: the self-audit covers the `main` and `develop` rulesets, general repository settings, and secret names. Code-project conformance (analyzers, tests, coverage, publish workflows) is CI's job and the fleet hub's fleet-wide audit's, not this self-audit's - see [AGENTS.md "Branching Model"][agents-branching-model] for the model this baseline encodes.
+This is a release-model repo: the self-audit covers the `main` and `develop` rulesets, general repository settings, and secret names. Code-project conformance (analyzers, tests, coverage, publish workflows) is CI's job and the fleet hub's fleet-wide audit's, not this self-audit's - see [GOVERNANCE.md "Branching Model"][governance-branching-model] for the model this baseline encodes.
 
 ## General Settings
 
@@ -58,13 +58,13 @@ done
 
 ## Verdict and Follow-Up
 
-A missing required item or a divergent payload is a **defect** (not operational); an equivalent outcome in a non-standard form is a **drift finding**. N/A items are excluded, never counted as failures. Surface findings as repository issues; fixes land as a pull request to `develop` per [AGENTS.md "Branching Model"][agents-branching-model]. To re-apply the whole baseline, run `repo-config/configure.sh` (see [repo-config/README.md][repo-config-readme]).
+A missing required item or a divergent payload is a **defect** (not operational); an equivalent outcome in a non-standard form is a **drift finding**. N/A items are excluded, never counted as failures. Surface findings as repository issues; fixes land as a pull request to `develop` per [GOVERNANCE.md "Branching Model"][governance-branching-model]. To re-apply the whole baseline, run `repo-config/configure.sh` (see [repo-config/README.md][repo-config-readme]).
 
 <!-- Repo -->
 
-[agents]: ./AGENTS.md
-[agents-branching-model]: ./AGENTS.md#branching-model
 [codestyle]: ./CODESTYLE.md
+[governance]: ./GOVERNANCE.md
+[governance-branching-model]: ./GOVERNANCE.md#branching-model
 [repo-config]: ./repo-config/
 [repo-config-develop]: ./repo-config/develop.json
 [repo-config-readme]: ./repo-config/README.md
