@@ -1,6 +1,50 @@
-# PhotoCleaner
+# PhotoCleaner <!-- omit from toc -->
 
-A .NET console application that processes and prepares media files for import into photo management systems such as Lightroom, Immich, and PhotoPrism.
+An application that prepares photos and videos for import into photo managers.
+
+## Build and Distribution <!-- omit from toc -->
+
+- **Source Code**: [GitHub][photocleaner-link], holding the source, the issues, and the CI/CD pipelines.
+- **Versioned Releases**: [GitHub Releases][releases-link], attaching the Linux and Windows executables as a 7z archive.
+- **Docker Images**: [Docker Hub][docker-link], multi-arch `linux/amd64` and `linux/arm64`.
+
+### Build Status <!-- omit from toc -->
+
+[![Docker Image Size][docker-size-shield]][docker-link]\
+[![License][license-shield]][license-link]
+
+### Releases <!-- omit from toc -->
+
+[![Docker Latest][docker-latest-shield]][docker-link]
+
+### Release Notes <!-- omit from toc -->
+
+**Version: 1.0**:
+
+**Summary**:
+
+- First published release, carrying the multi-arch Docker image and the GitHub release with the Linux and Windows executables attached.
+
+See [Release History][history-link] for the full history.
+
+## Table of Contents <!-- omit from toc -->
+
+- [Overview](#overview)
+- [Usage](#usage)
+  - [Command Line Syntax](#command-line-syntax)
+  - [Examples](#examples)
+- [Processing Flow](#processing-flow)
+- [Undo Flow](#undo-flow)
+- [Import Flow](#import-flow)
+- [Trash Flow](#trash-flow)
+- [Supported File Types](#supported-file-types)
+- [Docker](#docker)
+- [Workflow Example](#workflow-example)
+- [Questions or Issues](#questions-or-issues)
+- [Development Environment Setup](#development-environment-setup)
+  - [Install](#install)
+  - [Update](#update)
+- [License](#license)
 
 ## Overview
 
@@ -50,7 +94,7 @@ detailed logging of all operations.
 ```text
 $> PhotoCleaner --help
 Description:
-  PhotoCleaner - Pre-process media files for photo management systems.
+  PhotoCleaner - An application that prepares photos and videos for import into photo managers.
 
 Usage:
   PhotoCleaner [command] [options]
@@ -260,7 +304,7 @@ PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized
 # Import with a custom date format (creates e.g. 2024/06/2024-06-15/ subdirectories)
 PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/yyyy-MM-dd"
 
-# Preview what organize would do without changing anything
+# Preview what import would do without changing anything
 PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --dryrun
 
 # Move instead of copy (source files are removed)
@@ -451,14 +495,14 @@ docker run --rm -v /host/photos:/data \
 docker run --rm \
     -v /host/photos:/source \
     -v /host/organized:/organized \
-    photocleaner:latest organize --path /source --outpath /organized
+    photocleaner:latest import --path /source --outpath /organized
 
 # Import with deduplication DB (mount a persistent directory for the DB file)
 docker run --rm \
     -v /host/photos:/source \
     -v /host/organized:/organized \
     -v /host/db:/db \
-    photocleaner:latest organize --path /source --outpath /organized --db /db/photos.db
+    photocleaner:latest import --path /source --outpath /organized --db /db/photos.db
 
 # Index a directory into the database
 docker run --rm \
@@ -476,10 +520,138 @@ docker run --rm \
     -v /host/photos:/source \
     -v /host/organized:/organized \
     -v /host/db:/db \
-    photocleaner:latest organize --path /source --outpath /organized --db /db/photos.db --trashdb /db/trash.db
+    photocleaner:latest import --path /source --outpath /organized --db /db/photos.db --trashdb /db/trash.db
 ```
 
-## Development Tooling
+## Workflow Example
+
+**Run [icloudpd][icloudpd-link] to download photos from iCloud**:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run -it --rm --name icloudpd \
+    -v $(pwd)/.icloudpd:/cookies \
+    -v /data/media/Test:/data \
+    -e TZ=America/Los_Angeles \
+    docker.io/icloudpd/icloudpd:latest \
+    icloudpd \
+        --cookie-directory /cookies \
+        --username your@icloud.email \
+        --directory /data \
+        --set-exif-datetime \
+        --folder-structure "{:%Y/%m}" \
+        --recent 1000
+        # --skip-created-before 2025-01-01
+```
+
+**Run [PhotoCleaner][photocleaner-link] to sync Immich trash hashes** (optional, prevents re-importing trashed files):
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run --rm \
+    -v /data/media:/db \
+    photocleaner:latest \
+    trash \
+    --url http://immich:2283 \
+    --apikey $IMMICH_API_KEY \
+    --trashdb /db/trash.db
+```
+
+**Run [PhotoCleaner][photocleaner-link] to import new photos**:
+
+Copy only new files (not already in the DB and not trashed in Immich) from the icloudpd
+directory to an intermediate directory, without touching the icloudpd originals:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run --rm \
+    -v /data/media/icloud:/icloud \
+    -v /data/media/intermediate:/intermediate \
+    -v /data/media:/db \
+    photocleaner:latest \
+    import \
+    --path /icloud \
+    --outpath /intermediate \
+    --db /db/photos.db \
+    --trashdb /db/trash.db \
+    --threads 4
+```
+
+**Run [PhotoCleaner][photocleaner-link] to process the intermediate photos**:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run --rm \
+    -v /data/media/intermediate:/intermediate \
+    photocleaner:latest \
+    process \
+    --path /intermediate \
+    --threads 4
+```
+
+**Run [Immich CLI][immich-cli-link] to import photos into Immich**:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run -it --rm --name immichcli \
+    -v /data/media/Test:/upload:ro \
+    -e IMMICH_INSTANCE_URL=https://your.immich.server/api \
+    -e IMMICH_API_KEY=yourapikey \
+    -e TZ=America/Los_Angeles \
+    ghcr.io/immich-app/immich-cli:latest \
+    upload \
+        --recursive \
+        --concurrency 4 \
+        --ignore "**/*.bak*" \
+        --ignore "**/*.xmp" \
+        --ignore "**/*.tmp" \
+        --ignore "**/.DS_Store" \
+        --ignore "**/Thumbs.db" \
+        --ignore "**/@eaDir/**" \
+        --ignore "**/._*" \
+        /upload
+```
+
+**Run [immich-go][immich-go-link] to import photos into Immich**:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+immich-go upload from-folder --server=https://your.immich.server \
+    --api-key=yourapikey \
+    --manage-raw-jpeg=StackCoverJPG \
+    --manage-heic-jpeg=StackCoverJPG \
+    --manage-burst=NoStack \
+    --recursive \
+    --concurrent-tasks=4 \
+    --client-timeout=60m \
+    --on-errors=continue \
+    --include-extensions=.mp4,.mov,.tif,.jpg,.png,.dng,.heif,.heic \
+    /data/media/Test
+```
+
+## Questions or Issues
+
+Report a bug, request a feature, or ask a question in [GitHub Issues][issues-link].
+
+## Development Environment Setup
 
 ### Install
 
@@ -534,134 +706,28 @@ dotnet tool update --all
 dotnet outdated --upgrade:prompt
 ```
 
-## Workflow Example
-
-**Run [icloudpd](https://icloud-photos-downloader.github.io) to download photos from iCloud**:
-
-```shell
-#!/bin/bash
-
-set -Eeuo pipefail
-
-docker run -it --rm --name icloudpd \
-    -v $(pwd)/.icloudpd:/cookies \
-    -v /data/media/Test:/data \
-    -e TZ=America/Los_Angeles \
-    docker.io/icloudpd/icloudpd:latest \
-    icloudpd \
-        --cookie-directory /cookies \
-        --username your@icloud.email \
-        --directory /data \
-        --set-exif-datetime \
-        --folder-structure "{:%Y/%m}" \
-        --recent 1000
-        # --skip-created-before 2025-01-01
-```
-
-**Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to sync Immich trash hashes** (optional, prevents re-importing trashed files):
-
-```shell
-#!/bin/bash
-
-set -Eeuo pipefail
-
-docker run --rm \
-    -v /data/media:/db \
-    photocleaner:latest \
-    trash \
-    --url http://immich:2283 \
-    --apikey $IMMICH_API_KEY \
-    --trashdb /db/trash.db
-```
-
-**Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to organize new photos**:
-
-Copy only new files (not already in the DB and not trashed in Immich) from the icloudpd
-directory to an intermediate directory, without touching the icloudpd originals:
-
-```shell
-#!/bin/bash
-
-set -Eeuo pipefail
-
-docker run --rm \
-    -v /data/media/icloud:/icloud \
-    -v /data/media/intermediate:/intermediate \
-    -v /data/media:/db \
-    photocleaner:latest \
-    organize \
-    --path /icloud \
-    --outpath /intermediate \
-    --db /db/photos.db \
-    --trashdb /db/trash.db \
-    --threads 4
-```
-
-**Run [PhotoCleaner](https://github.com/ptr727/PhotoCleaner) to process the intermediate photos**:
-
-```shell
-#!/bin/bash
-
-set -Eeuo pipefail
-
-docker run --rm \
-    -v /data/media/intermediate:/intermediate \
-    photocleaner:latest \
-    process \
-    --path /intermediate \
-    --threads 4
-```
-
-**Run [Immich CLI](https://docs.immich.app/features/command-line-interface/) to import photos into Immich**:"
-
-```shell
-#!/bin/bash
-
-set -Eeuo pipefail
-
-docker run -it --rm --name immichcli \
-    -v /data/media/Test:/upload:ro \
-    -e IMMICH_INSTANCE_URL=https://your.immich.server/api \
-    -e IMMICH_API_KEY=yourapikey \
-    -e TZ=America/Los_Angeles \
-    ghcr.io/immich-app/immich-cli:latest \
-    upload \
-        --recursive \
-        --concurrency 4 \
-        --ignore "**/*.bak*" \
-        --ignore "**/*.xmp" \
-        --ignore "**/*.tmp" \
-        --ignore "**/.DS_Store" \
-        --ignore "**/Thumbs.db" \
-        --ignore "**/@eaDir/**" \
-        --ignore "**/._*" \
-        /upload
-```
-
-**Run [immich-go](https://github.com/simulot/immich-go) to import photos into Immich**:"
-
-```shell
-#!/bin/bash
-
-set -Eeuo pipefail
-
-immich-go upload from-folder --server=https://your.immich.server \
-    --api-key=yourapikey \
-    --manage-raw-jpeg=StackCoverJPG \
-    --manage-heic-jpeg=StackCoverJPG \
-    --manage-burst=NoStack \
-    --recursive \
-    --concurrent-tasks=4 \
-    --client-timeout=60m \
-    --on-errors=continue \
-    --include-extensions=.mp4,.mov,.tif,.jpg,.png,.dng,.heif,.heic \
-    /data/media/Test
-```
-
 ## License
 
 Licensed under the [MIT License][license-link]\
 ![GitHub License][license-shield]
 
-[license-link]: ./LICENSE
+<!-- Shields -->
+
+[docker-latest-shield]: https://img.shields.io/docker/v/ptr727/photocleaner/latest?logo=docker&label=Docker%20Latest
+[docker-size-shield]: https://img.shields.io/docker/image-size/ptr727/photocleaner/latest?logo=docker&label=Image%20Size
 [license-shield]: https://img.shields.io/github/license/ptr727/PhotoCleaner?label=License
+
+<!-- Repo -->
+
+[history-link]: ./HISTORY.md
+[license-link]: ./LICENSE
+
+<!-- External -->
+
+[docker-link]: https://hub.docker.com/r/ptr727/photocleaner
+[icloudpd-link]: https://icloud-photos-downloader.github.io
+[immich-cli-link]: https://docs.immich.app/features/command-line-interface/
+[immich-go-link]: https://github.com/simulot/immich-go
+[issues-link]: https://github.com/ptr727/PhotoCleaner/issues
+[photocleaner-link]: https://github.com/ptr727/PhotoCleaner
+[releases-link]: https://github.com/ptr727/PhotoCleaner/releases
