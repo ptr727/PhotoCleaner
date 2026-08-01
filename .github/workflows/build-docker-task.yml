@@ -102,6 +102,54 @@ jobs:
             BUILD_INFORMATION_VERSION=${{ inputs.assembly_informational_version }}
             BUILD_PACKAGE_VERSION=${{ inputs.semver2 }}
 
+      # Docker Hub's short description mirrors the README intro line (GOVERNANCE.md "Repository Details"), so read it
+      # from the file rather than restating it here: a literal in this workflow would be one more surface to drift.
+      # Strip CR first, since README.md is CRLF and a bare CR makes awk read the blank line 2 as non-empty.
+      - name: Read short description step
+        id: short-description
+        if: ${{ inputs.push && inputs.branch == 'main' }}
+        run: |
+          set -Eeuo pipefail
+          # Trim at extraction so every check below reads the same normalized value. CommonMark allows up to three
+          # leading spaces before a heading or list marker, so an indented '## ...' would slip past the structure
+          # check and ship as the tagline; trailing space would pad the published string.
+          INTRO=$(tr -d '\r' < README.md | awk 'NR>1 && NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }')
+          # Fail loud rather than pushing a wrong tagline: a restructured README that moves the intro would
+          # otherwise silently publish whatever follows the H1 on the next publish.
+          if [[ -z "$INTRO" ]]; then
+            echo "::error::No intro line found after the README H1; cannot set the Docker Hub short description."
+            exit 1
+          fi
+          # An empty README is not the realistic failure. Deleting or moving the intro is, and then the line picked
+          # up is the next construct (a '## ...' heading here), which is non-empty and under the cap, so the checks
+          # above and below both pass and a heading ships as the tagline. Reject anything opening a markdown block.
+          case "$INTRO" in
+            '#'* | '>'* | '-'* | '*'* | '+'* | '<'* | '|'* | '`'* | '~'* | '['* | '!'*)
+              echo "::error::Line after the README H1 is markdown structure, not the intro sentence: '$INTRO'"
+              exit 1
+              ;;
+          esac
+          # An ordered list opens with digits then '.' or ')' then a space, which no intro sentence does. Matched
+          # as a regex rather than a case glob, since a glob cannot express "one or more digits" without also
+          # swallowing an ordinary sentence that happens to start with a number. The pattern is held in a variable
+          # because bash fails to parse a ')' inside a bracket expression written inline after =~.
+          ordered_list_re='^[0-9]+[.)][[:space:]]'
+          if [[ "$INTRO" =~ $ordered_list_re ]]; then
+            echo "::error::Line after the README H1 is an ordered list item, not the intro sentence: '$INTRO'"
+            exit 1
+          fi
+          # spec/readme-structure.md requires the intro to be link-free plain text, and neither Docker Hub nor the
+          # GitHub About panel renders markdown, so a link would ship as its raw source.
+          if [[ "$INTRO" == *']('* || "$INTRO" == *']['* ]]; then
+            echo "::error::README intro contains a link; the short description must be plain text: '$INTRO'"
+            exit 1
+          fi
+          if (( ${#INTRO} > 100 )); then
+            echo "::error::README intro is ${#INTRO} characters; Docker Hub caps the short description at 100."
+            exit 1
+          fi
+          echo "intro=$INTRO" >> "$GITHUB_OUTPUT"
+
       # Push the trimmed Docker Hub overview from Docker/README.md, main only (one overview, no per-branch context).
       - name: Update Docker Hub description step
         if: ${{ inputs.push && inputs.branch == 'main' }}
@@ -111,3 +159,4 @@ jobs:
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
           repository: ptr727/photocleaner
           readme-filepath: ./Docker/README.md
+          short-description: ${{ steps.short-description.outputs.intro }}
