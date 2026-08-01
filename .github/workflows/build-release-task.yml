@@ -27,6 +27,12 @@ on:
         required: false
         type: boolean
         default: false
+      # Set false for a repo that produces no release-asset-* files (e.g. Docker-only): the release is then just the
+      # tag + source zip + README + LICENSE; the artifact download is skipped and the unmatched-files guard relaxes.
+      expect_release_assets:
+        required: false
+        type: boolean
+        default: true
 
 jobs:
 
@@ -47,11 +53,44 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
 
-  # Build only when validation passed (success) or was skipped (smoke); never when it failed.
+  # Entry gate: validate branch<->version consistency once, before the build jobs, so an NBGV mis-classification fails
+  # fast instead of after building and publishing. main must be a public release (no prerelease '-'); every other branch
+  # must carry a prerelease '-' (guards a develop leg being classified public and published as stable). Strip
+  # '+buildmetadata' first; a '-' there is legitimate, only a '-' in the core/prerelease segment marks a prerelease.
+  validate-release:
+    name: Validate release version job
+    needs: [get-version]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch and version consistency step
+        env:
+          SEMVER2: ${{ needs.get-version.outputs.SemVer2 }}
+          BRANCH: ${{ inputs.branch }}
+          SMOKE: ${{ inputs.smoke }}
+        run: |
+          set -Eeuo pipefail
+          # Smoke builds never publish and always version as prerelease (detached PR HEAD), which would trip the main arm.
+          if [[ "$SMOKE" == "true" ]]; then
+            echo "Smoke build; skipping release version validation."
+            exit 0
+          fi
+          CORE_AND_PRE="${SEMVER2%%+*}"
+          if [[ "$BRANCH" == "main" ]]; then
+            if [[ "$CORE_AND_PRE" == *-* ]]; then
+              echo "::error::Public (main) release version '$SEMVER2' carries a prerelease suffix; refusing to publish."
+              exit 1
+            fi
+          elif [[ "$CORE_AND_PRE" != *-* ]]; then
+            echo "::error::Prerelease ($BRANCH) version '$SEMVER2' has no prerelease suffix (NBGV classified it public); refusing to publish."
+            exit 1
+          fi
+
+  # Build only when validation passed (success) or was skipped (smoke); never when it failed. validate-release is the
+  # entry gate above, so it must be green before anything is built.
   build-executable:
     name: Build executable job
-    needs: [get-version, validate]
-    if: ${{ !cancelled() && needs.get-version.result == 'success' && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
+    needs: [get-version, validate, validate-release]
+    if: ${{ !cancelled() && needs.get-version.result == 'success' && needs.validate-release.result == 'success' && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
     uses: ./.github/workflows/build-executable-task.yml
     secrets: inherit
     with:
@@ -66,8 +105,8 @@ jobs:
 
   build-docker:
     name: Build Docker job
-    needs: [get-version, validate]
-    if: ${{ !cancelled() && needs.get-version.result == 'success' && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
+    needs: [get-version, validate, validate-release]
+    if: ${{ !cancelled() && needs.get-version.result == 'success' && needs.validate-release.result == 'success' && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
@@ -84,10 +123,11 @@ jobs:
 
   github-release:
     name: Publish GitHub release job
-    # !smoke enforces "smoke never publishes" even if a smoke caller set github: true.
+    # `!inputs.smoke` enforces "smoke never publishes" at the job level, so a smoke caller that also set
+    # `github: true` still can't create a release.
     if: ${{ inputs.github && !inputs.smoke }}
     runs-on: ubuntu-latest
-    needs: [get-version, build-executable, build-docker]
+    needs: [get-version, validate-release, build-executable, build-docker]
 
     steps:
 
@@ -97,29 +137,21 @@ jobs:
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
-      # Backstop (main only): refuse to publish if the public version carries a prerelease '-' (NBGV mis-versioning).
-      # Strip '+buildmetadata' first; only a '-' in the core segment marks a prerelease.
-      - name: Verify public release version step
-        if: ${{ inputs.branch == 'main' }}
-        env:
-          SEMVER2: ${{ needs.get-version.outputs.SemVer2 }}
-        run: |
-          set -Eeuo pipefail
-          CORE_AND_PRE="${SEMVER2%%+*}"   # drop +buildmetadata; a '-' here is the genuine prerelease separator
-          if [[ "$CORE_AND_PRE" == *-* ]]; then
-            echo "::error::Public (main) release version '$SEMVER2' carries a prerelease suffix; refusing to publish."
-            exit 1
-          fi
-
-      # Collect the executable build's release-asset-<branch>-* artifacts (the PhotoCleaner.7z) by pattern.
+      # Collect assets by the `release-asset-<branch>-*` pattern so this step is target-agnostic: subset releases by
+      # deleting the target, not `enable_*: false` (a skipped `needs` job would skip this release job too). The release
+      # step guards `fail_on_unmatched_files: true`, so at least one `release-asset-*` must match; a repo that drops
+      # every file-producing target (e.g. a Docker-only repo, whose release carries only source zip + README + LICENSE)
+      # relaxes that guard.
       - name: Download release asset artifacts step
+        if: ${{ inputs.expect_release_assets }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-asset-${{ inputs.branch }}-*
           merge-multiple: true
           path: ./Publish
 
-      # Weekly re-runs may hit an already-released version; skip release-create when the tag exists (no-op republish).
+      # The weekly publisher re-runs even with no new commits, so the version may already be released. Skip the release
+      # step when a release for this tag already exists to avoid a no-op republish.
       - name: Check for existing release step
         id: release-exists
         env:
@@ -138,8 +170,13 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # target_commitish pins the tag to the exact built commit (GitCommitId), not the moving branch ref.
-      # fail_on_unmatched_files catches a missing or misnamed PhotoCleaner.7z.
+      # `target_commitish` must be set explicitly: otherwise GitHub's REST API tags the release on the default branch.
+      # Pin it to `GitCommitId` so the tag is on the exact built commit, consistent with the SemVer2 tag and artifacts.
+      # Skip when the release already exists, but always let a manual `workflow_dispatch` through to refresh it.
+      # Every release (any branch, any target) is a tag on the built commit plus the auto-attached source zip, README,
+      # and LICENSE; targets amend it by uploading `release-asset-*` files (binaries/packages) or pushing elsewhere
+      # (image/registry). `fail_on_unmatched_files: true` fails loudly if a promised `release-asset-*` is missing or
+      # misnamed; a no-file-target repo relaxes it (see download step).
       - name: Create GitHub release step
         if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -148,18 +185,20 @@ jobs:
           tag_name: ${{ needs.get-version.outputs.SemVer2 }}
           target_commitish: ${{ needs.get-version.outputs.GitCommitId }}
           prerelease: ${{ inputs.branch != 'main' }}
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: ${{ inputs.expect_release_assets }}
           files: |
             LICENSE
             README.md
             ./Publish/*
 
-      # Surgical cleanup at the point of consumption (WORKFLOW.md D5.1): the release-asset-<branch>-* transfer
-      # artifacts now have durable copies on the release, so delete them by pattern to free the storage quota,
-      # scoped to this branch's assets. Gated to the create condition so it only runs when a release was created
-      # or refreshed; otherwise the retention-days: 1 backstop reaps them. Needs actions: write from the caller.
+      # Surgical cleanup at the point of consumption: the release-asset-<branch>-* transfer artifacts now have durable
+      # copies on the release, so delete them by exact pattern to free the storage quota - scoped to this branch's
+      # assets, leaving diagnostics and any other artifacts. Gated to the same condition as the create step so it only
+      # deletes when a release was actually created/refreshed this run; on a skipped create (existing tag, no new
+      # commits) the fresh artifacts stay for the run, reaped by the retention-days: 1 backstop. Needs the caller to
+      # grant `actions: write` (publish-release's publish job does).
       - name: Delete consumed release asset artifacts step
-        if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
+        if: ${{ inputs.expect_release_assets && (steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch') }}
         # Best-effort: the release is already published, so a listing/delete hiccup must never red the job; the
         # retention-days: 1 backstop reaps anything missed. Deletes every matching id (a rerun can upload duplicates).
         continue-on-error: true
@@ -173,6 +212,7 @@ jobs:
             ids=""
           fi
           for id in $ids; do
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" \
-              || echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+            if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; then
+              echo "::warning::Failed to delete artifact $id; retention-days backstop will reap it."
+            fi
           done
