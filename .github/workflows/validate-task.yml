@@ -58,6 +58,16 @@ jobs:
 
       - name: Checkout code step
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The prose gate diffs against the base branch, so it needs that branch's history.
+          # Only the runs that reach the gate pay for it, since a publish run skips the gate.
+          # A full clone there is time and network a release does not need.
+          # The condition matches the gate's own below, so the two cannot drift apart silently.
+          #
+          # The depths are quoted, and must stay quoted.
+          # An unquoted 0 is falsy, so `cond && 0 || 1` collapses to 1 whenever cond is true.
+          # Every run would then shallow-clone, leaving the gate no base to diff against.
+          fetch-depth: ${{ (github.event_name == 'push' && github.ref_name != 'main') && '0' || '1' }}
 
       - name: Check C# formatting step
         run: |
@@ -86,3 +96,26 @@ jobs:
 
       - name: Check EditorConfig step
         run: docker run --rm -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+
+      # The fleet prose rules live in the hub, so this repo consumes them rather than vendoring them.
+      # The rules are read from hub develop, so a rule change is exercised here before promotion.
+      # Only lines a change touches are reported, so the existing backlog blocks nothing.
+      #
+      # The base is the branch this one merges into.
+      # The gate runs on push, so there is no pull_request event to read a base from.
+      # Runs on main are skipped, since it only receives promotion merges already gated on develop.
+      #
+      # A publish run reaches this workflow too, through build-release-task, and is skipped.
+      # Its content was already gated when it was pushed.
+      # Re-reading it would diff the whole unpromoted delta and could fail a release on prose.
+      - name: Check prose step
+        if: ${{ github.event_name == 'push' && github.ref_name != 'main' }}
+        # A SHA pin, containing the prose gate from ptr727/ProjectTemplate#520.
+        # It was hub develop when pinned, and says nothing about where develop is now.
+        # A pin that claims to be a branch goes stale the moment that branch moves.
+        # It carries no release tag yet, so Dependabot cannot compare it and will not bump it.
+        # Repoint it by hand at the next hub release.
+        # Dependabot tracks it like any other action pin from then on.
+        uses: ptr727/ProjectTemplate/.github/actions/prose-gate@cbd5eb3c9e079b640d5461400d89b390de2f0780 # hub develop
+        with:
+          base: origin/${{ github.ref_name == 'develop' && 'main' || 'develop' }}
