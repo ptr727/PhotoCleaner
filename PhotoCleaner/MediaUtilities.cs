@@ -73,15 +73,44 @@ internal static class MediaUtilities
     )
     {
         Log.Debug("exiftool: Getting metadata for '{FilePath}'", filePath);
+
+        // Separates a file this tool cannot open from one it reads but exiftool cannot parse.
+        // Both come back from exiftool as an error alongside well formed JSON.
+        // Without this they are indistinguishable, so a permission problem reads as damaged media.
+        EnsureReadable(filePath);
+
+        // -all is required because -validate alone narrows the output to just that one tag.
+        // Measured at no cost over the plain call, so validation rides along instead of a second run.
+        // A file whose verdict reports an error also makes exiftool exit non-zero, JSON and all.
+        // The parsed output decides, not the exit code.
         BufferedCommandResult result = await Cli.Wrap("exiftool")
-            .WithArguments(["-groupNames", "-json", filePath])
+            .WithArguments(["-groupNames", "-json", "-validate", "-all", filePath])
+            .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(cancellationToken);
+
+        ReadOnlySpan<char> json = result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']']);
+        if (json.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                $"exiftool returned no metadata for '{filePath}' (exit {result.ExitCode}): "
+                    + result.StandardError.Trim()
+            );
+        }
+
         ExifToolJson? exifToolJson = JsonSerializer.Deserialize(
-            result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']']),
+            json,
             ExifToolJsonContext.Default.ExifToolJson
         );
         ArgumentNullException.ThrowIfNull(exifToolJson);
         return exifToolJson;
+    }
+
+    // Reading attributes needs no read permission on the content.
+    // Nothing about a file's metadata therefore proves its bytes can be reached.
+    // A command that hands the file to another process sees its own lack of access nowhere else.
+    internal static void EnsureReadable(string filePath)
+    {
+        using FileStream probe = File.OpenRead(filePath);
     }
 
     internal static async Task SetCreateDateAsync(

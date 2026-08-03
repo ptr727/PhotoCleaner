@@ -1,6 +1,6 @@
 # Code Style and Formatting Rules
 
-This is the single code-style guide for the fleet. The **General** section applies to every language. Each **language section** (.NET, Python) is self-contained: a repo follows only the section(s) for the languages it ships and ignores the rest. A repo keeps the whole file rather than trimming it - an unused-language section costs nothing, the same whole-file model as [`.editorconfig`][root], whose inert `[*.cs]` block a non-.NET repo keeps.
+This is the single code-style guide for the fleet. The **General** section applies to every language. Each **language section** (.NET, Python) is self-contained: a repo follows only the section(s) for the languages it ships and ignores the rest. A repo keeps the whole file rather than trimming it. An unused-language section costs nothing, the same whole-file model as [`.editorconfig`][root], whose inert `[*.cs]` block a non-.NET repo keeps.
 
 Cross-cutting *process* rules (PR titles, branching, US English, markdown style, comments philosophy, workflow YAML, PR review etiquette) live in [GOVERNANCE.md][governance] and are not repeated here.
 
@@ -10,21 +10,21 @@ These rules apply to every language in the repo.
 
 ### Tooling Names and Casing
 
-Use each tool's official casing in task labels, docs, and prose - `.NET` (not `.Net`), `CSharpier`, `ruff`, `pyright`, `uv`. Don't invent personal variants.
+Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.Net`), `CSharpier`, `ruff`, `pyright`, `uv`. Don't invent personal variants.
 
 ### Clean-Compile Verification
 
-Each language defines a **clean-compile** verification - the combination of build, formatter, linter, and code-analysis tools that must report clean before a commit. It is exposed as one or more **named** VS Code tasks (or, where a language ships no tasks, documented commands), and those definitions are the same across the fleet. The concrete names live in each language section below.
+Each language defines a **clean-compile** verification: the combination of build, formatter, linter, and code-analysis tools that must report clean before a commit. It is exposed as one or more **named** VS Code tasks (or, where a language ships no tasks, documented commands), and those definitions are the same across the fleet. The concrete names live in each language section below.
 
-- **Run it after every code change.** The relevant language's clean-compile must pass before you commit; CI runs the same checks as a backstop.
-- **The named task definition is the canonical spec** - its exact command sequence, arguments, and strictness. You may run it through the VS Code task **or** by invoking the equivalent native commands directly; either is fine **only if the sequence, arguments, and strictness match exactly**. No shortcuts and no more-lenient options (for example, never drop `--verify-no-changes` or loosen a `--severity`).
-- **A local commit/pre-commit gate is the repo's choice.** No single hook runner fits every language (a `dotnet`-tool runner like Husky.Net suits .NET but not Python), so none is mandated - but that is **not** a recommendation against commit gates. CI is the authoritative backstop regardless; a local gate is an additive convenience a repo may wire and keep - Husky.Net (and `dotnet husky run` as a style step) for .NET, `pre-commit` for Python. Keeping a working gate is not drift.
+- **Run it after every code change.** The relevant language's clean-compile must pass before you commit, and CI runs the same checks as a backstop.
+- **The named task definition is the canonical spec** - its exact command sequence, arguments, and strictness. You may run it through the VS Code task **or** by invoking the equivalent native commands directly, and either is fine **only if the sequence, arguments, and strictness match exactly**. No shortcuts and no more-lenient options (for example, never drop `--verify-no-changes` or loosen a `--severity`).
+- **A local commit/pre-commit gate is the repo's choice.** No single hook runner fits every language (a `dotnet`-tool runner like Husky.Net suits .NET but not Python), so none is mandated, but that is **not** a recommendation against commit gates. CI is the authoritative backstop regardless, and a local gate is an additive convenience a repo may wire and keep: Husky.Net (and `dotnet husky run` as a style step) for .NET, `pre-commit` for Python. Keeping a working gate is not drift.
 
 ### Analyzer Diagnostics and Suppressions
 
-- **A new port is not a license to silence diagnostics.** Brownfield / just-ported status never justifies relaxing analyzer or linter severities or muting newly surfaced warnings - fix them. (The only brownfield allowance is the one-time git-signing / line-ending migration described in [GOVERNANCE.md][governance] and [README.md][readme], which has nothing to do with code analysis.)
+- **A new port is not a license to silence diagnostics.** Brownfield / just-ported status never justifies relaxing analyzer or linter severities or muting newly surfaced warnings. Fix them. (The only brownfield allowance is the one-time git-signing / line-ending migration described in [GOVERNANCE.md][governance] and [README.md][readme], which has nothing to do with code analysis.)
 - **Suppress only genuine false-positives or deliberate, documented exceptions**, always at the **narrowest scope that fits**, in this order of preference:
-  1. An **in-code annotation on the specific symbol**, with a justification - the language's attribute/comment form, never a blanket pragma spanning a region.
+  1. An **in-code annotation on the specific symbol**, with a justification, in the language's attribute/comment form, never a blanket pragma spanning a region.
   2. The **owning project's local config** when the exception is project-wide for one project (e.g. a test project's own `.editorconfig` / `pyproject.toml`).
   3. The **root / shared config** only when the suppression is genuinely applicable to **every** project in the repo.
 - **Never blanket-relax a batch of rules project-wide** to get a port to build. The per-language mechanics (which attribute, which config key) are in each language section.
@@ -33,9 +33,9 @@ Each language defines a **clean-compile** verification - the combination of buil
 
 These apply repo-wide, in every directory:
 
-1. **Markdown linting**: All `.md` files must be lint-clean (error and warning free) via the VS Code `markdownlint` extension. [`.markdownlint-cli2.jsonc`][markdownlint-cli2] at the repo root is the single source of truth - the davidanson `markdownlint` extension and a command-line `markdownlint-cli2` run both read it, so the IDE and CLI stay in lock-step. Rules it deliberately disables (e.g. `MD013` line-length) are **intentional** - do not "fix" them. `MD033` inline HTML stays **enabled**: HTML comments are permitted (markdownlint does not flag them), HTML elements are flagged, and anything with a native markdown equivalent uses the markdown. Fix violations at the source rather than disabling rules.
-2. **Spelling**: All spelling must be clean via the CSpell VS Code integration; words must be correctly spelled in **US English** (the repo-wide convention - see [GOVERNANCE.md][governance]). The shared `cspell.json` sets `"language": "en-US"` so British spellings are flagged - a bare `"en"` accepts both US and British and silently passes the wrong spelling. Project-specific terms go in the shared `cspell.json` `words` list - it is the single source of truth the extension, CLI, and CI all read. The `.code-workspace` must **not** carry its own `cspell.words`/`cSpell.words` block; when externalizing words into `cspell.json`, delete any word list left in the workspace (a leftover one duplicates the list and silently drifts).
-3. **Spelling CI scope**: The enforced CI spell-check gate covers **`README.md` and `HISTORY.md` only** - these are the files every repo visitor sees, so they must be clean. It is deliberately **not** all `**/*.md`: repos carry many markdown files full of technical terms, and gating every one of them would mean endlessly padding `cspell.json` just to keep CI green. Broad, live spell-checking across any file (source, markdown, text) is the **cspell editor extension's** job, so typos still surface to whoever is editing. A repo owner **may** widen their own CI file list, but README + HISTORY are the default; keep the CI workflow, the `Lint: Spelling` VS Code task, and the GOVERNANCE.md cspell one-liner on the same file list. The list is explicit (not a glob), so a repo that ships no `HISTORY.md` (e.g. one with no changelog) must drop it from all three surfaces and gate on `README.md` alone - cspell errors on a listed file that does not exist. Markdown *linting* (item 1) stays repo-wide `**/*.md` - it does not choke on technical terms.
+1. **Markdown linting**: All `.md` files must be lint-clean (error and warning free) via the VS Code `markdownlint` extension. [`.markdownlint-cli2.jsonc`][markdownlint-cli2] at the repo root is the single source of truth, since the davidanson `markdownlint` extension and a command-line `markdownlint-cli2` run both read it, so the IDE and CLI stay in lock-step. Rules it deliberately disables (e.g. `MD013` line-length) are **intentional**, so do not "fix" them. `MD033` inline HTML stays **enabled**: HTML comments are permitted (markdownlint does not flag them), HTML elements are flagged, and anything with a native markdown equivalent uses the markdown. Fix violations at the source rather than disabling rules.
+2. **Spelling**: All spelling must be clean via the CSpell VS Code integration, and words must be correctly spelled in **US English** (the repo-wide convention, per [GOVERNANCE.md][governance]). The shared `cspell.json` sets `"language": "en-US"` so British spellings are flagged, where a bare `"en"` accepts both US and British and silently passes the wrong spelling. Project-specific terms go in the shared `cspell.json` `words` list, the single source of truth the extension, CLI, and CI all read. The `.code-workspace` must **not** carry its own `cspell.words`/`cSpell.words` block, and when externalizing words into `cspell.json`, delete any word list left in the workspace (a leftover one duplicates the list and silently drifts).
+3. **Spelling CI scope**: The enforced CI spell-check gate covers **`README.md` and `HISTORY.md` only**, because these are the files every repo visitor sees, so they must be clean. It is deliberately **not** all `**/*.md`: repos carry many markdown files full of technical terms, and gating every one of them would mean endlessly padding `cspell.json` just to keep CI green. Broad, live spell-checking across any file (source, markdown, text) is the **cspell editor extension's** job, so typos still surface to whoever is editing. A repo owner **may** widen their own CI file list, but README + HISTORY are the default; keep the CI workflow, the `Lint: Spelling` VS Code task, and the GOVERNANCE.md cspell one-liner on the same file list. The list is explicit (not a glob), so a repo that ships no `HISTORY.md` (e.g. one with no changelog) must drop it from all three surfaces and gate on `README.md` alone, since cspell errors on a listed file that does not exist. Markdown *linting* (item 1) stays repo-wide `**/*.md`, which does not choke on technical terms.
 4. **`README.md` and `HISTORY.md` share the same header**: the `# PhotoCleaner` title and the one-line description under it match exactly in both files, so a reader landing on the changelog sees the same project identity. A change to one is applied to the other in the same commit, and the description is also what the GitHub About panel and the Docker Hub short description carry (see [GOVERNANCE.md][governance] "Repository Details").
 
 ## .NET
@@ -52,15 +52,15 @@ This is the style guide for any **.NET projects** in this repo.
 
 1. **The `.NET Format` clean-compile task** (see [Clean-Compile Verification][clean-compile-verification])
    - The .NET clean-compile is the **`.NET Format`** VS Code task, which chains `CSharpier Format` -> `.NET Build` -> `dotnet format style --verify-no-changes`. These three task definitions are carried verbatim in [`.vscode/tasks.json`][vscode-tasks].
-   - After any code change it must pass before commit. Run the `.NET Format` task. To run it natively instead, reproduce that task chain from [`.vscode/tasks.json`][vscode-tasks] exactly - `CSharpier Format`, then `.NET Build`, then the `dotnet format style --verify-no-changes --severity=info ...` verify - without dropping or loosening any argument (tasks.json is the canonical command spec). Bare `dotnet format` alone, skipping CSharpier or the build, is not sufficient.
+   - After any code change it must pass before commit. Run the `.NET Format` task. To run it natively instead, reproduce that task chain from [`.vscode/tasks.json`][vscode-tasks] exactly (`CSharpier Format`, then `.NET Build`, then the `dotnet format style --verify-no-changes --severity=info ...` verify) without dropping or loosening any argument (tasks.json is the canonical command spec). Bare `dotnet format` alone, skipping CSharpier or the build, is not sufficient.
 
 2. **Analyzer configuration**
    - `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (full analyzer set enabled)
-   - `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` - any diagnostic surfaced as a warning fails the build, so it must be fixed or deliberately suppressed, not left to accumulate (see [Analyzer Diagnostics and Suppressions][analyzer-diagnostics-and-suppressions])
+   - `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`, so any diagnostic surfaced as a warning fails the build, so it must be fixed or deliberately suppressed, not left to accumulate (see [Analyzer Diagnostics and Suppressions][analyzer-diagnostics-and-suppressions])
 
 3. **CI lint backstop**
    - CI runs the clean-compile checks on every PR as the authoritative backstop
-   - Git hooks are optional; a repo may wire a local runner (Husky.Net) for pre-commit enforcement, but CI is the gate that matters
+   - Git hooks are optional, and a repo may wire a local runner (Husky.Net) for pre-commit enforcement, but CI is the gate that matters
 
 #### The Full Post-Change Set
 
@@ -74,14 +74,14 @@ The clean-compile task above is necessary and not sufficient. After every code c
 
 Shared MSBuild configuration is centralized at the repository root, never duplicated per project:
 
-- **`Directory.Build.props`** carries the properties every project shares - the analyzer set and `TreatWarningsAsErrors` from the Zero Warnings Policy above, plus `LangVersion`, `TargetFramework` where uniform, and any repo-wide build metadata. A csproj carries only what is genuinely project-specific (`OutputType`, `IsPackable`, project references).
+- **`Directory.Build.props`** carries the properties every project shares: the analyzer set and `TreatWarningsAsErrors` from the Zero Warnings Policy above, plus `LangVersion`, `TargetFramework` where uniform, and any repo-wide build metadata. A csproj carries only what is genuinely project-specific (`OutputType`, `IsPackable`, project references).
 - **`Directory.Packages.props`** enables central package management (`ManagePackageVersionsCentrally` true): every dependency version is declared once as a `PackageVersion` item, and a csproj's `PackageReference` items are versionless. One file to review on a bump, one Dependabot surface, and no version skew between projects.
 
-A repo whose projects still carry per-project analyzer settings or versioned `PackageReference` items is drifted - move the shared property or version up to the root file rather than editing it in place.
+A repo whose projects still carry per-project analyzer settings or versioned `PackageReference` items is drifted, so move the shared property or version up to the root file rather than editing it in place.
 
 #### Build Tasks
 
-Available VS Code tasks (run them from VS Code's task runner - **Terminal -> Run Task** - or an agent's task-running tool). The three clean-compile tasks below are carried verbatim; a repo adds its own convenience tasks (tool updates, dependency upgrades, benchmarks) on top:
+Available VS Code tasks (run them from VS Code's task runner, **Terminal -> Run Task**, or an agent's task-running tool). The three clean-compile tasks below are carried verbatim, and a repo adds its own convenience tasks (tool updates, dependency upgrades, benchmarks) on top:
 
 - `.NET Build`: Build with diagnostic verbosity *(clean-compile)*
 - `CSharpier Format`: Auto-format code with CSharpier *(clean-compile)*
@@ -99,7 +99,7 @@ Available VS Code tasks (run them from VS Code's task runner - **Terminal -> Run
    - `dotnet-outdated-tool`: Dependency update checks
    - Nerdbank.GitVersioning: Version management
 
-CI is the authoritative lint backstop. Local pre-commit hooks are optional - wire Husky.Net (or another runner) if you want local enforcement.
+CI is the authoritative lint backstop. Local pre-commit hooks are optional, so wire Husky.Net (or another runner) if you want local enforcement.
 
 #### Editor Baseline
 
@@ -127,7 +127,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - Top-level statements for console apps
    - Pattern matching over traditional checks
    - Collection expressions when types loosely match
-   - Extension methods - the classic `this`-parameter form, or an `extension(<receiver>) { ... }` block on C# 14+
+   - Extension methods, in the classic `this`-parameter form or an `extension(<receiver>) { ... }` block on C# 14+
    - Implicit object creation when type is apparent
    - Range and index operators
 
@@ -206,7 +206,7 @@ Note: Code snippets are illustrative examples only. Replace namespaces/types to 
    - YAML files: 2 spaces
    - JSON files: 4 spaces
 
-5. **Line endings**: not specified here - governed per repo by `.editorconfig` / `.gitattributes` per the [GOVERNANCE.md][governance] "Line Endings" section.
+5. **Line endings**: not specified here, but governed per repo by `.editorconfig` / `.gitattributes` per the [GOVERNANCE.md][governance] "Line Endings" section.
 
 6. **`#region`**: Do not use regions. Prefer logical file/folder/namespace organization.
 7. **Member ordering (StyleCop SA1201)**: const -> static readonly -> static fields -> instance readonly fields -> instance fields -> constructors -> public (events -> properties -> indexers -> methods -> operators) -> non-public in same order -> nested types
@@ -262,13 +262,13 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
 
 #### Error Handling and Logging
 
-1. **Structured logging**: Use structured message templates - Serilog is the **application's** concrete backend; a library never references it (see item 2)
+1. **Structured logging**: Use structured message templates. Serilog is the **application's** concrete backend, and a library never references it (see item 2)
 
    ```csharp
    logger.LogError(exception, "{Function}", function);
    ```
 
-2. **Libraries log through abstractions, never a concrete backend.** A NuGet **library** depends only on `Microsoft.Extensions.Logging.Abstractions` and exposes an `ILoggerFactory` seam - a settable global factory defaulting to `NullLoggerFactory.Instance` (fallback `NullLogger.Instance`) with `SetFactory`/`TrySetFactory`, and/or an `ILoggerFactory`/`ILogger` parameter in its API. It must **not** reference Serilog or any sink - that forces a logging framework on every consumer and drags in AOT-incompatible dependencies. The consuming **application** owns the concrete logger (Serilog is fine there), bridges it to `ILoggerFactory` (e.g. `SerilogLoggerFactory` from `Serilog.Extensions.Logging`), and injects it. Reference pattern: a `LogOptions` seam in the library; the consuming CLI builds the Serilog-backed factory and injects it via `LogOptions.SetFactory`.
+2. **Libraries log through abstractions, never a concrete backend.** A NuGet **library** depends only on `Microsoft.Extensions.Logging.Abstractions` and exposes an `ILoggerFactory` seam: a settable global factory defaulting to `NullLoggerFactory.Instance` (fallback `NullLogger.Instance`) with `SetFactory`/`TrySetFactory`, and/or an `ILoggerFactory`/`ILogger` parameter in its API. It must **not** reference Serilog or any sink, which would force a logging framework on every consumer and drag in AOT-incompatible dependencies. The consuming **application** owns the concrete logger (Serilog is fine there), bridges it to `ILoggerFactory` (e.g. `SerilogLoggerFactory` from `Serilog.Extensions.Logging`), and injects it. Reference pattern: a `LogOptions` seam in the library; the consuming CLI builds the Serilog-backed factory and injects it via `LogOptions.SetFactory`.
 
 3. **CallerMemberName**: Use for automatic function name tracking
 
@@ -288,20 +288,20 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
    }
    ```
 
-5. **Exceptions**: Do not swallow exceptions; log and rethrow or translate to a domain-specific exception
+5. **Exceptions**: Do not swallow exceptions, and either log and rethrow or translate to a domain-specific exception
 
 #### Code Patterns
 
 1. **Guard clauses**: Prefer early returns for validation and error handling
-2. **Async all the way**: Avoid blocking calls (`.Result`, `.Wait()`); use `async`/`await`
+2. **Async all the way**: Avoid blocking calls (`.Result`, `.Wait()`) and use `async`/`await`
 3. **Cancellation tokens**: Accept `CancellationToken` as the last parameter and pass it through
 4. **ConfigureAwait**: In library code, use `ConfigureAwait(false)` unless context is required
    - Do not call `ConfigureAwait(false)` in xUnit tests (see xUnit1030)
-5. **Disposables**: Use `await using` for async disposables; prefer `using` declarations
+5. **Disposables**: Use `await using` for async disposables, and prefer `using` declarations
 6. **LINQ vs loops**: Use LINQ for clarity, loops for hot paths or allocations
-7. **HTTP**: Reuse `HttpClient` via factory; avoid per-request instantiation
+7. **HTTP**: Reuse `HttpClient` via factory, never per-request instantiation
 8. **Collections**: Prefer `IReadOnlyList<T>`/`IReadOnlyCollection<T>` for public APIs
-9. **Immutability**: Prefer immutable records; use init-only setters when records are not suitable; prefer immutable or frozen collections for read-only data
+9. **Immutability**: Prefer immutable records, use init-only setters when records are not suitable, and prefer immutable or frozen collections for read-only data
 10. **Exceptions as control flow**: Avoid using exceptions for expected flow
 11. **Sealing classes**: Seal classes that are not designed for inheritance
 12. **Read-only data**: Use immutable or frozen collections for read-only data sets
@@ -309,7 +309,7 @@ Follow the scope hierarchy in [Analyzer Diagnostics and Suppressions][analyzer-d
 
 #### Testing Conventions
 
-1. **Framework**: **xUnit v3 or later** (the `xunit.v3` package, never the legacy v2 `xunit` package) with **AwesomeAssertions** for every assertion. Native xUnit asserts (`Assert.Equal`, `Assert.True`, ...) are not allowed - use the fluent `.Should()` API. Dynamic test skipping (`Assert.Skip`, `Assert.SkipWhen`) is control flow, not an assertion, and stays native.
+1. **Framework**: **xUnit v3 or later** (the `xunit.v3` package, never the legacy v2 `xunit` package) with **AwesomeAssertions** for every assertion. Native xUnit asserts (`Assert.Equal`, `Assert.True`, ...) are not allowed, so use the fluent `.Should()` API. Dynamic test skipping (`Assert.Skip`, `Assert.SkipWhen`) is control flow, not an assertion, and stays native.
 
    ```csharp
    [Fact]

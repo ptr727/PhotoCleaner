@@ -229,8 +229,7 @@ public sealed class IndexTaskTests
                 cancellationToken: TestContext.Current.CancellationToken
             );
 
-            // Rehash task forces recomputation - result should be same hash (file unchanged)
-            // but the code path goes through ComputeHashesAsync
+            // The file is unchanged so the hash matches, but the path runs through ComputeHashesAsync.
             IndexTask rehashTask = new(
                 CreateOptions(rehash: true),
                 db,
@@ -322,9 +321,8 @@ public sealed class IndexTaskTests
     [Fact]
     public async Task IndexFileAsync_MarkProcessed_PreservesExistingFlagOnUpdate()
     {
-        // --processed only affects rows being INSERTED. Existing rows keep their flag
-        // (they get cleared by UpdateHashesAsync on a hash change, which is the existing
-        // behavior, but the --processed flag itself never alters rows during update).
+        // --processed affects only rows being inserted, and existing rows keep their flag.
+        // UpdateHashesAsync clears that flag on a hash change, but --processed never alters it.
         string dbPath = TempDb();
         string filePath = TempFile("original");
         try
@@ -339,8 +337,8 @@ public sealed class IndexTaskTests
                 cancellationToken: TestContext.Current.CancellationToken
             );
 
-            // Re-run WITH --processed; the file is unchanged so this should be Unchanged
-            // and the existing row's is_processed should remain 0 (not flipped to 1).
+            // The file is unchanged, so the re-run reports Unchanged.
+            // The existing row keeps is_processed at 0.
             IndexTask withFlag = new(
                 CreateOptions(markProcessed: true),
                 db,

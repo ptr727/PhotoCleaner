@@ -433,4 +433,48 @@ public sealed class ExifToolJsonTests
         // Assert
         result.Should().BeFalse();
     }
+
+    // -- Validate verdict parsing ---------------------------------------------
+    // The sample strings below are verbatim from a sweep of a real collection.
+    // Roughly three quarters of healthy files carry warnings, so only the error count is acted on.
+
+    [Theory]
+    [InlineData("OK", 0, 0)]
+    [InlineData("1 Warning", 0, 1)]
+    [InlineData("1 Warning (minor)", 0, 1)]
+    [InlineData("2 Warnings", 0, 2)]
+    [InlineData("4 Warnings (all minor)", 0, 4)]
+    [InlineData("5 Warnings (1 minor)", 0, 5)]
+    [InlineData("12 Warnings (9 minor)", 0, 12)]
+    [InlineData("1 Error", 1, 0)]
+    [InlineData("2 Errors, 3 Warnings", 2, 3)]
+    [InlineData("1 Error, 11 Warnings (3 minor)", 1, 11)]
+    public void ParseValidate_KnownVerdicts_ReturnsCounts(
+        string validate,
+        int expectedErrors,
+        int expectedWarnings
+    )
+    {
+        // Act
+        (int errors, int warnings) = ExifToolJson.ParseValidate(validate);
+
+        // Assert
+        errors.Should().Be(expectedErrors);
+        warnings.Should().Be(expectedWarnings);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("something unexpected")]
+    public void ParseValidate_AbsentOrUnrecognized_ReturnsZeroCounts(string? validate)
+    {
+        // An unreadable verdict must not count as an error.
+        // An exiftool output change would otherwise start failing every file in the collection.
+        (int errors, int warnings) = ExifToolJson.ParseValidate(validate);
+
+        errors.Should().Be(0);
+        warnings.Should().Be(0);
+    }
 }

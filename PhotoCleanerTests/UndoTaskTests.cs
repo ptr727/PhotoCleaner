@@ -114,7 +114,7 @@ public sealed class UndoTaskTests
         string dir = TempDir();
         try
         {
-            // img.mp4 was deleted; img.mp4.bak is the only artefact
+            // The only remaining artifact is img.mp4.bak, because img.mp4 was deleted
             string bakPath = Path.Combine(dir, "img.mp4.bak");
             WriteContent(bakPath);
 

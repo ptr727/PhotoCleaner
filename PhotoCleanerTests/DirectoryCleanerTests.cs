@@ -156,9 +156,8 @@ public sealed class DirectoryCleanerTests
                 dryRun: true
             );
 
-            // Dry-run counts each directory that is empty at scan time but does not delete.
-            // Cascading deletes (parent that would become empty after child removal) are not
-            // simulated, so this only reports the leaves.
+            // Dry-run counts each directory empty at scan time but deletes nothing.
+            // Cascading deletes are not simulated, so only the leaves are reported.
             deleted.Should().Be(2);
             Directory.Exists(emptyA).Should().BeTrue();
             Directory.Exists(emptyB).Should().BeTrue();

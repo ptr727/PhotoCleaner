@@ -79,6 +79,64 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             .WithValidation(CommandResultValidation.None)
             .ExecuteAsync();
 
+    // -- Invalid: exiftool reports an error, file is skipped -----------------
+
+    [Fact]
+    public async Task ExecuteAsync_ExifToolErrorFile_IsInvalidAndNotImported()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            // A file whose bytes are not a real image makes exiftool report a format error.
+            string bad = Path.Combine(srcDir, "garbage.jpg");
+            await File.WriteAllBytesAsync(
+                bad,
+                [.. Enumerable.Range(0, 500).Select(i => (byte)(i % 251))],
+                TestContext.Current.CancellationToken
+            );
+
+            ImportTask task = new(
+                CreateOptions(outDir),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (
+                int organized,
+                int ignored,
+                int skipped,
+                int skipDbSkipped,
+                int trashSkipped,
+                int invalid,
+                int failed,
+                int deletedDirs
+            ) = await task.ExecuteAsync(
+                [bad],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            // Invalid is its own outcome, distinct from failed, and nothing is copied out.
+            invalid.Should().Be(1);
+            failed.Should().Be(0);
+            organized.Should().Be(0);
+            ignored.Should().Be(0);
+            skipped.Should().Be(0);
+            skipDbSkipped.Should().Be(0);
+            trashSkipped.Should().Be(0);
+            deletedDirs.Should().Be(0);
+            Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
+            File.Exists(bad).Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, true);
+            Directory.Delete(outDir, true);
+        }
+    }
+
     // -- UnsupportedFile: ignored, count incremented -------------------------
 
     [Fact]
@@ -104,6 +162,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -152,6 +211,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -201,6 +261,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -250,6 +311,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -305,6 +367,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -359,6 +422,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -407,6 +471,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -455,6 +520,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -505,6 +571,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -575,6 +642,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -623,6 +691,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -678,6 +747,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -697,9 +767,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             );
             recorded.Should().BeTrue();
 
-            // The DB row identifies the SOURCE file we imported (not the destination),
-            // so the dedup lookup keeps working even if the destination is later mutated
-            // (e.g. by tag injection or process re-hash).
+            // The row identifies the source file, not the destination.
+            // Dedup therefore survives later mutation of the destination.
             FileRecord? row = await db.GetByPathAsync(
                 jpg,
                 cancellationToken: TestContext.Current.CancellationToken
@@ -727,12 +796,11 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     [Fact]
     public async Task ExecuteAsync_TagPathMutatesDest_SourceRowIsUntouched()
     {
-        // Models the central design property: import inserts a row keyed by SOURCE path,
-        // even though the destination file gets mutated by tag injection. Because no
-        // command writes to the source path's row through normal use, dedup remains stable.
+        // Import keys its row by source path even though tag injection mutates the destination.
+        // No command writes that row in normal use, so dedup stays stable.
         string srcDir = TempDir();
-        // Put the file in a sub-directory so --tagpath actually has tokens to apply
-        // (ComputePathTags returns [] for files at the root of --path).
+        // The file needs a sub-directory for --tagpath to have any tokens to apply.
+        // ComputePathTags returns nothing for files at the root of --path.
         string srcSubDir = Path.Combine(srcDir, "vacation");
         Directory.CreateDirectory(srcSubDir);
         string outDir = TempDir();
@@ -757,15 +825,14 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 trashDatabase: null,
                 new()
             );
-            (int organized, _, _, _, _, _, _) = await task.ExecuteAsync(
+            (int organized, _, _, _, _, _, _, _) = await task.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
                 TestContext.Current.CancellationToken
             );
             organized.Should().Be(1);
 
-            // The dest file on disk has had XMP tags written and now hashes to something
-            // different from the source.
+            // Writing XMP tags changed the destination, so it no longer hashes to the source.
             string dest = Path.Combine(outDir, "2024-06", "photo.jpg");
             File.Exists(dest).Should().BeTrue();
             (string destSha256, _) = await Database.ComputeHashesAsync(
@@ -782,8 +849,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             srcRow.Should().NotBeNull();
             srcRow.Sha256.Should().Be(srcSha256);
 
-            // No row was inserted for the dest path. Process operating on /Processed with a
-            // separate Process.db is what tracks the dest state; import never writes there.
+            // No row is inserted for the destination path.
+            // A separate Process.db tracks destination state, and import never writes there.
             FileRecord? destRow = await db.GetByPathAsync(
                 dest,
                 cancellationToken: TestContext.Current.CancellationToken
@@ -822,7 +889,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 trashDatabase: null,
                 new()
             );
-            (int organized1, _, int skipped1, _, _, int failed1, _) = await first.ExecuteAsync(
+            (int organized1, _, int skipped1, _, _, _, int failed1, _) = await first.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
                 TestContext.Current.CancellationToken
@@ -838,7 +905,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 trashDatabase: null,
                 new()
             );
-            (int organized2, _, int skipped2, _, _, int failed2, _) = await second.ExecuteAsync(
+            (int organized2, _, int skipped2, _, _, _, int failed2, _) = await second.ExecuteAsync(
                 [jpg],
                 new DirectoryInfo(srcDir),
                 TestContext.Current.CancellationToken
@@ -1095,6 +1162,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -1140,6 +1208,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -1264,6 +1333,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -1310,6 +1380,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -1370,6 +1441,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -1427,6 +1499,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -1494,6 +1567,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(
@@ -1559,6 +1633,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 int skipped,
                 int skipDbSkipped,
                 int trashSkipped,
+                int invalid,
                 int failed,
                 int deletedDirs
             ) = await task.ExecuteAsync(

@@ -91,10 +91,7 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
         }
     }
 
-    /// <summary>
-    /// Returns true when the filesystem hosting <paramref name="directory"/> is case-sensitive.
-    /// Probes at runtime so it works correctly on Linux (true), Windows NTFS (false), and macOS HFS+ (false).
-    /// </summary>
+    // Probed at runtime because Linux is case-sensitive while Windows NTFS and macOS HFS+ are not.
     internal static bool IsFileSystemCaseSensitive(string directory)
     {
         string upper = Path.Combine(directory, "_CASE_PROBE_");
@@ -370,8 +367,8 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
         await Cli.Wrap("ffmpeg").WithArguments(["-nostdin", "-y", .. arguments]).ExecuteAsync();
 
     private static async Task RunExiftoolAsync(string[] arguments) =>
-        // exiftool exits with code 1 for warnings (e.g. writing DNG tags to TIFF);
-        // the write still succeeds, so we suppress exit code validation here.
+        // Warnings such as writing DNG tags to TIFF make exiftool exit 1.
+        // The write still succeeds, so exit code validation is suppressed.
         await Cli.Wrap("exiftool")
             .WithArguments(arguments)
             .WithValidation(CommandResultValidation.None)

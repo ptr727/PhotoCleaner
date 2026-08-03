@@ -18,7 +18,7 @@ Summarized for VS Code's generators. The full rules, rationale, and examples are
 
 ## Reviewing Carried Fleet Content
 
-Several of this repository's governance files are carried from a shared template and kept in sync across a fleet of sibling repositories, among them `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md`, this file, and the `repo-config/` rulesets. Most of `GOVERNANCE.md` is universal fleet law: every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer, is byte-locked and verified by an automated byte-for-byte match against the template canonical, not by line-by-line review. The two sections `AGENTS.md` carries are byte-locked on the same terms.
+Several of this repository's governance files are carried from a shared template and kept in sync across a fleet of sibling repositories, among them `AGENTS.md`, `CODESTYLE.md`, `WORKFLOW.md`, this file, and the `repo-config/` rulesets. Most of `GOVERNANCE.md` is universal fleet law: every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer, is byte-locked and verified by an automated byte-for-byte match against the template canonical, not by line-by-line review. `AGENTS.md` is the thin router and carries two byte-locked sections of its own, with no repository-specific ones.
 
 Two constraints follow when reviewing that content.
 
@@ -27,19 +27,32 @@ Two constraints follow when reviewing that content.
 
 ## GitHub Copilot Review Runbook
 
-> This runbook implements the [GOVERNANCE.md "PR Review Etiquette"](../GOVERNANCE.md#pr-review-etiquette) review-loop contract for GitHub Copilot. Without it in-repo, an agent has no pointer to the reliable Copilot mechanics and falls back to known-broken paths (the no-op `POST /requested_reviewers`, the wrong bot-login filter). In the API snippets below, fill the `<N>` placeholder (the PR number).
+> This runbook implements the [GOVERNANCE.md "PR Review Etiquette"](../GOVERNANCE.md#pr-review-etiquette) review-loop contract for GitHub Copilot. Without it in-repo, an agent has no pointer to the reliable Copilot mechanics and falls back to known-broken paths (the no-op `POST /requested_reviewers`, the wrong bot-login filter). In the API snippets below, fill the `<owner>` / `<repo>` / `<N>` placeholders.
 
 Use this section for provider-specific mechanics. The expected review loop *contract* (request review on every push, verify head-SHA coverage, triage findings, reply + resolve, escalate when stuck) is defined in [GOVERNANCE.md -> PR Review Etiquette](../GOVERNANCE.md#pr-review-etiquette). This section only describes how to make GitHub Copilot reliably execute it.
 
 ### Triggering and Polling
 
-Auto-review on push is configured (via the branch ruleset's `copilot_code_review` rule with `review_on_push: true`) but fires inconsistently in practice - treat it as best-effort, not guaranteed. After every push, **re-request a review programmatically** via the GraphQL `requestReviews` mutation, passing the Copilot reviewer's bot node id in `botIds`. This drives the loop end-to-end without a UI hand-off.
+Auto-review on push is configured (via the branch ruleset's `copilot_code_review` rule with `review_on_push: true`) but fires inconsistently in practice, so treat it as best-effort, not guaranteed. After every push, **re-request a review programmatically** via the GraphQL `requestReviews` mutation, passing the Copilot reviewer's bot node id in `botIds`. This drives the loop end-to-end without a UI hand-off.
 
-**A review with no inline comments is still a completed review - not a failure, and not a reason to ask the maintainer to re-trigger.** Copilot very often posts a single formal review (GraphQL `state: COMMENTED`) whose body ends with "...reviewed N of N changed files ... and generated no comments" and adds **zero** inline threads. That review carries the head `commit.oid` and fully satisfies the loop - it is the clean-pass success case. Never read "no inline comments" as "the review didn't run," and never re-request or escalate to the maintainer because comments are absent.
+**A review with no inline comments is still a completed review, not a failure, and not a reason to ask the maintainer to re-trigger.** Copilot very often posts a single formal review (GraphQL `state: COMMENTED`) whose body ends with "...reviewed N of N changed files ... and generated no comments" and adds **zero** inline threads. That review carries the head `commit.oid` and fully satisfies the loop, and it is the clean-pass success case. Never read "no inline comments" as "the review didn't run," and never re-request or escalate to the maintainer because comments are absent.
 
-**Round 1 is normally auto-seeded - poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA); by then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
+**Read the low-confidence findings, which are not inline threads.** A review body can carry a collapsed `<details>` block of findings Copilot withheld from the inline threads, and those findings appear nowhere in `reviewThreads`, so a loop that polls threads alone never sees them and reports a clean pass. **Match the block on more than one phrasing.** Its heading has appeared both as `Suppressed comments (N)` and as "Comments suppressed due to low confidence", so a filter keyed on either one alone silently reports zero suppressed findings on a review that has them, the same false clean this rule exists to prevent, one level up in the detection. They have been right repeatedly, including a rule stated more broadly than its check enforced and a check that skipped fenced blocks in every rule but one. Read the body of every review, investigate each suppressed finding on the same footing as an inline one, and answer it in the PR conversation, since a suppressed finding has no thread to reply on or resolve.
 
-> **The reviewer login differs by API.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer` - **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]` - **with** the suffix. Each query below uses the correct form for its API; match the API, not a single spelling, when adapting them.
+```sh
+# `test` with an alternation, not `contains` on one phrasing: the heading wording has changed.
+gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
+  '.[] | select(.body | test("Suppressed comments|low confidence")) | .body'
+
+# Scope it to the current head, so an answered finding from an earlier round does not re-open.
+PR_HEAD=$(gh pr view <N> --json headRefOid --jq '.headRefOid')
+gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
+  "[.[] | select(.commit_id==\"$PR_HEAD\") | select(.body | test(\"Suppressed comments|low confidence\"))] | length"
+```
+
+**Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA). By then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
+
+> **The reviewer login differs by API.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. Each query below uses the correct form for its API, so match the API, not a single spelling, when adapting them.
 
 ```sh
 # 1. PR node id + the Copilot reviewer's bot node id (read from any existing
@@ -47,7 +60,7 @@ Auto-review on push is configured (via the branch ruleset's `copilot_code_review
 PR_NODE=$(gh pr view <N> --json id --jq '.id')
 BOT_ID=$(gh api graphql -f query='
 {
-  repository(owner: "ptr727", name: "PhotoCleaner") {
+  repository(owner: "<owner>", name: "<repo>") {
     pullRequest(number: <N>) {
       reviews(first: 50) { nodes { author { __typename login ... on Bot { id } } } }
     }
@@ -65,14 +78,14 @@ mutation($pr: ID!, $bot: ID!) {
 }' -F pr="$PR_NODE" -F bot="$BOT_ID"
 ```
 
-The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR - the auto-review-on-open normally supplies the first one (it may have **no inline comments**; that still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing.
+The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR, and the auto-review-on-open normally supplies the first one (it may have **no inline comments**, which still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing.
 
-**Cold start (round 1 not yet landed): read the id repo-wide, not from this PR.** The Copilot reviewer's bot node id is the reviewer bot *account's* node id and is **stable across every PR in the repo**. So a freshly opened PR that has neither a formal review nor an issue comment yet does **not** need UI seeding to bootstrap the id - read it from any prior Copilot review anywhere in the repo, then feed it into the `requestReviews` mutation to drive round 1. Query the **most recent** PRs (`first: 20` with an explicit newest-first order; plain `last: 20` returns the *oldest* PRs, which may predate Copilot on the repo), and **guard for an empty result** - an empty `$BOT_ID` means none of the sampled PRs carry a Copilot review. Widen the window (raise the count or paginate) before concluding the repo has never had one and falling back to UI seeding; never feed an empty id into the mutation:
+**Cold start (round 1 not yet landed): read the id repo-wide, not from this PR.** The Copilot reviewer's bot node id is the reviewer bot *account's* node id and is **stable across every PR in the repo**. So a freshly opened PR that has neither a formal review nor an issue comment yet does **not** need UI seeding to bootstrap the id: read it from any prior Copilot review anywhere in the repo, then feed it into the `requestReviews` mutation to drive round 1. Query the **most recent** PRs (`first: 20` with an explicit newest-first order; plain `last: 20` returns the *oldest* PRs, which may predate Copilot on the repo), and **guard for an empty result**, since an empty `$BOT_ID` means none of the sampled PRs carry a Copilot review. Widen the window (raise the count or paginate) before concluding the repo has never had one and falling back to UI seeding; never feed an empty id into the mutation:
 
 ```sh
 BOT_ID=$(gh api graphql -f query='
 {
-  repository(owner: "ptr727", name: "PhotoCleaner") {
+  repository(owner: "<owner>", name: "<repo>") {
     pullRequests(first: 20, orderBy: { field: CREATED_AT, direction: DESC }) {
       nodes { reviews(first: 20) { nodes { author { __typename login ... on Bot { id } } } } }
     }
@@ -86,21 +99,25 @@ if [ -z "$BOT_ID" ]; then
 fi
 ```
 
-If Copilot posted **only an issue comment** on this PR and no formal review, you can instead read the id from that comment's author (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort - needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read; then use the mutation for every subsequent re-request.
+If Copilot posted **only an issue comment** on this PR and no formal review, you can instead read the id from that comment's author (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort, needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read. Use the mutation for every subsequent re-request.
 
 **Do NOT post `@Copilot review` as a PR comment.** That comment triggers the Copilot *coding agent* (`copilot-swe-agent[bot]`), which makes code changes rather than posting a review.
 
-Known non-working request paths (don't rely on them - use the `requestReviews` mutation above instead):
+Known non-working request paths (don't rely on them, and use the `requestReviews` mutation above instead):
 
 - `POST /requested_reviewers` with `reviewers=[Copilot]` can return 200 but no-op.
 - `copilot-pull-request-reviewer` as a requested reviewer slug returns 422.
-- `requestReviews` with the reviewer's bot node id in **`userIds`** fails with `Could not resolve to User node` - the Copilot reviewer is a **Bot**, so its node id goes in **`botIds`** (as in the mutation above), never `userIds`.
-- `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` lists `copilot-swe-agent` (the coding agent), not `copilot-pull-request-reviewer` - do not source the reviewer's bot node id there. Read it from an existing review per step 1 above.
-- There is no `removePullRequestFromReviewRequest` mutation, and removing the reviewer to force a fresh pass is unnecessary anyway - `requestReviews` with `union: true` re-fires the review on the current head.
+- `requestReviews` with the reviewer's bot node id in **`userIds`** fails with `Could not resolve to User node`, because the Copilot reviewer is a **Bot**, so its node id goes in **`botIds`** (as in the mutation above), never `userIds`.
+- `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` lists `copilot-swe-agent` (the coding agent), not `copilot-pull-request-reviewer`, so do not source the reviewer's bot node id there. Read it from an existing review per step 1 above.
+- There is no `removePullRequestFromReviewRequest` mutation, and removing the reviewer to force a fresh pass is unnecessary anyway, since `requestReviews` with `union: true` re-fires the review on the current head.
 
 ### Verify Review Covered Current Head
 
-Before merging, confirm Copilot reviewed the current PR head SHA. Copilot may respond as either a formal review (carries an exact commit SHA) or an issue comment (no SHA - use the most recent Copilot comment for manual confirmation). Check both.
+Before merging, confirm Copilot reviewed the current PR head SHA. Copilot may respond as either a formal review (carries an exact commit SHA) or an issue comment (no SHA, so use the most recent Copilot comment for manual confirmation). Check both.
+
+**Count matches and compare numerically, so an empty result cannot read as success.** A poll that captures a `gh api --jq` result and exits on `[ "$found" != "0" ]` treats an **empty** string as a landed review, and an empty string is exactly what a mis-written filter returns. Pipe the matches through `wc -l` and test `-gt 0`, so a query that finds nothing and a query that ran wrong both read as "not yet". A `gh` call that fails to run reaches the test the same way, because it writes its message to stderr and prints nothing to stdout, so the `$(...)` around it still yields the empty string. A mistyped or unsupported flag is the usual cause, and `gh` reports one as `accepts 1 arg(s), received 4` rather than as anything resembling a review verdict.
+
+**Check head coverage before reading merge-state, never the reverse.** A push makes the required checks go green before Copilot re-reviews the new head, so `mergeStateStatus` can read `CLEAN` in the window before any formal review covers the head. A poll that exits on `CLEAN` merges into that gap. Gate on a formal review whose `commit.oid` equals the current head SHA first, then on zero unresolved threads, and only then read merge-state.
 
 ```sh
 PR_HEAD=$(gh pr view <N> --json headRefOid --jq '.headRefOid')
@@ -112,33 +129,35 @@ gh pr view <N> --json reviews --jq \
 
 # 2. Issue comment - show the most recent Copilot comment for manual
 #    confirmation. This is the REST API, so the login carries the `[bot]` suffix.
-gh api repos/ptr727/PhotoCleaner/issues/<N>/comments --jq \
+gh api repos/<owner>/<repo>/issues/<N>/comments --jq \
   '[.[] | select(.user.login=="copilot-pull-request-reviewer[bot]")] | last | {created_at, body: .body[:200]}'
 ```
 
-Coverage is confirmed when (1) exits 0 - **a formal review with no inline comments still satisfies path (1)**, because coverage is about the head SHA, not the comment count. For issue comments (path 2), body content is the only reliable signal - `created_at` is not: `git log -1 --format=%cI` is the **commit** timestamp, not the push timestamp, so amended or rebased commits can have an earlier timestamp and an older Copilot comment could satisfy a time check even though Copilot never saw the current head. Treat path (2) as confirmed only when the comment body explicitly refers to the current changes.
+Coverage is confirmed when (1) exits 0, and **a formal review with no inline comments still satisfies path (1)**, because coverage is about the head SHA, not the comment count. For issue comments (path 2), body content is the only reliable signal, and `created_at` is not: `git log -1 --format=%cI` is the **commit** timestamp, not the push timestamp, so amended or rebased commits can have an earlier timestamp and an older Copilot comment could satisfy a time check even though Copilot never saw the current head. Treat path (2) as confirmed only when the comment body explicitly refers to the current changes.
 
 ### Bounded Retry Workflow
 
-This path is only for a **genuinely missing** review - no Copilot review (formal *or* issue comment) covers the current head SHA after polling. A review that covered the head but produced no comments is a clean pass, not a missing review; do not enter this retry path for it.
+This path is only for a **genuinely missing** review, meaning no Copilot review (formal *or* issue comment) covers the current head SHA after polling. A review that covered the head but produced no comments is a clean pass, not a missing review, so do not enter this retry path for it.
+
+**A slow review is pending, not missing, so poll with backoff and never escalate on a timeout alone.** Copilot can lag far beyond the usual one-to-three minutes when it has been re-requested many times in quick succession, because it throttles under load, and a re-review landing tens of minutes after the request is normal. A poll that times out is therefore evidence only that the review has not landed *yet*, not that Copilot is done or unresponsive. Report the status as "review still pending" and keep polling on a widening interval (for example 20s steps, then a few minutes) rather than stopping. Enter the escalation step below only when the `requestReviews` mutation itself no-ops or errors, or after a genuinely long wait with the request confirmed accepted, never merely because one fixed poll window elapsed.
 
 If a review did not run on the current head, retry:
 
 1. Wait briefly and check head-SHA coverage (see above).
-1. Re-request the review via the `requestReviews` mutation (see "Triggering and Polling"); fall back to the GitHub PR UI only if the mutation no-ops.
+1. Re-request the review via the `requestReviews` mutation (see "Triggering and Polling"), falling back to the GitHub PR UI only if the mutation no-ops.
 1. Retry up to two more times (three total).
 1. If still missing, mark review as blocked and escalate to the user/maintainer with what was attempted.
 
 ### Reply and Thread Resolution Workflow
 
-Every id below is captured from a live query into a variable and passed from there - never hand-typed, guessed, or pasted as a `PRRT_...` literal. A node id resolves globally, so a fabricated or stale id does not fail, it writes to a real thread on an unrelated repository. This runbook implements [GOVERNANCE.md "Repository Boundaries and Write Safety"](../GOVERNANCE.md#repository-boundaries-and-write-safety): write only to this repo, capture every id from a live query, and never suppress a mutation's output.
+Every id below is captured from a live query into a variable and passed from there, never hand-typed, guessed, or pasted as a `PRRT_...` literal. A node id resolves globally, so a fabricated or stale id does not fail, it writes to a real thread on an unrelated repository. This runbook implements [GOVERNANCE.md "Repository Boundaries and Write Safety"](../GOVERNANCE.md#repository-boundaries-and-write-safety): write only to this repo, capture every id from a live query, and never suppress a mutation's output.
 
-List unresolved threads. Use `first: 100` with cursor-based pagination; if `hasNextPage` is true, re-run with `after: "<endCursor>"` to retrieve the next page:
+List unresolved threads. Use `first: 100` with cursor-based pagination, and where `hasNextPage` is true, re-run with `after: "<endCursor>"` to retrieve the next page:
 
 ```sh
 gh api graphql -f query='
 {
-  repository(owner: "ptr727", name: "PhotoCleaner") {
+  repository(owner: "<owner>", name: "<repo>") {
     pullRequest(number: <N>) {
       reviewThreads(first: 100) {
         nodes {
@@ -156,12 +175,12 @@ gh api graphql -f query='
 '
 ```
 
-Reply on a thread, then resolve it. Capture the target thread's id into `$TID` from the listing query above - filter to the thread being answered by its `path`, and guard for an empty result so a mutation never runs on a guessed id. When a file carries more than one unresolved thread, `path` alone is ambiguous and `head -n 1` would pick the wrong one, so narrow by first-comment body - the query already fetches `comments(first: 1)` for this - by adding `and (.comments.nodes[0].body | contains("<SNIPPET>"))` to the `select`:
+Reply on a thread, then resolve it. Capture the target thread's id into `$TID` from the listing query above, filtering to the thread being answered by its `path`, and guard for an empty result so a mutation never runs on a guessed id. When a file carries more than one unresolved thread, `path` alone is ambiguous and `head -n 1` would pick the wrong one, so narrow by first-comment body (the query already fetches `comments(first: 1)` for this) by adding `and (.comments.nodes[0].body | contains("<SNIPPET>"))` to the `select`:
 
 ```sh
 TID=$(gh api graphql -f query='
 {
-  repository(owner: "ptr727", name: "PhotoCleaner") {
+  repository(owner: "<owner>", name: "<repo>") {
     pullRequest(number: <N>) {
       reviewThreads(first: 100) {
         nodes { id isResolved path comments(first: 1) { nodes { body } } }
@@ -190,26 +209,27 @@ mutation($threadId: ID!) {
 }' -F threadId="$TID"
 ```
 
-Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution action - GitHub provides no API or UI to resolve them. Reply if the finding warrants it; no resolution step is needed or possible.
+Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution action, since GitHub provides no API or UI to resolve them. Reply if the finding warrants it, but no resolution step is needed or possible.
 
 ### PR Edits and Merge-State Gotchas
 
-- **`gh pr edit --title/--body` is broken here.** It touches the deprecated Projects-classic `projectCards` GraphQL field and **exits non-zero without applying the change** (a stale PR description then survives review rounds). Edit the title/body via the API and verify it took: GraphQL `updatePullRequest(input: { pullRequestId, title, body })`, or REST `gh api -X PATCH repos/ptr727/PhotoCleaner/pulls/<N> -F body=@body.md` (the `@` reads the body from a file - name it explicitly, not the literal `file`).
-- **`main`/`develop` use rulesets, not classic branch protection.** The classic protection REST endpoint (`repos/.../branches/<b>/protection`) 404s - read the ruleset instead. A `mergeStateStatus` of `BLOCKED` on a green PR is usually just **unresolved review threads** (the ruleset requires thread resolution); resolving them moves it to `CLEAN`. (`BLOCKED` is a `mergeStateStatus` value; don't confuse it with the separate `mergeable` field's `MERGEABLE`/`CONFLICTING`, which reports merge conflicts, not review gates.)
-- **Push -> head-SHA read race.** A `headRefOid` read taken immediately after a push can return the **old** head; re-read after the push registers, or a coverage poll evaluates the stale SHA.
-- **Copilot is sometimes factually wrong** (e.g. it claimed `actionlint -color` "requires a value" - it is a boolean flag). Verify a finding before fixing; decline with evidence when it is wrong - that is distinct from dismissing a still-present finding as stale.
+- **`gh pr edit --title/--body` is broken here.** It touches the deprecated Projects-classic `projectCards` GraphQL field and **exits non-zero without applying the change** (a stale PR description then survives review rounds). Edit the title/body via the API and verify it took: GraphQL `updatePullRequest(input: { pullRequestId, title, body })`, or REST `gh api -X PATCH repos/<owner>/<repo>/pulls/<N> -F body=@body.md` (the `@` reads the body from a file, so name it explicitly, not the literal `file`).
+- **`main`/`develop` use rulesets, not classic branch protection.** The classic protection REST endpoint (`repos/.../branches/<b>/protection`) 404s, so read the ruleset instead. A `mergeStateStatus` of `BLOCKED` on a green PR is usually just **unresolved review threads** (the ruleset requires thread resolution); resolving them moves it to `CLEAN`. (`BLOCKED` is a `mergeStateStatus` value; don't confuse it with the separate `mergeable` field's `MERGEABLE`/`CONFLICTING`, which reports merge conflicts, not review gates.)
+- **Push -> head-SHA read race.** A `headRefOid` read taken immediately after a push can return the **old** head, so re-read after the push registers, or a coverage poll evaluates the stale SHA.
+- **Copilot is sometimes factually wrong** (e.g. it claimed `actionlint -color` "requires a value" when it is a boolean flag). Verify a finding before fixing, and decline with evidence when it is wrong, which is distinct from dismissing a still-present finding as stale.
 
 Reply-body conventions:
 
 - Accepted bug/style fix: include fixing commit SHA and a one-line summary.
 - Declined style comment: cite the rule (GOVERNANCE.md or the CODESTYLE.md language section) and the existing-tree precedent.
 - Declined architecture proposal: one-sentence rationale.
+- Declined false positive on carried fleet content (a broken-link or dead-cross-reference flag inside byte-locked rule text): cite the "Reviewing Carried Fleet Content" section, since the reference is intentional and the text cannot be edited locally.
 
 After the final push, sweep-resolve stale older threads for removed code paths.
 
 ## When in Doubt
 
-Read [AGENTS.md](../AGENTS.md) to find the section that governs your change, and [GOVERNANCE.md](../GOVERNANCE.md) for the rule text itself. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions - keep those focused on the change itself.
+Read [AGENTS.md](../AGENTS.md) to find the section that governs your change, and [GOVERNANCE.md](../GOVERNANCE.md) for the rule text itself. For code-style rules, [`CODESTYLE.md`](../CODESTYLE.md) (its General section plus the relevant language section) is authoritative. Don't restate any of these files' rules in commit bodies or PR descriptions, and keep those focused on the change itself.
 
 If you find a gap in the governance itself (this file, AGENTS.md, or GOVERNANCE.md is out of date, a rule is missing, something bit this repo and would bite the next), fix it in the governance docs as part of your change rather than only working around it locally.
 
@@ -222,30 +242,35 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
 ### Project Structure
 
 - **Docker/**: Docker configuration
-  - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final); installs `exiftool` and `ffmpeg` in the final stage
+  - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final) that installs `exiftool` and `ffmpeg` in the final stage
 - **PhotoCleaner/**: Main console application
   - `Program.cs`: Entry point with logger setup (Main only)
-  - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `import`, `index`, and `trash` subcommands)
-  - `MediaUtilities.cs`: Shared static utilities - `SupportedExtensions` (FrozenSet), `GetUniqueFileName`, `GetExifToolJsonAsync`, `SetCreateDateAsync`, video/duration constants
-  - `CommandRunner.cs`: Thin wrapper for command start/complete/error logging
+  - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `import`, `index`, `trash`, and `verify` subcommands)
+  - `MediaUtilities.cs`: Shared static utilities, `SupportedExtensions` (FrozenSet), `GetUniqueFileName`, `GetExifToolJsonAsync`, `SetCreateDateAsync`, video/duration constants
+  - `CommandRunner.cs`: Thin wrapper for command start/complete/error logging, taking `Func<Task<int>>` and returning the command's exit code
+  - `ExitCode.cs`: The shared exit-code contract, being `Success` (0), `Error` (1, command could not run), and `Failed` (2, ran to completion with per-file failures)
   - `DatabaseScope.cs`: Generic async DB lifecycle helper (create, init, dispose)
   - `TrashDatabaseScope.cs`: Same lifecycle helper pattern for `TrashDatabase`
   - `FileEnumerator.cs`: Parallel file enumeration returning `(IReadOnlyList<string>, int)`
-  - `DirectoryCleaner.cs`: Static helper that deletes empty subdirectories under a root (deepest-first; root itself is never deleted); used by `import` and `process` when `--deleteempty` is set
-  - `ProcessCommand.cs`: Process command orchestration - case conflict resolution, reprocessing loop, result reporting
+  - `DirectoryCleaner.cs`: Static helper that deletes empty subdirectories under a root (deepest-first, and the root itself is never deleted), used by `import` and `process` when `--deleteempty` is set
+  - `ProcessCommand.cs`: Process command orchestration, case conflict resolution, reprocessing loop, result reporting
   - `ImportCommand.cs`: Import command orchestration (formerly `OrganizeCommand`)
   - `IndexCommand.cs`: Index command orchestration
-  - `TrashCommand.cs`: Trash command orchestration - fetches trashed asset checksums from Immich API, stores SHA-1 hashes in a `TrashDatabase`
+  - `TrashCommand.cs`: Trash command orchestration, fetches trashed asset checksums from Immich API, stores SHA-1 hashes in a `TrashDatabase`
   - `UndoCommand.cs`: Undo command orchestration
+  - `VerifyCommand.cs`: Verify command orchestration, which enumerates, runs `VerifyTask`, and reports counts
   - `ProcessTask.cs`: Core file processing pipeline (validation, conversion, metadata)
-  - `UndoTask.cs`: Undo logic - two-pass algorithm that restores `.bak` files
-  - `ImportTask.cs`: Import logic - copies (default) or moves supported media files from source into date-based subdirectories under `--outpath`. Inserts a row keyed by SOURCE path into Import.db. Optional SQLite deduplication via `Database`. (Formerly `OrganizeTask`.)
+  - `UndoTask.cs`: Undo logic, two-pass algorithm that restores `.bak` files
+  - `ImportTask.cs`: Import logic, copies (default) or moves supported media files from source into date-based subdirectories under `--outpath`. Inserts a row keyed by SOURCE path into Import.db. Optional SQLite deduplication via `Database`. (Formerly `OrganizeTask`.)
+  - `VerifyTask.cs`: Verification logic, a decode pass that runs Immich's own `MediaRepository` inside `ghcr.io/immich-app/immich-server:release` via `docker run`, batching paths over stdin. Preflights the image before judging any file, so an infrastructure failure exits `Error` rather than marking files invalid
+  - `ImmichVerifyScript.cs`: The Node script run inside the Immich image, as const strings. Calls Immich's own compiled `MediaRepository`, `defaults`, and `ThumbnailConfig` rather than reimplementing the preview pipeline, so behavior tracks Immich across releases
+  - `VerifyResult.cs`: The AOT-compatible `ImmichVerifyLine` JSON model and its `ImmichVerifyJsonContext` source-generated context, together forming the container's output protocol
   - `IndexTask.cs`: Common DB upsert logic used by `process` and `index` commands; `IndexFileAsync` (single-file) returns `(IndexStatus, sha256, sha1, wasProcessed)`; `ExecuteAsync` (batch parallel) returns `(inserted, updated, unchanged, ignored, failed)`. When `options.MarkProcessed` is true, newly inserted rows are marked `is_processed=1` (used by `index --processed` to seed Process.db).
   - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`, `file_size`, `mtime_ticks`, `is_processed`); indexes on both hash columns; size/mtime caching via `ResolveHashesAsync` to skip rehashing unchanged files. Every write computes both sha256 and sha1 in a single read pass; both columns are non-null
   - `TrashDatabase.cs`: Simple SQLite wrapper for Immich trash hashes; single `trash_hashes` table (`sha1` PRIMARY KEY); used by `trash`, `import`, and `process` commands
   - `ImmichApiModels.cs`: AOT-compatible JSON models for Immich API (`ImmichSearchRequest`, `ImmichSearchResponse`, `ImmichAssetDto`) with `ImmichJsonContext` source generation
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
-  - `ExifToolJson.cs`: JSON model for ExifTool metadata
+  - `ExifToolJson.cs`: JSON model for ExifTool metadata, including the `ExifTool:Validate` verdict and `ParseValidate` which splits it into error and warning counts
   - `SkippedExtensionTracker.cs`: Thread-safe tracker for unknown file extensions skipped during processing; used by all commands that filter by `MediaUtilities.SupportedExtensions` (`process`, `import`, `index`)
   - `HttpClientFactory.cs`: Polly resilience pipeline (retry, circuit breaker) and `SocketsHttpHandler` connection pooling
   - `AssemblyInfo.cs`: Assembly metadata (app name, version) used by `HttpClientFactory` for User-Agent header
@@ -263,6 +288,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `TrashDatabaseTests.cs`: TrashDatabase tests (8 tests)
   - `TrashCommandTests.cs`: TrashCommand tests with mock HTTP handler (6 tests)
   - `DirectoryCleanerTests.cs`: DirectoryCleaner static helper tests (6 tests)
+  - `VerifyTaskTests.cs`: Verify protocol parsing and script-contract tests (10 tests)
 
 ### Core Processing Pipeline
 
@@ -277,11 +303,16 @@ if (!RenameMismatchedMimeExtensions()
     || !WarnDngVersion())
 ```
 
+Before that chain runs, `CheckExifToolValidation` acts on the `ExifTool:Validate` verdict that
+rides along with the metadata read. Only an error count fails the file (`ProcessResult.Invalid`).
+Warnings are logged at debug level, because roughly three quarters of healthy files in a real
+collection carry at least one.
+
 ### State Management Pattern
 
 - **Primary Constructor Parameters**: Command and task classes use C# 12 primary constructors. All task classes take `CommandLine.Options options` as their first parameter, plus any non-option runtime params (e.g., `Database`, shared collections). Command classes take `(CommandLine.Options options, CancellationToken cancellationToken)` and pass `options` directly to task constructors.
-- **Command/Task Separation**: Command classes (e.g., `ProcessCommand`) handle orchestration (file enumeration, DB lifecycle, result logging); task classes (e.g., `ProcessTask`) handle per-file business logic
-- **Composable Infrastructure**: `CommandRunner`, `DatabaseScope`, and `FileEnumerator` are static helpers freely composed by command classes - no inheritance hierarchy
+- **Command/Task Separation**: Command classes (e.g., `ProcessCommand`) handle orchestration (file enumeration, DB lifecycle, result logging), while task classes (e.g., `ProcessTask`) handle per-file business logic
+- **Composable Infrastructure**: `CommandRunner`, `DatabaseScope`, and `FileEnumerator` are static helpers freely composed by command classes, no inheritance hierarchy
 - **Shared Collections**: `ConcurrentBag<string>` for file names, `ConcurrentDictionary<string, byte>` for unknown extensions with case-insensitive comparison
 - **Parallel Processing**: Files processed using `Parallel.ForEachAsync` with `MaxDegreeOfParallelism`
 - **External Tool Integration**: Uses `CliWrap` for all external command execution (exiftool, ffmpeg, ffprobe)
@@ -293,7 +324,7 @@ if (!RenameMismatchedMimeExtensions()
 
 ```csharp
 BufferedCommandResult result = await Cli.Wrap("exiftool")
-    .WithArguments(["-groupNames", "-json", _fileInfo.FullName])
+    .WithArguments(["-groupNames", "-json", "-validate", "-all", _fileInfo.FullName])
     .ExecuteBufferedAsync();
 ```
 
@@ -304,7 +335,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 ### Media File Processing Conventions
 
 - **FrozenSet Extensions**: Define supported extensions as `FrozenSet<string>` with `StringComparer.OrdinalIgnoreCase` (e.g., `s_remuxExtensions`, `s_jpegExtensions`)
-- **Case-Insensitive Matching**: Use FrozenSet `.Contains()` directly without `.ToLower()` - comparer handles case-insensitivity
+- **Case-Insensitive Matching**: Use FrozenSet `.Contains()` directly without `.ToLower()`, comparer handles case-insensitivity
 - **File Type Categorization**: Group operations by file type requirements (remux vs re-encode vs audio-only)
 - **Single-Pass Optimizations**: Prefer single-loop iterations with early exit over multiple LINQ passes
 - **Skipped Extension Tracking**: Commands that filter files by `MediaUtilities.SupportedExtensions` pass a shared `SkippedExtensionTracker` instance to their task classes. The tracker collects unknown extensions (thread-safe via `Track()`), and the command calls `LogWarnings()` after processing to log them sorted. Used by `process`, `import`, and `index` commands.
@@ -320,7 +351,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 ### Date Inference System (DateFromPath.cs)
 
 - **Static Internal Methods**: All methods are `internal static` for testability with `InternalsVisibleTo`
-- **DateFromPath.InferCreatedDate()**: Main entry point - tries filename first, then path fallback
+- **DateFromPath.InferCreatedDate()**: Main entry point, tries filename first, then path fallback
 - **DateFromPath.ExtractDateFromFilename()**: Supports multiple filename patterns:
   - `YYYYMMDD_HHMMSS` format (e.g., `20210502_200152957_iOS-1747.jpg`)
   - `YYYYMMDD` format (e.g., `EX_20030219_3378.jpg`)
@@ -332,16 +363,16 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 ### Command Line Interface (CommandLine.cs)
 
 - **System.CommandLine Integration**: Uses modern .NET command line parsing
-- **Five subcommands**: `process`, `undo`, `import`, `index`, `trash` - each with their own option set
+- **Six subcommands**: `process`, `undo`, `import`, `index`, `trash`, `verify`, each with their own option set
 - **Required `--path` Parameter**: Single directory path using `Option<DirectoryInfo>`. Validated with `AcceptExistingOnly()`
-- **Optional `--dryrun` Flag**: Non-destructive preview mode (process, undo, import - not index)
+- **Optional `--dryrun` Flag**: Non-destructive preview mode (process, undo, import, not index)
 - **Optional `--threads` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()` (process, import, index)
-- **Optional `--skipbackup` Flag** (process only): Skips all `.bak` file creation - originals are deleted/overwritten in-place. Logs a warning at startup. Disables undo.
+- **Optional `--skipbackup` Flag** (process only): Skips all `.bak` file creation, originals are deleted/overwritten in-place. Logs a warning at startup. Disables undo.
 - **Optional `--deleteempty` Flag** (process, import): After the command completes, deletes empty child subdirectories from the target directory (deepest first; target root is never deleted). For `process` the target is `--path` (operated on in-place); for `import` it is `--outpath`. Implemented by `DirectoryCleaner.DeleteEmptyDirectories(root, dryRun)`.
 - **`import` subcommand** (formerly `organize`): Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from `--outpath` after all files are imported. `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool; filtered by `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) checked via `meta.FileTypeExtension`; uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every imported file. `--datepath` (default `false`) infers the EXIF creation date from the source file path when no date is already embedded; applies the date to the destination file before restoring mtime. **`--db <sqlite-file>` (Import.db) is the source-side dedup DB**: rows are keyed by `path = source_path` (NOT dest path) and hold the source file's hash/size/mtime. On each source file, import calls `GetByPathAsync(source_path)` for source-side hash caching, then `Sha256ExistsAsync(source_hash)` to skip already-imported sources. New imports insert a row at the source path. **No command outside `import` writes to source-keyed rows**, so dedup cannot be clobbered by later runs of `process`/`index`. `--trashdb <sqlite-file>` skips files whose **source-file** SHA-1 is in Trash.db (Limitation: when import rewrites the dest via `--tags`/`--tagpath`/`--datepath`, the dest SHA-1 differs from the source SHA-1; Immich stored the dest SHA-1 from a prior upload, so the trash match is missed here and is caught later by `process --trashdb`). `--skipdb <sqlite-file>` skips files whose SHA-256 matches a reference DB (read-only). Cross-collection dedup is typically implemented by pointing `--skipdb` at another collection's Import.db. `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
-- **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. `--processed` (optional) marks newly-INSERTED rows with `is_processed = 1`; useful when seeding a Process.db from existing files so `process` treats them as already-done. The flag does not flip the flag on existing rows. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
+- **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. `--processed` (optional) marks newly-INSERTED rows with `is_processed = 1`, which is useful when seeding a Process.db from existing files so `process` treats them as already-done. The flag does not flip the flag on existing rows. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
 - **`trash` subcommand**: Syncs trashed asset checksums from an Immich server into a local SQLite trash database. `--url` (Immich server URL, required), `--trashdb <sqlite-file>` (trash database, required), and the API key supplied by exactly one of `--apikey` (inline) or `--apikey-file` (path to a file whose trimmed contents are the key). The two API-key options are mutually exclusive and exactly one must be provided; `--apikey-file` must reference an existing, non-empty, readable file (existence enforced by an option validator, non-empty/readable by a command-level validator; read failures are translated to validation errors, never thrown). The key is resolved at parse time by `CommandLine.ResolveApiKey`/`ReadApiKeyFile` (file contents preferred and `.Trim()`-med) and flows into `Options.ImmichApiKey`. Uses `POST /api/search/metadata` with `trashedAfter` to fetch all trashed assets, converts Base64 SHA-1 checksums to hex, and inserts them via `INSERT OR IGNORE`. Full sync (idempotent, append-only). No `--dryrun`.
-- **`--trashdb` Flag** (import, process): SQLite database file with Immich trash hashes (synced by `trash`). In `import`, files matching the trash DB are skipped (this prevents re-importing photos the user trashed in Immich); the check is against the **source-file** SHA-1, so files whose dest SHA-1 was mutated by `import` itself (`--tags`/`--tagpath`/`--datepath`) will not match here even though Immich stored the mutated SHA-1 - `process --trashdb` catches those on the next pass. In `process`, matching files are **deleted from disk and from Process.db** before the per-file processing pipeline runs (cleanup of files trashed in Immich after upload, and the safety net for the import source-vs-dest SHA-1 drift). The Trash.db check is the durable safety net beyond Immich's ~30-day trash retention.
+- **`--trashdb` Flag** (import, process): SQLite database file with Immich trash hashes (synced by `trash`). In `import`, files matching the trash DB are skipped (this prevents re-importing photos the user trashed in Immich); the check is against the **source-file** SHA-1, so files whose dest SHA-1 was mutated by `import` itself (`--tags`/`--tagpath`/`--datepath`) will not match here even though Immich stored the mutated SHA-1, `process --trashdb` catches those on the next pass. In `process`, matching files are **deleted from disk and from Process.db** before the per-file processing pipeline runs (cleanup of files trashed in Immich after upload, and the safety net for the import source-vs-dest SHA-1 drift). The Trash.db check is the durable safety net beyond Immich's ~30-day trash retention.
 - **Optional `--skipdb` Flag** (import only): SQLite database of files to skip (read-only SHA-256 check). Files whose SHA-256 matches a record in this DB are skipped without being recorded. Use this to skip files already present in another collection.
 - **Optional `--rehash` Flag** (process, import, index): Forces SHA-256 recomputation for every file, ignoring the size/mtime cache. SHA-1 is also recomputed when `--trashdb` is in use. Useful after filesystem operations that preserve mtime but change content.
 - **Optional `--duration` Flag** (process only): Overrides `ShortVideoDuration` (default `1.0`s). Videos in a live-photo-compatible format whose duration is <= this value are always deleted. Must be `> 0`. Stored in `CommandLine.Options.ShortVideoDuration` and read by `DeleteLivePhotosAsync`.
@@ -379,18 +410,18 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 ### Video Conversion Logic
 
 - **Three-tier approach**: Remux (.mts, .m2ts, .mkv) -> Re-encode (.wmv, .avi, .3gp, .gif) -> Audio-only (.mov/.mp4 with PCM)
-- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion; `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) is written alongside the backup containing the full output path - this is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was already taken. When `options.SkipBackup` is true, no `.bak` or `.bak.out` files are created - the original is deleted after conversion.
-- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source.bak> <output> -all:all -overwrite_original` copies all source metadata to the output file. `ffmpeg -map_metadata` is not used - it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` handles cross-format date mapping, so no separate date-setting step is needed after conversion.
+- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) is written alongside the backup containing the full output path, this is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was already taken. When `options.SkipBackup` is true, no `.bak` or `.bak.out` files are created, and the original is deleted after conversion.
+- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source.bak> <output> -all:all -overwrite_original` copies all source metadata to the output file. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` handles cross-format date mapping, so no separate date-setting step is needed after conversion.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
 ### Live Photo Detection
 
-- **Short videos** (duration <= `options.ShortVideoDuration`, default `1.0s`; overridable via `--duration`): always deleted regardless of companion file
+- **Short videos** (duration <= `options.ShortVideoDuration`, default `1.0s`, overridable via `--duration`): always deleted regardless of companion file
 - **Companion file search** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file by:
   1. Direct basename match (`IMG_1234.mov` -> `IMG_1234.heic`)
-  2. Basename minus `_hevc` suffix (`IMG_1234_HEVC.mov` -> `IMG_1234.heic`) - new iPhone naming
+  2. Basename minus `_hevc` suffix (`IMG_1234_HEVC.mov` -> `IMG_1234.heic`), the newer iPhone naming
 - **ContentIdentifier confirmation**: a candidate pair is only deleted when both files expose a `ContentIdentifier` tag that matches exactly. If either file lacks the tag, or the tags differ, the video is kept. There is no fallback to name-only deletion.
-- **Long videos** (>= `LiveVideoDuration` = 4.0s): always kept even with a matching companion; a warning is logged
+- **Long videos** (>= `LiveVideoDuration` = 4.0s): always kept even with a matching companion, and a warning is logged
 
 ### Undo Architecture (UndoTask.cs)
 
@@ -404,9 +435,9 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
     - Derived base: delete current file + all its backups
     - Non-derived base: delete current file if present, restore `X.bak` -> `X`; then locate the derived conversion output: if `X.bak.out` companion exists read the explicit output path from it and delete that file (handles uniquified names like `img_1.mp4`); otherwise fall back to checking whether `stem.mp4` exists and has no backup (legacy single-run heuristic)
 - **Internal static helpers** (testable via `InternalsVisibleTo`):
-  - `IsBackupFile(path)` - matches `.bak\d*$`
-  - `IsNumberedBackup(path)` - matches `.bak\d+$`
-  - `GetBackupBase(path)` - strips the `.bak\d*` suffix
+  - `IsBackupFile(path)`: matches `.bak\d*$`
+  - `IsNumberedBackup(path)`: matches `.bak\d+$`
+  - `GetBackupBase(path)`: strips the `.bak\d*` suffix
 - **Dry run**: logs all intended operations but performs no file I/O
 - **Known limitation**: extension renames to a previously non-existent filename create no backup and cannot be undone
 

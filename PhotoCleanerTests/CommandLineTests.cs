@@ -6,6 +6,63 @@ public sealed class CommandLineTests
 {
     private static string ExistingDir => Directory.GetCurrentDirectory();
 
+    // -- Verify command -------------------------------------------------------
+
+    [Fact]
+    public void VerifyCommand_PathOnly_ParsesWithoutErrors()
+    {
+        CommandLine cli = new(["verify", "--path", ExistingDir]);
+
+        cli.Result.Errors.Should().BeEmpty();
+    }
+
+    // An option the command does not define is an error, never something silently ignored.
+    [Fact]
+    public void VerifyCommand_UnknownOption_IsRejected()
+    {
+        CommandLine cli = new(["verify", "--path", ExistingDir, "--nosuchoption"]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void VerifyCommand_WithDbAndThreads_ParsesOptions()
+    {
+        CommandLine cli = new([
+            "verify",
+            "--path",
+            ExistingDir,
+            "--db",
+            "Verify.db",
+            "--threads",
+            "2",
+            "--reprocess",
+        ]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        cli.Result.Errors.Should().BeEmpty();
+        options.DbFile!.Name.Should().Be("Verify.db");
+        options.Threads.Should().Be(2);
+        options.Reprocess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void VerifyCommand_MissingPath_ReportsError()
+    {
+        CommandLine cli = new(["verify"]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void VerifyCommand_IsRegisteredAsSubcommand()
+    {
+        CommandLine cli = new(["--help"]);
+
+        cli.Root.Subcommands.Select(command => command.Name).Should().Contain("verify");
+    }
+
     // -- SkipBackup option ----------------------------------------------------
 
     [Fact]

@@ -6,7 +6,7 @@ The audit is read-only: it diffs live state against the committed baseline and r
 
 ## Scope
 
-This is a release-model repo: the self-audit covers the `main` and `develop` rulesets, general repository settings, and secret names. Code-project conformance (analyzers, tests, coverage, publish workflows) is CI's job and the fleet hub's fleet-wide audit's, not this self-audit's - see [GOVERNANCE.md "Branching Model"][governance-branching-model] for the model this baseline encodes.
+This is a release-model repo: the self-audit covers the `main` and `develop` rulesets, general repository settings, and secret names. Code-project conformance (analyzers, tests, coverage, publish workflows) is CI's job and the fleet hub's fleet-wide audit's, not this self-audit's. See [GOVERNANCE.md "Branching Model"][governance-branching-model] for the model this baseline encodes.
 
 ## General Settings
 
@@ -35,7 +35,7 @@ for b in develop main; do
 done
 ```
 
-The result must be exactly two rulesets named `develop` and `main` - a missing ruleset or a divergent payload is a **defect**; a duplicate or stray ruleset is a **drift finding**.
+The result must be exactly two rulesets named `develop` and `main`. A missing ruleset or a divergent payload is a **defect**, and a duplicate or stray ruleset is a **drift finding**.
 
 ## Secrets
 

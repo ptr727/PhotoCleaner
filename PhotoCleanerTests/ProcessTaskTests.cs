@@ -33,6 +33,66 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
 
     // -- Extension / MIME handling --------------------------------------------
 
+    // A file exiftool cannot open looks like one it cannot parse: an error plus valid JSON.
+    // The shared metadata call separates them by opening the file first.
+    // A permission problem is therefore never recorded as damaged media, in any command.
+    [Fact]
+    public async Task GetExifToolJsonAsync_UnreadableFile_Throws()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("File mode permissions are only enforced on Linux");
+            return;
+        }
+
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        string locked = Path.Combine(workDir, "locked.jpg");
+        try
+        {
+            // Arrange
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), locked);
+            File.SetUnixFileMode(locked, UnixFileMode.None);
+            using (FileStream? readable = TryOpen(locked))
+            {
+                if (readable is not null)
+                {
+                    Assert.Skip("Running with permission to read anything");
+                    return;
+                }
+            }
+
+            // Act
+            Func<Task> act = async () =>
+                await MediaUtilities.GetExifToolJsonAsync(
+                    locked,
+                    TestContext.Current.CancellationToken
+                );
+
+            // Assert
+            await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        }
+        finally
+        {
+            if (File.Exists(locked))
+            {
+                File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    private static FileStream? TryOpen(string path)
+    {
+        try
+        {
+            return File.OpenRead(path);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_UnknownExtension_ReturnsUnknownExtension()
     {
@@ -62,9 +122,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
-            // On case-insensitive filesystems (Windows NTFS, macOS HFS+) "photo.Jpg" and
-            // "photo.jpg" are the same file, so the rename is meaningless and File.Exists()
-            // cannot distinguish them. Skip on those platforms; the test runs fully on Linux.
+            // On a case-insensitive filesystem the two names are the same file.
+            // The rename is then meaningless and File.Exists cannot distinguish them.
             if (!TempDirectoryFixture.IsFileSystemCaseSensitive(workDir))
             {
                 Assert.Skip(
@@ -365,8 +424,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             string filePath = Path.Combine(workDir, TempDirectoryFixture.MtsFile);
             File.Copy(fixture.SourceFile(TempDirectoryFixture.MtsFile), filePath);
 
-            // Act - first pass: exiftool returns "m2t" for MPEG-TS, so .mts is renamed to .m2t
-            // and queued for reprocess; remux to .mp4 happens on the second pass
+            // For MPEG-TS, exiftool returns "m2t", so the first pass renames and re-queues.
+            // The remux to .mp4 happens on the second pass.
             ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
@@ -390,8 +449,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             string filePath = Path.Combine(workDir, TempDirectoryFixture.M2tsFile);
             File.Copy(fixture.SourceFile(TempDirectoryFixture.M2tsFile), filePath);
 
-            // Act - first pass: exiftool returns "m2t" for MPEG-TS, so .m2ts is renamed to .m2t
-            // and queued for reprocess; remux to .mp4 happens on the second pass
+            // For MPEG-TS, exiftool returns "m2t", so the first pass renames and re-queues.
+            // The remux to .mp4 happens on the second pass.
             ProcessTask.ProcessResult result = await CreateContext(filePath);
 
             // Assert
@@ -614,8 +673,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             // Act
             ProcessTask.ProcessResult result = await CreateContext(filePath);
 
-            // Assert - exiftool returns "mov" for QuickTime, which matches the extension, so no
-            // rename occurs; PCM audio is detected and re-encoded directly in the first pass
+            // For QuickTime, exiftool returns "mov", which matches the extension, so no rename occurs.
+            // PCM audio is detected and re-encoded directly in the first pass.
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
             File.Exists(filePath).Should().BeFalse();
             File.Exists(filePath + ".bak").Should().BeTrue();
@@ -640,8 +699,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             // Act
             ProcessTask.ProcessResult result = await CreateContext(filePath);
 
-            // Assert - exiftool returns "mov" for QuickTime, which matches the extension, so no
-            // rename occurs; AAC audio requires no conversion, file is left as-is
+            // For QuickTime, exiftool returns "mov", which matches the extension, so no rename occurs.
+            // AAC audio needs no conversion, so the file is left as-is.
             result.Should().Be(ProcessTask.ProcessResult.Success);
             File.Exists(filePath).Should().BeTrue();
             File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeFalse();
@@ -704,8 +763,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     [Fact]
     public async Task ExecuteAsync_PcmMp4WithContentIdentifier_PreservesContentIdentifierAfterConversion()
     {
-        // Arrange - live photo MP4 with PCM audio: first pass re-encodes audio (no companion yet),
-        // then companion is added and second pass deletes the video as a live photo
+        // The first pass re-encodes the audio, since no companion image exists yet.
+        // The companion is then added and the second pass deletes the video as a live photo.
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
@@ -734,6 +793,93 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             File.Exists(videoPath + ".bak").Should().BeTrue();
             File.Exists(videoPath).Should().BeFalse();
             File.Exists(imagePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    // -- exiftool validation ---------------------------------------------------
+
+    [Fact]
+    public async Task ExecuteAsync_FileWithValidationWarnings_IsNotTreatedAsInvalid()
+    {
+        // A truncated JPEG makes exiftool report "1 Warning: JPEG format error".
+        // Warnings must stay advisory, since roughly three quarters of healthy files carry one.
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange
+            string filePath = Path.Combine(workDir, "truncated.jpg");
+            byte[] source = await File.ReadAllBytesAsync(
+                fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                TestContext.Current.CancellationToken
+            );
+            await File.WriteAllBytesAsync(
+                filePath,
+                source[..(source.Length / 2)],
+                TestContext.Current.CancellationToken
+            );
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
+
+            // Assert
+            result.Should().NotBe(ProcessTask.ProcessResult.Invalid);
+            File.Exists(filePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FileExifToolErrorsOn_ReturnsInvalid()
+    {
+        // On exactly these files, exiftool exits non-zero while still emitting the JSON verdict.
+        // Without validation disabled on that call this path throws and is counted as a failure.
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange
+            string filePath = Path.Combine(workDir, "garbage.jpg");
+            await File.WriteAllBytesAsync(
+                filePath,
+                [.. Enumerable.Range(0, 500).Select(i => (byte)(i % 251))],
+                TestContext.Current.CancellationToken
+            );
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Invalid);
+            File.Exists(filePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_HealthyFile_ReturnsSuccessWithValidationEnabled()
+    {
+        // Guards the always-on -validate addition: it must not perturb the existing pipeline.
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange
+            string filePath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
         }
         finally
         {

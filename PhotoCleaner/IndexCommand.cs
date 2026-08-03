@@ -38,6 +38,8 @@ internal sealed class IndexCommand(CommandLine.Options options, CancellationToke
                     Log.Information("Ignored {IgnoredCount} non-media files", ignored);
                     _skippedExtensions.LogWarnings();
                     Log.Information("Failed {FailedCount} files", failed);
+
+                    return failed > 0 ? ExitCode.Failed : ExitCode.Success;
                 }
             )
             .ConfigureAwait(false);

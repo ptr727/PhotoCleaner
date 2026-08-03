@@ -10,6 +10,7 @@ internal sealed class ProcessCommand(
     private ConcurrentBag<string> _fileNames = [];
     private readonly SkippedExtensionTracker _skippedExtensions = new();
     private int _failedCount;
+    private int _invalidCount;
     private int _deletedCount;
     private int _modifiedCount;
     private int _skippedCount;
@@ -78,7 +79,12 @@ internal sealed class ProcessCommand(
                     );
                     Log.Information("Modified {ModifiedCount} files", _modifiedCount);
                     Log.Information("Deleted {DeletedCount} files", _deletedCount);
+                    Log.Information("Invalid {InvalidCount} files", _invalidCount);
                     Log.Information("Failed {FailedCount} files", _failedCount);
+
+                    return _failedCount > 0 || _invalidCount > 0
+                        ? ExitCode.Failed
+                        : ExitCode.Success;
                 }
             )
             .ConfigureAwait(false);
@@ -90,9 +96,8 @@ internal sealed class ProcessCommand(
     )]
     private async Task ExecuteProcessAsync(Database? database, TrashDatabase? trashDatabase)
     {
-        // Separate files that share a stem (different extensions) so they
-        // are never processed in parallel - prevents one thread from
-        // deleting/renaming a file that another thread is reading.
+        // Files sharing a stem are never processed in parallel.
+        // Otherwise one thread could delete or rename a file another thread is reading.
         ConcurrentBag<string> deferred = FixExtensionConflicts();
 
         ConcurrentBag<string> reProcessNames = [];
@@ -127,6 +132,9 @@ internal sealed class ProcessCommand(
                             case ProcessTask.ProcessResult.Failure:
                                 _ = Interlocked.Increment(ref _failedCount);
                                 break;
+                            case ProcessTask.ProcessResult.Invalid:
+                                _ = Interlocked.Increment(ref _invalidCount);
+                                break;
                             case ProcessTask.ProcessResult.Deleted:
                                 _ = Interlocked.Increment(ref _deletedCount);
                                 break;
@@ -144,10 +152,18 @@ internal sealed class ProcessCommand(
                         }
                     }
                     catch (Exception ex)
-                        when (ex is FileNotFoundException || !File.Exists(fileName))
+                        when (ex is FileNotFoundException or DirectoryNotFoundException)
                     {
+                        // Process is the only command that rewrites the tree it walks as it goes.
+                        // A missing name is usually its own earlier rename rather than a fault.
+                        // It could equally be an external deletion, and the two are not cheaply told apart.
+                        // So this neither fails the run nor claims to know which one happened.
+                        // Import and verify both count a missing file as failed instead.
+                        // Neither modifies its input, so there a vanished file can only be external.
+                        // Matching the exception alone keeps a permission error out of this branch.
+                        // Information rather than debug, so the run records why the file is gone.
                         Log.Information(
-                            "File no longer exists during processing (concurrent rename): '{FilePath}'",
+                            "File no longer exists during processing: '{FilePath}'",
                             fileName
                         );
                     }
@@ -223,12 +239,8 @@ internal sealed class ProcessCommand(
         ConcurrentBag<string> deferred
     ) SplitExtensionConflicts(ConcurrentBag<string> fileNames)
     {
-        // Group media files by directory + stem (filename without extension).
-        // When multiple media files share the same stem (e.g. IMG.DNG + IMG.jpg),
-        // keep only one per group and defer the rest so they are never
-        // processed in parallel. Non-media files (e.g. PhotoCleaner.Process.db,
-        // PhotoCleaner.Process.log) bypass conflict detection - they are skipped
-        // by ProcessTask and cannot race with media-file pipeline steps.
+        // Media files are grouped by directory and stem, keeping one per group and deferring the rest.
+        // Non-media files bypass conflict detection, since ProcessTask skips them and they cannot race.
         ConcurrentBag<string> filtered = [];
         ConcurrentBag<string> deferred = [];
         Dictionary<string, List<string>> stemMap = new(

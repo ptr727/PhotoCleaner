@@ -45,7 +45,7 @@ internal sealed class CommandLine
     internal RootCommand CreateRootCommand()
     {
         RootCommand command = new(
-            "PhotoCleaner - An application that prepares photos and videos for import into photo managers."
+            "PhotoCleaner - Utility to prepare photos and videos for import into photo managers."
         )
         {
             _logLevelOption,
@@ -57,6 +57,25 @@ internal sealed class CommandLine
         command.Subcommands.Add(CreateImportCommand());
         command.Subcommands.Add(CreateIndexCommand());
         command.Subcommands.Add(CreateTrashCommand());
+        command.Subcommands.Add(CreateVerifyCommand());
+
+        return command;
+    }
+
+    private Command CreateVerifyCommand()
+    {
+        Command command = new("verify", "Verify that media files can be rendered by Immich")
+        {
+            _pathOption,
+            _threadsOption,
+            _dbFileOption,
+            _rehashOption,
+            _reprocessOption,
+        };
+        command.SetAction(
+            (parseResult, cancellationToken) =>
+                new VerifyCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
+        );
 
         return command;
     }
@@ -299,7 +318,7 @@ internal sealed class CommandLine
     private static Option<DirectoryInfo> CreatePathOption() =>
         new Option<DirectoryInfo>("--path")
         {
-            Description = "The directory path to process",
+            Description = "The media directory path",
             Required = true,
         }.AcceptExistingOnly();
 
@@ -389,7 +408,7 @@ internal sealed class CommandLine
     {
         Option<FileInfo?> option = new("--skipdb")
         {
-            Description = "SQLite database with indexed files to be skipped",
+            Description = "SQLite database with indexed files to be skipped (read-only)",
         };
         option.Validators.Add(result =>
         {
@@ -403,10 +422,7 @@ internal sealed class CommandLine
     }
 
     private static Option<bool> CreateReprocessOption() =>
-        new("--reprocess")
-        {
-            Description = "Re-process files even if already marked as processed in the database",
-        };
+        new("--reprocess") { Description = "Re-run every file even if the database marks it done" };
 
     private static Option<bool> CreateMarkProcessedOption() =>
         new("--processed")
