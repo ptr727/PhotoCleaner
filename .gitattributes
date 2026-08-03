@@ -1,9 +1,19 @@
-# Default: do not normalize line endings (`* -text`); .editorconfig end_of_line rules guide what the editor writes.
-# The exception pins below are git enforcement - they force LF for execution-sensitive classes regardless of editor.
+# Default: git does not normalize line endings (`* -text`), and .editorconfig end_of_line rules guide what the editor writes.
+# The exception pins below are git's own enforcement, forcing LF for execution-sensitive classes regardless of editor.
+# Configure with: git config --global core.autocrlf false
+# Renormalize with: git add --renormalize .
+# Inspect with: git ls-files --eol
 * -text
 
-# Scripts and extensionless executables must stay LF - a CRLF shebang breaks execution.
+# Exception: scripts must stay LF regardless of the `* -text` default, because a CRLF shebang breaks execution.
+# `.editorconfig` covers `*.sh`, but an extensionless executable matches no extension rule.
+# Pin those here, so git enforces LF on checkout and on `--renormalize`.
 *.sh text eol=lf
 
-# Husky.Net ships an extensionless pre-commit hook with a /bin/sh shebang; pin it to LF so a CRLF cannot break execution.
+# Husky.Net ships an extensionless pre-commit hook with a `/bin/sh` shebang, so pin it to LF.
+# A CRLF shebang would break the hook's execution.
 .husky/pre-commit text eol=lf
+
+# Dockerfiles must be LF, because a CRLF breaks RUN heredocs and line continuations.
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
