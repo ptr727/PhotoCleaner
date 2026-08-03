@@ -1,0 +1,95 @@
+name: Merge bot pull request action
+
+# Auto-merges in-repo bot pull requests: enable on opened/reopened, disable on a maintainer push.
+# - Merge method by base: develop = squash, main = merge.
+# - App token, not GITHUB_TOKEN: it fires downstream workflows and can write on a Dependabot PR.
+# - pull_request_target, not pull_request: jobs hold the App key.
+#   The workflow and action SHAs then resolve from the trusted base, not the pull request head.
+#   No job checks out pull request code, since each runs gh pr merge by URL.
+#
+# The fleet canonical also carries merge-codegen and merge-upstream-version jobs.
+# This repository runs neither codegen nor an upstream-version tracker, so both are N/A here.
+# They are left out rather than carried as conditions that can never match.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+# Concurrency keys on the pull request number rather than on github.ref.
+# Under pull_request_target that ref is the base branch, serializing every bot pull request.
+# Cancelling is off, so a follow-up synchronize cannot kill an opened run mid-enable.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+
+  merge-dependabot:
+    name: Merge dependabot pull request job
+    runs-on: ubuntu-latest
+    # Dependabot pull requests from this repository, not forks.
+    # Only on opened or reopened, so the disable job stays sticky.
+    if: >-
+      (github.event.action == 'opened' || github.event.action == 'reopened') &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+
+      - name: Generate GitHub App token step
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
+      # Auto-merge every tier, semver-major included.
+      # The required checks are the gate, not the size of the bump.
+      - name: Merge pull request step
+        run: |
+          set -Eeuo pipefail
+          case "${{ github.event.pull_request.base.ref }}" in
+            develop) method=--squash ;;
+            main) method=--merge ;;
+            *)
+              echo "::error::Unsupported base branch: ${{ github.event.pull_request.base.ref }}"
+              exit 1
+              ;;
+          esac
+          gh pr merge --auto "$method" "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  disable-auto-merge-on-maintainer-push:
+    name: Disable auto-merge on maintainer push job
+    runs-on: ubuntu-latest
+    # Fires when a maintainer pushes to a bot's branch, meaning synchronize with a non-bot actor.
+    # Disables auto-merge so the maintainer's commits do not merge with the bot's.
+    # They re-enable it by hand.
+    # The disable call is idempotent.
+    if: >-
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.actor != github.event.pull_request.user.login
+    permissions:
+      pull-requests: write
+
+    steps:
+
+      - name: Generate GitHub App token step
+        # App token, because a Dependabot pull request's GITHUB_TOKEN is read-only whoever triggered it.
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+
+      - name: Disable auto-merge step
+        run: gh pr merge --disable-auto "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}

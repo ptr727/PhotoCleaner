@@ -26,20 +26,19 @@
         "csharp.debug.symbolOptions.searchNuGetOrgSymbolServer": true,
         "csharp.debug.symbolOptions.searchMicrosoftSymbolServer": true,
         "files.encoding": "utf8",
-        "csharp.debug.justMyCode": false,
-        "claudeCode.preferredLocation": "sidebar",
-        "claudeCode.useCtrlEnterToSend": true,
+        "csharp.debug.justMyCode": false
     },
     "extensions": {
         "recommendations": [
+            "csharpier.csharpier-vscode",
             "davidanson.vscode-markdownlint",
+            "editorconfig.editorconfig",
+            "fanaticpythoner.better-todo-tree",
+            "github.vscode-github-actions",
+            "ms-azuretools.vscode-docker",
             "ms-dotnettools.csdevkit",
             "streetsidesoftware.code-spell-checker",
-            "editorconfig.editorconfig",
-            "csharpier.csharpier-vscode",
-            "github.vscode-github-actions",
-            "eamodio.gitlens",
-            "fanaticpythoner.better-todo-tree"
+            "yzhang.markdown-all-in-one"
         ]
     }
 }

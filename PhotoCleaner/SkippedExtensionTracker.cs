@@ -23,6 +23,14 @@ internal sealed class SkippedExtensionTracker
         sorted.Sort(StringComparer.OrdinalIgnoreCase);
         foreach (string extension in sorted)
         {
+            // A file with no extension tracks as an empty string, which reads as a quoted nothing.
+            // Naming the case keeps the count honest without printing a blank.
+            if (extension.Length == 0)
+            {
+                Log.Warning("Skipped files carrying no extension");
+                continue;
+            }
+
             Log.Warning("Unknown file extension: '{Extension}'", extension);
         }
     }

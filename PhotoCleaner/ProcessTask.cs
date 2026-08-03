@@ -23,6 +23,7 @@ internal sealed class ProcessTask(
         Modified,
         UnknownExtension,
         Skipped,
+        Invalid,
     }
 
     private ExifToolJson? _exifToolJson;
@@ -114,10 +115,9 @@ internal sealed class ProcessTask(
                 preProcessHash
             );
 
-            // Trash check: delete files whose SHA-1 matches an Immich-trashed asset.
-            // The user explicitly threw these away in Immich; uploading them again on the
-            // next immich-cli run would be wasted work, so prune them here while we are
-            // already touching every file. Persist deletion in Process.db so re-runs are no-ops.
+            // Deletes files whose SHA-1 matches an asset already trashed in Immich.
+            // Pruning here costs nothing, since every file is being touched anyway.
+            // The deletion is persisted so re-runs are no-ops.
             if (
                 trashDatabase is not null
                 && await TryDeleteIfTrashedAsync(sha1).ConfigureAwait(false)
@@ -141,6 +141,11 @@ internal sealed class ProcessTask(
         _exifToolJson = await MediaUtilities
             .GetExifToolJsonAsync(fileInfo.FullName, cancellationToken)
             .ConfigureAwait(false);
+
+        if (!CheckExifToolValidation())
+        {
+            return ProcessResult.Invalid;
+        }
 
         // Process files
         ProcessResult result =
@@ -633,6 +638,34 @@ internal sealed class ProcessTask(
                 }
             }
         }
+    }
+
+    // Roughly three quarters of healthy files carry validation warnings, so only errors fail a file.
+    private bool CheckExifToolValidation()
+    {
+        (int errors, int warnings) = ExifToolJson.ParseValidate(_exifToolJson!.Validate);
+        if (errors == 0)
+        {
+            if (warnings > 0)
+            {
+                Log.Debug(
+                    "exiftool validation reported {WarningCount} warning(s) for '{FilePath}': {Validate}",
+                    warnings,
+                    fileInfo.FullName,
+                    _exifToolJson.Validate
+                );
+            }
+            return true;
+        }
+
+        Log.Error(
+            "exiftool validation reported {ErrorCount} error(s) for '{FilePath}': {Validate} {Error}",
+            errors,
+            fileInfo.FullName,
+            _exifToolJson.Validate,
+            _exifToolJson.ExifToolError
+        );
+        return false;
     }
 
     private bool WarnDngVersion()

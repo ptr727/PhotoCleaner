@@ -101,6 +101,45 @@
             "stopAtEntry": false
         },
         {
+            "name": "Verify",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".NET Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "verify",
+                "--path=/data/media/PhotoCleaner/Originals",
+                "--db=/data/media/PhotoCleaner/Verify.db",
+                "--rehash=false",
+                "--reprocess=true",
+                "--threads=4",
+                "--loglevel=verbose",
+                "--logfile=/data/media/PhotoCleaner/Verify.log",
+                "--logclear=true"
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Verify No Database",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": ".NET Build",
+            "program": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0/PhotoCleaner.dll",
+            "args": [
+                "verify",
+                "--path=/data/media/PhotoCleaner/Originals",
+                "--threads=4",
+                "--loglevel=verbose",
+                "--logfile=/data/media/PhotoCleaner/Verify.log",
+                "--logclear=true"
+            ],
+            "cwd": "${workspaceFolder}/PhotoCleaner/bin/Debug/net10.0",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
             "name": "Undo",
             "type": "coreclr",
             "request": "launch",

@@ -25,7 +25,7 @@ internal sealed class UndoCommand(CommandLine.Options options, CancellationToken
                     Log.Information("Deleted {DeletedCount} files", deleted);
                     Log.Information("Failed {FailedCount} files", failed);
 
-                    return Task.CompletedTask;
+                    return Task.FromResult(failed > 0 ? ExitCode.Failed : ExitCode.Success);
                 }
             )
             .ConfigureAwait(false);

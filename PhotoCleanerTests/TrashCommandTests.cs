@@ -111,6 +111,48 @@ public sealed class TrashCommandTests
     public void ConvertChecksum_InvalidBase64_ReturnsNull() =>
         TrashCommand.ConvertChecksum("not-valid-base64!!!").Should().BeNull();
 
+    // Pagination stopping early leaves the database short of the server.
+    // Callers use it to skip files, so a short one silently re-imports trashed assets.
+    [Fact]
+    public async Task ExecuteAsync_InvalidNextPage_ExitsFailed()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            // Arrange - a page that hands back a NextPage the loop cannot use
+            byte[] sha1 = new byte[20];
+            sha1[0] = 0x01;
+            using MockImmichHandler handler = new();
+            handler.EnqueueResponse(
+                MakeResponse([Convert.ToBase64String(sha1)], nextPage: "not-a-page")
+            );
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath),
+                TestContext.Current.CancellationToken,
+                client
+            );
+
+            // Act
+            int exitCode = await command.ExecuteAsync();
+
+            // Assert - the page it did read is kept, and the run reports the shortfall
+            exitCode.Should().Be(2);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
+            count.Should().Be(1);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_SinglePage_InsertsHashes()
     {
@@ -273,9 +315,6 @@ public sealed class TrashCommandTests
         }
     }
 
-    /// <summary>
-    /// Mock HTTP handler that returns queued ImmichSearchResponse payloads.
-    /// </summary>
     internal sealed class MockImmichHandler : DelegatingHandler
     {
         private readonly Queue<ImmichSearchResponse> _responses = new();

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -153,6 +154,12 @@ public sealed class ExifToolJson
     [JsonPropertyName("Matroska:DateTimeOriginal")]
     public string? MatroskaDateTimeOriginal { get; set; }
 
+    [JsonPropertyName("ExifTool:Validate")]
+    public string? Validate { get; set; }
+
+    [JsonPropertyName("ExifTool:Error")]
+    public string? ExifToolError { get; set; }
+
     [JsonPropertyName("QuickTime:ContentIdentifier")]
     public string? QuickTimeContentIdentifier { get; set; }
 
@@ -230,6 +237,56 @@ public sealed class ExifToolJson
 
         // Matroska:DateTimeOriginal
         return !string.IsNullOrEmpty(RIFFDateTimeOriginal) ? RIFFDateTimeOriginal : null;
+    }
+
+    // Verdicts read "OK", "4 Warnings (all minor)", or "2 Errors, 3 Warnings".
+    // Only the leading count of each clause matters, since the minor breakdown qualifies warnings.
+    internal static (int Errors, int Warnings) ParseValidate(string? validate)
+    {
+        if (string.IsNullOrWhiteSpace(validate))
+        {
+            return (0, 0);
+        }
+
+        int errors = 0,
+            warnings = 0;
+        foreach (Range clauseRange in validate.AsSpan().Split(','))
+        {
+            ReadOnlySpan<char> clause = validate.AsSpan()[clauseRange].Trim();
+
+            // Strip any minor qualifier in parentheses before looking for the noun.
+            int parenIndex = clause.IndexOf('(');
+            if (parenIndex >= 0)
+            {
+                clause = clause[..parenIndex].Trim();
+            }
+
+            int spaceIndex = clause.IndexOf(' ');
+            if (
+                spaceIndex <= 0
+                || !int.TryParse(
+                    clause[..spaceIndex],
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out int count
+                )
+            )
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> noun = clause[(spaceIndex + 1)..].Trim();
+            if (noun.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+            {
+                errors += count;
+            }
+            else if (noun.StartsWith("Warning", StringComparison.OrdinalIgnoreCase))
+            {
+                warnings += count;
+            }
+        }
+
+        return (errors, warnings);
     }
 
     internal static bool IsDngVersionNewer(string? versionString)

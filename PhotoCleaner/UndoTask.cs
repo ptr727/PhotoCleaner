@@ -59,9 +59,8 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         // Pass 1 - identify derived base paths
         HashSet<string> derivedBases = new(StringComparer.OrdinalIgnoreCase);
 
-        // Among groups that share the same stem+dir but different
-        // extensions, the one whose base file currently exists on disk is the derived conversion
-        // output - the original was backed up then removed; the output is still present.
+        // Among same-stem groups, the one whose base file still exists is the conversion output.
+        // The original was backed up then removed, so only the output remains on disk.
         foreach (KeyValuePair<string, List<string>> kvp in groups)
         {
             string basePath = kvp.Key;
@@ -191,9 +190,8 @@ internal sealed partial class UndoTask(CommandLine.Options options)
 
                 restored++;
 
-                // Delete any extra (numbered) backups for this group - the original is now
-                // restored and intermediate-state backups (.bak1, .bak2, ...) serve no purpose.
-                // The primaryBackup was already consumed (moved) by TryRestore, so we skip it.
+                // Once the original is restored the intermediate-state backups serve no purpose.
+                // TryRestore already consumed primaryBackup, so it is skipped.
                 foreach (
                     string backup in backups.Where(b =>
                         !string.Equals(b, primaryBackup, StringComparison.OrdinalIgnoreCase)
@@ -211,10 +209,8 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                     }
                 }
 
-                // Locate derived conversion output.
-                // Prefer the explicit .bak.out companion written by ProcessTask (reliable even
-                // when GetUniqueFileName appended a counter suffix like img_1.mp4).
-                // Fall back to the stem-based heuristic for backups created before this feature.
+                // The .bak.out companion stays reliable when the output name gained a counter suffix.
+                // The stem-based heuristic is the fallback for backups predating that companion.
                 string companionPath = primaryBackup + ".out";
                 if (File.Exists(companionPath))
                 {
@@ -253,10 +249,9 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                     )
                 )
                 {
-                    // Legacy fallback: look for same-stem .mp4 with no backup of its own.
-                    // Note: a format-agnostic scan (any same-stem different-ext file) is unsafe
-                    // because companion images (e.g. img.heic alongside img.mov) would be falsely
-                    // deleted. We therefore target only the known video output extension.
+                    // Legacy fallback looking for a same-stem .mp4 with no backup of its own.
+                    // Only the known video output extension is targeted.
+                    // A format-agnostic scan would falsely delete companion images.
                     string stem = Path.GetFileNameWithoutExtension(basePath);
                     string? dir = Path.GetDirectoryName(basePath);
                     string derivedOutput = Path.Combine(

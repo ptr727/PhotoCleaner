@@ -14,6 +14,7 @@ internal sealed class TrashCommand(
                 "Trash",
                 async () =>
                 {
+                    bool partialSync = false;
                     await TrashDatabaseScope
                         .RunAsync(
                             options.TrashDbFile,
@@ -120,11 +121,12 @@ internal sealed class TrashCommand(
                                         }
                                         else
                                         {
-                                            Log.Warning(
+                                            Log.Error(
                                                 "Stopping pagination: invalid NextPage value '{NextPage}' after page {Page}",
                                                 result.NextPage,
                                                 page
                                             );
+                                            partialSync = true;
                                             hasMore = false;
                                         }
                                     }
@@ -152,6 +154,13 @@ internal sealed class TrashCommand(
                             cancellationToken: cancellationToken
                         )
                         .ConfigureAwait(false);
+
+                    // Pagination stopping early leaves the database short of the server.
+                    // Callers use it to skip files, so a short one re-imports trashed assets.
+                    // That is a completed run carrying a failure rather than a success.
+                    // A page that throws leaves it short as well, keeping the pages before it.
+                    // That exits Error from the handler above rather than reaching here.
+                    return partialSync ? ExitCode.Failed : ExitCode.Success;
                 }
             )
             .ConfigureAwait(false);

@@ -1,42 +1,51 @@
 # PhotoCleaner <!-- omit from toc -->
 
-An application that prepares photos and videos for import into photo managers.
+Utility to prepare photos and videos for import into photo managers.
 
 ## Build and Distribution <!-- omit from toc -->
 
-- **Source Code**: [GitHub][photocleaner-link], holding the source, the issues, and the CI/CD pipelines.
-- **Versioned Releases**: [GitHub Releases][releases-link], attaching the Linux and Windows executables as a 7z archive.
-- **Docker Images**: [Docker Hub][docker-link], multi-arch `linux/amd64` and `linux/arm64`.
+- **Source Code**: [GitHub][github-link] for source, issues, and the CI/CD pipelines.
+- **Versioned Releases**: [GitHub Releases][releases-link] for pre-compiled executables for Windows, Linux, and macOS.
+- **Docker Images**: [Docker Hub][docker-link] for container images with all tools pre-installed.
 
 ### Build Status <!-- omit from toc -->
 
-[![Docker Image Size][docker-size-shield]][docker-link]\
-[![License][license-shield]][license-link]
+[![Release Status][release-status-shield]][actions-link]\
+[![Docker Status][docker-status-shield]][actions-link]\
+[![Last Commit][last-commit-shield]][commit-link]
 
 ### Releases <!-- omit from toc -->
 
-[![Docker Latest][docker-latest-shield]][docker-link]
+[![GitHub Release][release-version-shield]][releases-link]\
+[![GitHub Pre-Release][pre-release-version-shield]][releases-link]\
+[![Docker Latest][docker-latest-version-shield]][docker-link]\
+[![Docker Develop][docker-develop-version-shield]][docker-link]
 
 ### Release Notes <!-- omit from toc -->
 
-**Version: 1.0**:
+**Version 1.1**:
 
 **Summary**:
 
-- First published release, carrying the multi-arch Docker image and the GitHub release with the Linux and Windows executables attached.
+- Added `verify` command to detect possibly corrupt images, e.g. Immich fails to generate a preview image.
+- Added `-validate` to exiftool to report metadata warnings and errors.
 
-See [Release History][history-link] for the full history.
+> **Breaking**: commands now exit `2` when they complete with per-file failures.
+
+See [Release History][history-link] for complete release notes and older versions.
 
 ## Table of Contents <!-- omit from toc -->
 
 - [Overview](#overview)
 - [Usage](#usage)
   - [Command Line Syntax](#command-line-syntax)
+  - [Exit Codes](#exit-codes)
   - [Examples](#examples)
 - [Processing Flow](#processing-flow)
 - [Undo Flow](#undo-flow)
 - [Import Flow](#import-flow)
 - [Trash Flow](#trash-flow)
+- [Verify Flow](#verify-flow)
 - [Supported File Types](#supported-file-types)
 - [Docker](#docker)
 - [Workflow Example](#workflow-example)
@@ -44,7 +53,6 @@ See [Release History][history-link] for the full history.
 - [Development Environment Setup](#development-environment-setup)
   - [Install](#install)
   - [Update](#update)
-- [License](#license)
 
 ## Overview
 
@@ -55,12 +63,12 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   compound extensions (e.g. `photo.heic.jpg` -> `photo.jpg`).
 - **Renames mixed-case extensions**: Converts uppercase or mixed-case extensions to lowercase
   (e.g. `.JPG` -> `.jpg`).
-- **Handles Live Photos**: Removes Apple Live Photo video components - videos <= 1s are always
-  removed; videos <= 4s with a candidate companion image (same basename, or basename with `_hevc`
-  suffix stripped) are removed when both files share the same `ContentIdentifier` EXIF tag;
-  longer videos with a matching image trigger a warning but are kept.
-- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4; re-encodes WMV, AVI, 3GP, and
-  GIF to MP4 (H.264/AAC); re-encodes PCM audio to AAC in MOV and MP4 files while preserving
+- **Handles Live Photos**: Removes Apple Live Photo video components. Videos <= 1s are always
+  removed. Videos <= 4s with a candidate companion image (same basename, or basename with `_hevc`
+  suffix stripped) are removed when both files share the same `ContentIdentifier` EXIF tag.
+  Longer videos with a matching image trigger a warning but are kept.
+- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, re-encodes WMV, AVI, 3GP, and
+  GIF to MP4 (H.264/AAC), and re-encodes PCM audio to AAC in MOV and MP4 files while preserving
   the video stream. All source metadata (including `ContentIdentifier` and other QuickTime tags)
   is copied to the converted file using `exiftool -TagsFromFile`.
 - **Imports into date folders** (via `import` command): Copies (default) or moves supported
@@ -79,6 +87,12 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   database. This trash DB can then be used with `import --trashdb` to skip files that were
   already imported and trashed in Immich, and with `process --trashdb` to delete files trashed
   in Immich after upload, preventing re-import of known duplicates.
+- **Verifies files render in Immich** (via `verify` command): Answers whether a file will survive
+  Immich's preview generation, which metadata checks cannot predict. Immich's own thumbnail
+  pipeline is run inside the `immich-server` image, so the verdict is the one Immich will reach
+  rather than an approximation of it. That decoder is the sole authority: PhotoCleaner does not
+  parse container formats itself, because a format it did not recognize would be indistinguishable
+  from a damaged one. Docker is required. Nothing is modified, and `verify` only ever reads.
 - **Warns on DNG version**: Flags DNG files with a format version newer than v1.4 that may not
   render correctly in older applications.
 
@@ -94,7 +108,7 @@ detailed logging of all operations.
 ```text
 $> PhotoCleaner --help
 Description:
-  PhotoCleaner - An application that prepares photos and videos for import into photo managers.
+  PhotoCleaner - Utility to prepare photos and videos for import into photo managers.
 
 Usage:
   PhotoCleaner [command] [options]
@@ -105,6 +119,7 @@ Commands:
   import      Import media files into date-based subdirectories
   index       Index files into the database for deduplication tracking
   trash       Sync trashed asset hashes from Immich
+  verify      Verify that media files can be rendered by Immich
 
 Options:
   --loglevel <Debug|Error|Fatal|Information|Verbose|Warning>  Set the log level [default: Information]
@@ -120,7 +135,7 @@ Description:
   Process media files
 
 Options:
-  --path <path> (REQUIRED)      The directory path to process
+  --path <path> (REQUIRED)      The media directory path
   --dryrun                      Perform a dry run without making changes
   --threads <threads>           Number of parallel threads [default: 4]
   --skipbackup                  Skip creating backup files (disables undo)
@@ -128,8 +143,8 @@ Options:
   --db <db>                     SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
   --duration <duration>         Maximum duration in seconds below which a video is considered a short clip and deleted [default: 1]
-  --reprocess                   Re-process files even if already marked as processed in the database
-  --trashdb <trashdb>           SQLite database with Immich trash hashes (read-only). Files matching are deleted from disk and the DB
+  --reprocess                   Re-run every file even if the database marks it done
+  --trashdb <trashdb>           SQLite database with Immich trash hashes (read-only)
 ```
 
 ```text
@@ -138,7 +153,7 @@ Description:
   Undo media file processing
 
 Options:
-  --path <path> (REQUIRED)      The directory path to process
+  --path <path> (REQUIRED)      The media directory path
   --dryrun                      Perform a dry run without making changes
 ```
 
@@ -148,11 +163,11 @@ Description:
   Import media files into date-based subdirectories
 
 Options:
-  --path <path> (REQUIRED)       The directory path to process
+  --path <path> (REQUIRED)       The media directory path
   --dryrun                       Perform a dry run without making changes
   --threads <threads>            Number of parallel threads [default: 4]
   --outpath <outpath> (REQUIRED) Output directory for organized files
-  --format <format>              Date format for output subdirectory names [default: yyyy/MM/dd]
+  --format <format>              Date format for output subdirectory names; use '/' to create nested subdirectories (e.g. yyyy/MM/dd) [default: yyyy/MM/dd]
   --deleteempty                  Delete empty subdirectories under the target directory after the command completes
   --move                         Move files instead of copying (default: copy)
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
@@ -170,11 +185,11 @@ Description:
   Index files into the database for deduplication tracking
 
 Options:
-  --path <path> (REQUIRED)      The directory path to index
+  --path <path> (REQUIRED)      The media directory path
   --threads <threads>           Number of parallel threads [default: 4]
   --db <db> (REQUIRED)          SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
-  --processed                   Mark newly inserted rows as already processed (use when seeding a Process.db)
+  --processed                   Mark newly inserted rows as already processed (use when seeding a Process.db from existing files)
 ```
 
 ```text
@@ -189,41 +204,54 @@ Options:
   --trashdb <trashdb> (REQUIRED) SQLite database to store Immich trash hashes
 ```
 
+```text
+$> PhotoCleaner verify --help
+Description:
+  Verify that media files can be rendered by Immich
+
+Options:
+  --path <path> (REQUIRED)      The media directory path
+  --threads <threads>           Number of parallel threads [default: 4]
+  --db <db>                     SQLite database file for file state tracking
+  --rehash                      Force rehashing of all files, ignoring size/mtime cache
+  --reprocess                   Re-run every file even if the database marks it done
+```
+
 **Option notes:**
 
-- `--path` - must point to an existing directory; accepts exactly one directory per command
+- `--path`: must point to an existing directory. Accepts exactly one directory per command
   invocation.
-- `--threads` - defaults to `min(CPU count, 4)`; must be `> 0` and `<= CPU count`.
-- `--skipbackup` - opt-in (`process` only); skips all `.bak` file creation. The `undo`
+- `--threads`: defaults to `min(CPU count, 4)`. Must be `> 0` and `<= CPU count`.
+- `--skipbackup`: opt-in (`process` only). Skips all `.bak` file creation. The `undo`
   command cannot reverse a run made with this flag.
-- `--outpath` - required for `import`; target directory (created on demand).
-- `--format` - optional (`import` only); a C# date format string used to name date
-  subdirectories (default `"yyyy/MM/dd"`). Must be date-only - time components are rejected.
+- `--outpath`: required for `import`. Target directory (created on demand).
+- `--format`: optional (`import` only). A C# date format string used to name date
+  subdirectories (default `"yyyy/MM/dd"`). Must be date-only, so time components are rejected.
   Files with no EXIF date land in a `"0001/01/01"` fallback bucket.
-- `--deleteempty` - optional (`import`, `process`); after the command completes, deletes
+- `--deleteempty`: optional (`import`, `process`). After the command completes, deletes
   empty child subdirectories from the target directory (deepest first). For `import` the
-  target is `--outpath`; for `process` it is `--path` (which is operated on in-place). The
+  target is `--outpath`, and for `process` it is `--path` (which is operated on in-place). The
   target root itself is never deleted. Useful for cleaning up directory trees left behind
   after `process` deletes files (live photos, originals when `--skipbackup`) or after
   pruning organized output.
-- `--move` - optional (`import` only); moves files instead of copying. Default behavior is
+- `--move`: optional (`import` only). Moves files instead of copying. Default behavior is
   to copy, which preserves the source files. Use `--move` when the source directory is
   temporary.
-- `--tagpath` - optional (`import` only); splits the source sub-directory path relative to
+- `--tagpath`: optional (`import` only). Splits the source sub-directory path relative to
   `--path` into tokens and writes each token as an `XMP:Subject` tag on the destination file
   using exiftool. Files at the root of `--path` receive no tags. Tags are applied with a
   remove-then-add pattern (`-XMP:Subject-= / -XMP:Subject+=`) so existing tags are preserved
   and duplicates are not created. Only file types that support XMP writes are tagged.
-- `--tags` - optional (`import` only); a comma-separated list of `XMP:Subject` tags applied to
+- `--tags`: optional (`import` only). A comma-separated list of `XMP:Subject` tags applied to
   every organized file (e.g. `--tags "vacation,family trip,2018"`). Tags are applied using the
-  same remove-then-add pattern as `--tagpath`. Can be combined with `--tagpath` - both sets of
+  same remove-then-add pattern as `--tagpath`. Can be combined with `--tagpath`, and both sets of
   tags are merged. Only file types that support XMP writes are tagged.
-- `--datepath` - optional (`import` only); when a file has no embedded creation date, infers
+- `--datepath`: optional (`import` only). When a file has no embedded creation date, infers
   one from the filename or directory path structure (via `DateFromPath`) and writes it to the
   destination file before restoring mtime. Opt-in because writing to files is destructive and
   the source path context is only available during `import` (before files move to date-based
   directories).
-- `--db <path>` - optional for `import` and `process`, **required** for `index`; path to a
+- `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`). The schema is the same for every command, but
   the **meaning of the `path` column depends on which command writes the row**, so each
@@ -237,14 +265,14 @@ Options:
   The DB file is created automatically on first use. **The two stages MUST use separate DB files**:
   if `import` and `process` shared one DB, `process` would overwrite the source-content hashes
   that `import` wrote (because `import` mutates the dest file via XMP tag injection, so the dest
-  hash diverges from the source hash; `process` then re-hashes the dest and clobbers the row).
-  This was a real bug; the per-stage layout is the fix.
-- `--trashdb <path>` - **required** for `trash`, optional for `import` and `process`; path
+  hash diverges from the source hash, and `process` then re-hashes the dest and clobbers the row).
+  This was a real bug, and the per-stage layout is the fix.
+- `--trashdb <path>`: **required** for `trash`, optional for `import` and `process`. Path
   to a SQLite database with Immich trash hashes.
   - For `trash`: hashes are fetched from the Immich API and written to the database.
   - For `import`: files matching a trash hash are skipped (read-only). This is the durable
     "do not re-import" record beyond Immich's own ~30-day trash retention. Without it, a file
-    the user trashed > 30 days ago can come back the next time icloudpd re-downloads it, because
+    the user trashed > 30 days ago can come back the next time the downloader re-fetches it, because
     Immich no longer has the hash to deduplicate against on re-upload.
     Limitation: `import` compares the **source-file** SHA-1 against the trash DB. When
     `import` rewrites the destination via `--tags`, `--tagpath`, or `--datepath`, the dest file's
@@ -256,29 +284,52 @@ Options:
     cleans up files trashed in Immich after upload, before the next `immich-cli` upload would
     re-upload them. Also acts as the safety net for files that `import --trashdb` could not
     match because of the source-vs-dest SHA-1 drift described above.
-- `--skipdb <path>` - optional for `import`; path to a SQLite database with indexed files
+- `--skipdb <path>`: optional for `import`. Path to a SQLite database with indexed files
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
-- `--url <url>` - **required** for `trash`; the Immich server URL (e.g. `http://immich:2283`).
-- `--apikey <key>` / `--apikey-file <path>` - the Immich API key for `trash`; supply it via
+- `--url <url>`: **required** for `trash`. The Immich server URL (e.g. `http://immich:2283`).
+- `--apikey <key>` / `--apikey-file <path>`: the Immich API key for `trash`. Supply it via
   exactly one of these two mutually exclusive options (one is required). Create the key in Immich
-  under Account Settings > API Keys. `--apikey` passes the key inline; `--apikey-file` points to a
+  under Account Settings > API Keys. `--apikey` passes the key inline, while `--apikey-file` points to a
   file whose trimmed contents are the key, keeping the secret out of shell history and process
   arguments. The file must exist and be non-empty.
-- `--rehash` - optional (`process`, `import`, `index`); forces SHA-256 recomputation for
+- `--rehash`: optional (`process`, `import`, `index`). Forces SHA-256 recomputation for
   every file, bypassing the size/mtime cache. SHA-1 is also recomputed when `--trashdb` is
   in use. Use when file content may have changed without the modification timestamp being
   updated.
-- `--duration` - optional (`process` only); overrides the short-video deletion threshold
+- `--duration`: optional (`process` only). Overrides the short-video deletion threshold
   (default `1.0` seconds). Videos in a live-photo-compatible format whose duration is <= this
   value are always deleted. Must be `> 0`.
-- `--reprocess` - optional (`process` only); when set, ignores the `is_processed` flag in
+- `--reprocess`: optional (`process`, `verify`). When set, ignores the `is_processed` flag in
   the database and processes every file regardless of prior run history. Useful after changing
   pipeline settings (e.g. `--duration`) without wiping the database.
-- `--processed` - optional (`index` only); marks newly inserted rows with `is_processed = 1`.
+- `--processed`: optional (`index` only). Marks newly inserted rows with `is_processed = 1`.
   Use this when seeding a Process.db from existing files so a subsequent `process` run treats
   them as already processed and only touches new arrivals. The flag does not flip the bit on
   rows that already exist in the DB.
+
+### Exit Codes
+
+Every command uses the same three codes, so a pipeline can branch on the result without parsing
+logs:
+
+| Code | Meaning |
+| ---- | ------- |
+| `0` | Success. The command completed and every file succeeded. |
+| `1` | Error. The command could not complete: unhandled exception, fatal configuration error, cancellation, or a failed `verify` preflight. |
+| `2` | Completed with failures. The command ran to completion, but one or more files failed or failed verification, or `trash` synced only part of the server. |
+
+The distinction between `1` and `2` matters most for `verify`. A `1` means the check itself could
+not run at all, because Docker was unreachable or the Immich image could not be prepared, and it
+says nothing about any file. A `2` means the run completed and one or more files were invalid **or could
+not be verified**, the latter covering a file that could not be read or that no verdict came back
+for. A script must never treat an infrastructure failure as a verdict on the collection, and should
+read the `Invalid` and `Failed` counts to tell a bad file from a gap in coverage.
+
+`trash` exits `2` when pagination stops early, which leaves the trash database holding fewer
+hashes than the server. That database is used by `import --trashdb` and `process --trashdb` to skip
+files, so a short one silently re-imports assets that were trashed, and a pipeline gating on the
+exit code should not go on to upload against it.
 
 ### Examples
 
@@ -346,21 +397,32 @@ PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --db
 # Import and skip files already in another collection (read-only reference)
 PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --skipdb /data/existing-collection.db
 
+# Verify that Immich can render every file, before uploading
+PhotoCleaner verify --path /home/user/Intermediate --db /data/verify.db
+
 # Full workflow with Immich trash integration
 PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --trashdb /data/trash.db
 PhotoCleaner import --path /home/user/iCloud --outpath /home/user/Intermediate --db /data/photos.db --trashdb /data/trash.db
 PhotoCleaner process --path /home/user/Intermediate --db /data/process.db
+PhotoCleaner verify --path /home/user/Intermediate --db /data/verify.db
 ```
 
 ## Processing Flow
 
 1. **File enumeration**: Recursively scans all specified directories.
 2. **Case conflict detection**: Identifies files with the same name but different casing that
-   would collide on case-insensitive file systems; renames conflicting files before processing.
+   would collide on case-insensitive file systems, then renames them before processing.
 3. **Per-file validation pipeline** (runs in parallel, stops on first action per file):
-   1. Rename to canonical MIME extension - corrects mismatches and strips compound extensions.
+   0. Act on the exiftool `-validate` verdict, which rides along with the metadata read that
+      `process` already performs and so costs nothing extra. A file exiftool reports **errors**
+      on is marked invalid and no further step touches it. **Warnings are logged at debug level
+      and nothing more**: measured across a real collection, roughly three quarters of perfectly
+      healthy files carry at least one (odd IFD offsets, non-standard maker note tags, short
+      IPTC fields), so failing on warnings would condemn most of a library. This is a cheap net
+      for a rare case, not a substitute for the `verify` command.
+   1. Rename to canonical MIME extension, correcting mismatches and stripping compound extensions.
    2. Rename mixed-case extension to lowercase.
-   3. Delete short or Live Photo video clips: videos <= 1s are always deleted; videos <= 4s
+   3. Delete short or Live Photo video clips. Videos <= 1s are always deleted, and videos <= 4s
       with a candidate companion image (direct name match or `_hevc`-suffix match) are deleted
       when both files share a matching `ContentIdentifier` tag.
    4. Convert legacy or incompatible video formats to MP4:
@@ -370,13 +432,16 @@ PhotoCleaner process --path /home/user/Intermediate --db /data/process.db
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
 4. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
-5. **Results summary**: Reports counts of failed, modified, and successfully processed files;
-   lists any unrecognized file extensions.
+5. **Results summary**: Reports counts of failed, invalid, modified, and successfully processed
+   files, and lists any unrecognized file extensions. Exits `2` if anything failed or was invalid.
+
+The `import` command applies the same exiftool validation, skipping any file that reports errors
+rather than pulling it into the collection.
 
 ## Undo Flow
 
 Every file modification or deletion made by `process` creates a `.bak` backup alongside the
-original: the first backup is `X.bak`; if that already exists (from a prior run) the next is
+original: the first backup is `X.bak`, and if that already exists (from a prior run) the next is
 `X.bak1`, then `X.bak2`, etc. The `undo` command reverses all processing by scanning the given
 directories for backup files and applying a two-pass algorithm:
 
@@ -389,7 +454,7 @@ directories for backup files and applying a two-pass algorithm:
    - *Non-derived* base: delete the current file if it exists (overwritten in-place), rename
      `X.bak` -> `X` to restore the original. The converted output is located via the
      `X.bak.out` companion file written at conversion time (handles uniquified names like
-     `stem_1.mp4`); if no companion exists, falls back to deleting `stem.mp4` when present
+     `stem_1.mp4`). If no companion exists, falls back to deleting `stem.mp4` when present
      and untracked (legacy single-run heuristic).
 
 **Known limitation**: extension renames that target a filename that did not previously exist
@@ -412,7 +477,7 @@ directories to `outpath/date/filename`:
    - `--trashdb`: if the file matches a hash in the Immich trash DB, the file is skipped
      (counted as "trashed in Immich").
    - `--skipdb`: if the file matches a record in the reference DB, the file is skipped
-     (counted as "skipped by reference"). This is a read-only check - no records are written.
+     (counted as "skipped by reference"). This is a read-only check, so no records are written.
    - `--db` (Import.db): if the source SHA-256 is already present (from a previous import
      run), the file is skipped (counted as "skipped"). Otherwise, the file is copied/moved and
      a record is inserted **keyed by the SOURCE path** (not the dest path) with the source
@@ -421,15 +486,15 @@ directories to `outpath/date/filename`:
      Process.db cannot clobber the dedup key. The DB file is created automatically on first use.
 3. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
    `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
-   is found - those files land in a `"0001/01/01"` bucket (with the default `yyyy/MM/dd` format),
+   is found. Those files land in a `"0001/01/01"` bucket (with the default `yyyy/MM/dd` format),
    making undated files easy to locate and handle manually.
 4. **Subdirectory naming**: the date is formatted using `--format` (default `"yyyy/MM/dd"`).
-   The format is validated at startup - time components are rejected.
+   The format is validated at startup, and time components are rejected.
 5. **Copy or move**: by default files are copied and the source is preserved. Pass `--move`
    to remove the source file after a successful copy.
 6. **Tagging**: `--tagpath` splits the source sub-directory path relative to `--path` into
    tokens and writes each as an `XMP:Subject` tag. `--tags` applies explicit comma-separated
-   tags to every file. Both can be combined - tags are merged and deduplicated. Applied after
+   tags to every file. Both can be combined, and tags are merged and deduplicated. Applied after
    copy/move, before mtime restore. Files at the root of `--path` receive no path tags.
 7. **Collision handling**: if a file with the same name already exists in the destination,
    `_1`, `_2`, ... suffixes are appended (e.g. `photo_1.jpg`). A warning is logged.
@@ -458,6 +523,50 @@ were already imported and trashed in Immich.
 
 The trash database is append-only. If an asset is restored (un-trashed) in Immich, its hash
 remains in the database. Delete the database file and re-run `trash` to rebuild from scratch.
+
+## Verify Flow
+
+The `verify` command answers one question: will Immich be able to generate a preview for this
+file? It exists because a file can be byte-complete, pass every other check, upload successfully,
+and then fail thumbnail generation forever. Metadata inspection cannot see this, because the file
+reports as a perfectly clean HEIC or DNG, so the only reliable answer comes from running the decoder
+Immich runs.
+
+`verify` is a standalone pipeline step rather than an option on `process`, so the calling script
+chooses where to run it and whether a failure should stop the pipeline or merely be recorded.
+
+1. **Partition**: non-media files are ignored. With `--db`, files already verified and unchanged
+   since are skipped, so a repeat run over a large collection is cheap.
+
+   **Give `verify` its own database file.** It records the verified state in the same
+   `is_processed` column that `process` writes, so pointing `--db` at a `Process.db` makes
+   `verify` skip every file as "already verified" when they were only processed. Nothing detects
+   this, so use a separate `Verify.db`, as the examples below do.
+2. **Decode pass** (requires Docker). Every file is handed to
+   Immich's own `MediaRepository` running inside the `immich-server` image, using the same
+   `generateThumbnail`, the same libvips build, the same libheif and libraw versions, and for RAW
+   the same embedded-preview extraction. Paths are streamed in batches over stdin so container
+   startup is paid once per batch rather than once per file. The media directory is mounted
+   read-only at the fixed container path `/photocleaner`, and every path is translated onto it
+   before being sent in, so a host path that is not a valid container path still works.
+
+   The decoder is the only judge of a file's health. PhotoCleaner deliberately carries no
+   container parser of its own, because such a parser condemns whatever it fails to understand,
+   and an unfamiliar but valid format is indistinguishable from a damaged one from the inside.
+   A file that cannot be read, or that vanishes mid-run, counts as failed rather than invalid,
+   since neither is evidence of damage.
+3. **Report**: logs each rejection with the decoder's own message, then a summary. Exits `2` if
+   any file is invalid or any file failed.
+
+Nothing is modified, moved, or deleted. `verify` only ever reads.
+
+Because the decode pass calls Immich's own compiled code rather than reimplementing its pipeline,
+it tracks Immich's behavior across releases automatically. It runs `docker` directly, so it must
+be run somewhere Docker is available, and is not supported from inside PhotoCleaner's own
+container. There is no offline mode, because the decoder is the whole check.
+
+Before any file is judged, the command runs a preflight against the image. If Docker is
+unreachable or the image cannot be prepared, it exits `1` without marking a single file invalid.
 
 ## Supported File Types
 
@@ -525,29 +634,89 @@ docker run --rm \
 
 ## Workflow Example
 
-**Run [icloudpd][icloudpd-link] to download photos from iCloud**:
+**Run [kei][kei-link] to download photos from iCloud**:
+
+kei keeps its settings in a TOML file rather than on the command line, so the same configuration
+serves the one-shot and the long-running forms. A minimal `config.toml`:
+
+```toml
+[auth]
+username = "your@icloud.email"
+
+[download]
+directory = "/photos"
+folder_structure = "%Y/%m/%Y-%m-%d"
+
+[filters]
+media = ["photos", "videos", "live-photos"]
+
+[photos]
+raw_policy = "prefer-raw"
+
+[watch]
+interval = 86400
+```
+
+Authenticate once, interactively, so the session is stored in the data directory:
 
 ```shell
 #!/bin/bash
 
 set -Eeuo pipefail
 
-docker run -it --rm --name icloudpd \
-    -v $(pwd)/.icloudpd:/cookies \
-    -v /data/media/Test:/data \
-    -e TZ=America/Los_Angeles \
-    docker.io/icloudpd/icloudpd:latest \
-    icloudpd \
-        --cookie-directory /cookies \
-        --username your@icloud.email \
-        --directory /data \
-        --set-exif-datetime \
-        --folder-structure "{:%Y/%m}" \
-        --recent 1000
-        # --skip-created-before 2025-01-01
+docker run -it --rm --name kei \
+    -v /data/appdata/kei/config:/config \
+    -v /data/media/icloud:/photos \
+    -e KEI_DATA_DIR=/config \
+    ghcr.io/rhoopr/kei:latest \
+    kei login
 ```
 
-**Run [PhotoCleaner][photocleaner-link] to sync Immich trash hashes** (optional, prevents re-importing trashed files):
+Then sync on demand:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run -it --rm --name kei \
+    -v /data/appdata/kei/config:/config \
+    -v /data/media/icloud:/photos \
+    -e KEI_DATA_DIR=/config \
+    ghcr.io/rhoopr/kei:latest \
+    kei sync \
+        --config /config/config.toml \
+        --recent 30d
+        # --dry-run to preview without writing
+```
+
+Or run it as a service that keeps mirroring on the `[watch]` interval:
+
+```yaml
+services:
+  kei:
+    image: ghcr.io/rhoopr/kei:latest
+    container_name: kei
+    restart: unless-stopped
+    environment:
+      - TZ=America/Los_Angeles
+      - KEI_DATA_DIR=/config
+    volumes:
+      - /data/media/icloud:/photos
+      - /data/appdata/kei/config:/config
+    secrets:
+      - icloud_password
+    command:
+      - kei
+      - service
+      - run
+      - --config
+      - /config/config.toml
+      - --password-file
+      - /run/secrets/icloud_password
+```
+
+**Run PhotoCleaner to sync [Immich][immich-link] trash hashes** (optional, prevents re-importing trashed files):
 
 ```shell
 #!/bin/bash
@@ -563,10 +732,10 @@ docker run --rm \
     --trashdb /db/trash.db
 ```
 
-**Run [PhotoCleaner][photocleaner-link] to import new photos**:
+**Run PhotoCleaner to import new photos**:
 
-Copy only new files (not already in the DB and not trashed in Immich) from the icloudpd
-directory to an intermediate directory, without touching the icloudpd originals:
+Copy only new files (not already in the DB and not trashed in Immich) from the download
+directory to an intermediate directory, without touching the downloaded originals:
 
 ```shell
 #!/bin/bash
@@ -586,7 +755,7 @@ docker run --rm \
     --threads 4
 ```
 
-**Run [PhotoCleaner][photocleaner-link] to process the intermediate photos**:
+**Run PhotoCleaner to process the intermediate photos**:
 
 ```shell
 #!/bin/bash
@@ -599,6 +768,31 @@ docker run --rm \
     process \
     --path /intermediate \
     --threads 4
+```
+
+**Run PhotoCleaner to verify Immich can render the photos**:
+
+Run this on the host rather than inside the PhotoCleaner container: the decode pass invokes
+`docker` to run Immich's own decoder, and Docker-in-Docker is not supported. Capture the exit
+code instead of letting `set -e` abort, so the upload can be skipped while the run still reports
+cleanly:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+rc=0
+PhotoCleaner verify \
+    --path /data/media/intermediate \
+    --db /data/media/verify.db \
+    --threads 4 || rc=$?
+
+case $rc in
+    0) echo "All files verified" ;;
+    2) echo "Invalid files found - skipping upload, review the log" >&2; exit 2 ;;
+    *) echo "Verification could not run (exit $rc) - this says nothing about the files" >&2; exit "$rc" ;;
+esac
 ```
 
 **Run [Immich CLI][immich-cli-link] to import photos into Immich**:
@@ -649,7 +843,7 @@ immich-go upload from-folder --server=https://your.immich.server \
 
 ## Questions or Issues
 
-Report a bug, request a feature, or ask a question in [GitHub Issues][issues-link].
+Ask questions in the [Discussions][discussions-link] forum and report bugs in [GitHub Issues][issues-link].
 
 ## Development Environment Setup
 
@@ -706,28 +900,40 @@ dotnet tool update --all
 dotnet outdated --upgrade:prompt
 ```
 
-## License
+## License <!-- omit from toc -->
 
 Licensed under the [MIT License][license-link]\
 ![GitHub License][license-shield]
 
 <!-- Shields -->
 
-[docker-latest-shield]: https://img.shields.io/docker/v/ptr727/photocleaner/latest?logo=docker&label=Docker%20Latest
-[docker-size-shield]: https://img.shields.io/docker/image-size/ptr727/photocleaner/latest?logo=docker&label=Image%20Size
+[docker-develop-version-shield]: https://img.shields.io/docker/v/ptr727/photocleaner/develop?label=Docker%20Develop&logo=docker&color=orange
+[docker-latest-version-shield]: https://img.shields.io/docker/v/ptr727/photocleaner/latest?label=Docker%20Latest&logo=docker
+[docker-status-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PhotoCleaner/publish-release.yml?event=schedule&logo=github&label=Docker%20Build
+[last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/PhotoCleaner?logo=github&label=Last%20Commit
 [license-shield]: https://img.shields.io/github/license/ptr727/PhotoCleaner?label=License
+[pre-release-version-shield]: https://img.shields.io/github/v/release/ptr727/PhotoCleaner?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[release-status-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PhotoCleaner/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
+[release-version-shield]: https://img.shields.io/github/v/release/ptr727/PhotoCleaner?logo=github&label=GitHub%20Release
 
 <!-- Repo -->
 
 [history-link]: ./HISTORY.md
 [license-link]: ./LICENSE
 
+<!-- Internal -->
+
+[actions-link]: https://github.com/ptr727/PhotoCleaner/actions
+[commit-link]: https://github.com/ptr727/PhotoCleaner/commits/main
+[discussions-link]: https://github.com/ptr727/PhotoCleaner/discussions
+[docker-link]: https://hub.docker.com/r/ptr727/photocleaner
+[github-link]: https://github.com/ptr727/PhotoCleaner
+[issues-link]: https://github.com/ptr727/PhotoCleaner/issues
+[releases-link]: https://github.com/ptr727/PhotoCleaner/releases
+
 <!-- External -->
 
-[docker-link]: https://hub.docker.com/r/ptr727/photocleaner
-[icloudpd-link]: https://icloud-photos-downloader.github.io
-[immich-cli-link]: https://docs.immich.app/features/command-line-interface/
+[kei-link]: https://github.com/rhoopr/kei
+[immich-link]: https://immich.app
+[immich-cli-link]: https://docs.immich.app/features/command-line-interface
 [immich-go-link]: https://github.com/simulot/immich-go
-[issues-link]: https://github.com/ptr727/PhotoCleaner/issues
-[photocleaner-link]: https://github.com/ptr727/PhotoCleaner
-[releases-link]: https://github.com/ptr727/PhotoCleaner/releases

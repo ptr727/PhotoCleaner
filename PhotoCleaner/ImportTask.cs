@@ -40,6 +40,7 @@ internal sealed class ImportTask(
         Skipped,
         SkippedBySkipDb,
         TrashedInImmich,
+        Invalid,
         Failed,
     }
 
@@ -54,6 +55,7 @@ internal sealed class ImportTask(
         int skipped,
         int skipDbSkipped,
         int trashSkipped,
+        int invalid,
         int failed,
         int deletedDirs
     )> ExecuteAsync(
@@ -67,6 +69,7 @@ internal sealed class ImportTask(
             skipped = 0,
             skipDbSkipped = 0,
             trashSkipped = 0,
+            invalid = 0,
             failed = 0;
         Log.Information("Importing {FileCount} files", allFiles.Count);
         await Parallel
@@ -90,6 +93,7 @@ internal sealed class ImportTask(
                                 ref skipDbSkipped
                             ),
                             ImportResult.TrashedInImmich => Interlocked.Increment(ref trashSkipped),
+                            ImportResult.Invalid => Interlocked.Increment(ref invalid),
                             ImportResult.Failed => Interlocked.Increment(ref failed),
                             _ => throw new NotImplementedException(),
                         };
@@ -100,6 +104,8 @@ internal sealed class ImportTask(
                     }
                     catch (Exception ex)
                     {
+                        // Every failure counts, including a file missing since it was indexed.
+                        // Import never renames its source, so a vanished file means the tree changed.
                         Log.Error(ex, "Failed to import '{FilePath}'", file);
                         _ = Interlocked.Increment(ref failed);
                     }
@@ -110,7 +116,16 @@ internal sealed class ImportTask(
         int deletedDirs = options.DeleteEmpty
             ? DirectoryCleaner.DeleteEmptyDirectories(options.OutPath!, options.DryRun)
             : 0;
-        return (imported, ignored, skipped, skipDbSkipped, trashSkipped, failed, deletedDirs);
+        return (
+            imported,
+            ignored,
+            skipped,
+            skipDbSkipped,
+            trashSkipped,
+            invalid,
+            failed,
+            deletedDirs
+        );
     }
 
     private async Task<ImportResult> ImportFileAsync(
@@ -133,9 +148,8 @@ internal sealed class ImportTask(
         string? sha1 = null;
         if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
-            // Source-side hash caching: when the source file is already recorded in the import DB
-            // and its size/mtime match disk, ResolveHashesAsync returns the cached hashes without
-            // rehashing. The cache is keyed by source path because import inserts source paths.
+            // ResolveHashesAsync returns cached hashes when size and mtime still match disk.
+            // The cache is keyed by source path because import inserts source paths.
             FileRecord? cached = database is null
                 ? null
                 : await database.GetByPathAsync(file, cancellationToken).ConfigureAwait(false);
@@ -147,9 +161,8 @@ internal sealed class ImportTask(
             sha1 = resolvedSha1;
             Log.Debug("File '{FilePath}' has SHA-256 '{Sha256}'", file, sha256);
 
-            // Trash check is mandatory and runs FIRST. The Trash.db is the durable record of
-            // "user threw this away in Immich" beyond Immich's 30-day trash retention. Skipping
-            // here is the only thing preventing re-import after Immich purges its own trash.
+            // Trash.db outlives Immich's 30-day trash retention.
+            // Skipping here is the only thing preventing re-import after Immich purges its trash.
             if (trashDatabase is not null)
             {
                 bool trashed = await trashDatabase
@@ -202,6 +215,20 @@ internal sealed class ImportTask(
         }
 
         ExifToolJson? meta = await GetFileMetaAsync(file, cancellationToken).ConfigureAwait(false);
+
+        // Warnings are ignored on purpose, since most healthy files carry them.
+        (int validateErrors, _) = ExifToolJson.ParseValidate(meta?.Validate);
+        if (validateErrors > 0)
+        {
+            Log.Error(
+                "Skipping import of '{FilePath}': exiftool validation reported {ErrorCount} error(s): {Validate} {Error}",
+                file,
+                validateErrors,
+                meta!.Validate,
+                meta.ExifToolError
+            );
+            return ImportResult.Invalid;
+        }
 
         string inferredDateStr = string.Empty;
         DateTime? inferredDate = null;
@@ -310,8 +337,8 @@ internal sealed class ImportTask(
             // Restore source mtime last - after any exiftool writes
             File.SetLastWriteTimeUtc(finalDest, sourceInfo.LastWriteTimeUtc);
 
-            // Record the SOURCE in the import DB. The row identifies the source file we
-            // imported, not the destination. Lookups are by source content hash (sha256).
+            // The row identifies the source file, not the destination.
+            // Lookups are by source content hash.
             if (database is not null && sha256 is not null && sha1 is not null)
             {
                 Log.Debug("Inserting source '{SourcePath}' with SHA-256 '{Sha256}'", file, sha256);
@@ -334,9 +361,8 @@ internal sealed class ImportTask(
         }
         catch (OperationCanceledException)
         {
-            // Clean up partial destination file on cancelled copy (not move - moves are atomic
-            // on the same filesystem; for cross-device moves .NET leaves the source intact on
-            // failure, so no orphan risk)
+            // Only a cancelled copy can leave a partial destination.
+            // A move is atomic on one filesystem, and cross-device failure leaves the source intact.
             if (!options.Move && File.Exists(finalDest))
             {
                 try
@@ -414,9 +440,8 @@ internal sealed class ImportTask(
             );
     }
 
-    // Adds each tag to XMP:Subject on destFile without creating duplicates.
-    // Uses remove-then-add (-= then +=) per value so existing copies are replaced
-    // rather than doubled. -overwrite_original skips exiftool's _original backup.
+    // Remove-then-add per value replaces an existing copy instead of doubling it.
+    // -overwrite_original skips exiftool's _original backup.
     private static async Task ApplyTagsAsync(
         string[] tags,
         string destFile,

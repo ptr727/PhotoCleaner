@@ -1,14 +1,14 @@
 # PhotoCleaner
 
-An application that prepares photos and videos for import into photo managers.
+Utility to prepare photos and videos for import into photo managers.
 
 ## Documentation
 
 Refer to the [project page][github] for complete usage and configuration.
 
-- **Source Code**: [GitHub][github] - source code, issues, and CI/CD pipelines.
-- **Binary Releases**: [GitHub Releases][releases] - pre-compiled executables for Windows, Linux, and macOS.
-- **Docker Images**: [Docker Hub][dockerhub] - container images with exiftool and ffmpeg pre-installed.
+- **Source Code**: [GitHub][github], holding the source, the issues, and the CI/CD pipelines.
+- **Binary Releases**: [GitHub Releases][releases], carrying pre-compiled executables for Windows, Linux, and macOS.
+- **Docker Images**: [Docker Hub][dockerhub], carrying container images with exiftool and ffmpeg pre-installed.
 
 ## Docker Tags
 
