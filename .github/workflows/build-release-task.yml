@@ -103,10 +103,16 @@ jobs:
       assembly_file_version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
       assembly_informational_version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
 
+  # The terminal publish target, so it needs every other build (D4.5).
+  # The image builds from source and consumes no executable artifact, so nothing else forces the ordering.
+  # Without it a failed build-executable skips github-release while the image still pushes and `latest` moves.
+  # That is a partial publish: an image with no release.
+  # `!failure()` is what blocks it, since a failed upstream build must stop the push where a skipped one must not.
+  # `validate` is skipped on smoke, which is the skip that must still build.
   build-docker:
     name: Build Docker job
-    needs: [get-version, validate, validate-release]
-    if: ${{ !cancelled() && needs.get-version.result == 'success' && needs.validate-release.result == 'success' && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
+    needs: [get-version, validate, validate-release, build-executable]
+    if: ${{ !failure() && !cancelled() && needs.get-version.result == 'success' && needs.validate-release.result == 'success' && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
     uses: ./.github/workflows/build-docker-task.yml
     secrets: inherit
     with:
