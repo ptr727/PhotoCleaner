@@ -498,6 +498,30 @@ public sealed class VerifyTaskTests(TempDirectoryFixture fixture)
             Task<string> error = probe.StandardError.ReadToEndAsync();
             if (!probe.WaitForExit(60_000))
             {
+                // Disposing the probe frees its handles without ending the child.
+                // A wedged docker would otherwise outlive the test that started it.
+                try
+                {
+                    probe.Kill(entireProcessTree: true);
+
+                    // Kill only signals, so the child is still alive when it returns.
+                    probe.WaitForExit(5_000);
+                }
+                catch (InvalidOperationException)
+                {
+                    // It exited between the timeout expiring and the kill.
+                }
+
+                // The kill closes the pipes, so the drains finish rather than being left unobserved.
+                try
+                {
+                    Task.WaitAll([output, error], 5_000);
+                }
+                catch (AggregateException)
+                {
+                    // A drain that faulted on the closing pipe is observed here and discarded.
+                }
+
                 return false;
             }
 
