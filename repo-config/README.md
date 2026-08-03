@@ -23,7 +23,7 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 ## Repo Settings
 
-The fleet-standard general settings live in [`settings.json`][settings-json] and are applied idempotently by `configure.sh apply` alongside the rulesets (`gh api PATCH /repos/{owner}/{repo}`). The two settings that depend on per-repo state (`has_discussions` for visibility and `default_branch` for main-must-exist) are computed by the script, not stored in the file. `configure.sh apply` also enables Dependabot vulnerability alerts and automated security updates, which are fleet policy applied via the API rather than a `settings.json` key. `configure.sh check` validates all of these and exits non-zero on drift.
+The fleet-standard general settings live in [`settings.json`][settings-json] and are applied idempotently by `configure.sh apply` alongside the rulesets (`gh api PATCH /repos/{owner}/{repo}`). The two settings that depend on per-repo state, `has_discussions` (visibility) and `default_branch` (main-must-exist), are computed by the script, not stored in the file. `configure.sh apply` also enables Dependabot vulnerability alerts and automated security updates, fleet policy applied via the API rather than a `settings.json` key. `configure.sh check` validates all of these and exits non-zero on drift.
 
 - **Default branch `main`** (the script sets it only when a `main` branch exists, never pointing the default at a missing branch).
 - **Merge methods**: `Allow merge commits` and `Allow squash merging` on, **rebase off**, and each branch ruleset then picks its method (merge on `main`, squash on `develop`).
