@@ -6,9 +6,10 @@ How this repository is run. It ships a .NET console application and a multi-arch
 
 ### Run the gates the way CI runs them
 
-Local and CI runs read the same committed configuration, but they invoke it differently: locally the formatter writes, and in CI it only verifies. The [`.NET Format`](./.vscode/tasks.json) task is the local clean-compile chain, meaning `dotnet csharpier format`, then `dotnet build`, then the style verify. Run the chain and the suite before committing, since the chain never runs the tests and a change that compiles and formats cleanly can still be broken:
+Local and CI runs read the same committed configuration, but they invoke it differently: locally the formatter writes, and in CI it only verifies. The [`.NET Format`](./.vscode/tasks.json) task is the local clean-compile chain, meaning `dotnet csharpier format`, then `dotnet build`, then the style verify. Run the chain and the suite before committing, since the chain never runs the tests and a change that compiles and formats cleanly can still be broken. CSharpier and Husky.Net are local tools declared in [`.config/dotnet-tools.json`](./.config/dotnet-tools.json), and neither the `.NET Format` task nor the two tasks it depends on restores them, so run `dotnet tool restore` on a fresh clone before that task or the chain below. A clone whose package cache does not already hold the tools otherwise fails on the format step:
 
 ```sh
+dotnet tool restore
 dotnet csharpier format --log-level=debug .
 dotnet build
 dotnet format style --verify-no-changes --severity=info --verbosity=detailed
@@ -16,7 +17,7 @@ dotnet test
 dotnet husky run
 ```
 
-CI differs in two places. It substitutes `dotnet csharpier check .` for the format step, after a `dotnet tool restore`, and it runs the suite as `dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage` so coverlet emits the report the Codecov upload consumes. The style verify is identical. So a local run that formats a file leaves CI clean, while an unformatted commit fails there rather than being fixed.
+CI differs in two places. It substitutes `dotnet csharpier check .` for the format step, and it runs the suite as `dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage` so coverlet emits the report the Codecov upload consumes. The style verify is identical. So a local run that formats a file leaves CI clean, while an unformatted commit fails there rather than being fixed.
 
 The lint set runs in containers, matching the `Lint:` tasks in [`.vscode/tasks.json`](./.vscode/tasks.json):
 
