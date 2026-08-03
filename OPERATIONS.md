@@ -60,12 +60,9 @@ Workflow runs are the CI log. `gh run list --branch [branch]` and `gh run view [
 
 The application logs to the console and to the file named by `--logfile`. Raise the level with `--loglevel debug` when a file is rejected and the reason is not obvious.
 
-A calling script branches on the exit code rather than on output:
+A calling script branches on the exit code rather than on output. Every command uses the same three codes, and [Exit Codes](./README.md#exit-codes) is the contract for what each one means.
 
-- `0`: the command ran to completion.
-- `1`: the command could not run, meaning a command-line parse or validation error, a cancellation, or an unhandled exception. A parse error short-circuits before any work starts, so nothing was touched.
-
-Note that a per-file failure does not currently change the exit code, so `0` means the command finished rather than that every file succeeded. Read the log to tell those apart.
+The operational point is that `0` and `2` both mean the command ran to completion, and they differ only in whether every file succeeded. A pipeline that reads any non-zero code as "nothing happened" is therefore wrong: `1` is the only code that says the command reported nothing about the files, and a command-line parse error short-circuits before any work starts, so nothing was touched.
 
 ## Tool Usage
 
@@ -73,8 +70,9 @@ The application shells out to external tools rather than reimplementing them, so
 
 - **exiftool** reads and writes metadata, invoked through `MediaUtilities.GetExifToolJsonAsync`. It is installed in the Docker image, and a native run needs it on `PATH`.
 - **ffmpeg** handles video, and is installed in the image alongside exiftool.
+- **Docker** is a runtime dependency of `verify` alone, which runs the Immich decoder inside the `immich-server` image. The preflight exits `1` when the `docker` command is missing or the image cannot be prepared, so an unreachable daemon fails the run rather than condemning files.
 
-The application itself needs no Docker daemon at runtime. Docker here is a packaging and tooling concern only, meaning the shipped image and the containerized linters above.
+Every other command runs natively, so outside `verify` Docker is a packaging and tooling concern only, meaning the shipped image and the containerized linters above.
 
 The Immich API key can be given inline with `--apikey` or read from a file with `--apikey-file`, and the two are mutually exclusive. Prefer the file: an inline key lands in shell history and is visible in the process list for as long as the command runs.
 
