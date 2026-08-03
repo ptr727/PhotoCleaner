@@ -503,10 +503,23 @@ public sealed class VerifyTaskTests(TempDirectoryFixture fixture)
                 try
                 {
                     probe.Kill(entireProcessTree: true);
+
+                    // Kill only signals, so the child is still alive when it returns.
+                    probe.WaitForExit(5_000);
                 }
                 catch (InvalidOperationException)
                 {
                     // It exited between the timeout expiring and the kill.
+                }
+
+                // The kill closes the pipes, so the drains finish rather than being left unobserved.
+                try
+                {
+                    Task.WaitAll([output, error], 5_000);
+                }
+                catch (AggregateException)
+                {
+                    // A drain that faulted on the closing pipe is observed here and discarded.
                 }
 
                 return false;
