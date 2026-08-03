@@ -13,9 +13,15 @@
 # Root config
 root = true
 
-# Defaults
+# Defaults: CRLF is the default, and only the LF exceptions below are declared.
+# Most LF pins are shared with `.gitattributes`, which git enforces: `*.sh`, the husky pre-commit shebang, and Dockerfiles.
+# The workflow-YAML pin (`.github/workflows/*`) is `.editorconfig`-only.
+# For that one, git stays passive (`* -text`) and CI (editorconfig-checker) enforces LF.
+# Keep the `[*]` `end_of_line = crlf` default, which the Windows-GUI and WSL-engine workflow requires because Windows tooling misbehaves on LF.
+# Every uncovered file type relies on that default too.
 [*]
 charset = utf-8
+end_of_line = crlf
 indent_size = 4
 indent_style = space
 insert_final_newline = true
@@ -23,39 +29,44 @@ trim_trailing_whitespace = true
 
 # Markdown files
 [*.md]
-end_of_line = crlf
 trim_trailing_whitespace = false
 
 # Xml files
 [*.{xml,csproj,props,targets}]
-end_of_line = crlf
 indent_size = 2
 
 # Yaml files
 [*.{yml,yaml}]
-end_of_line = crlf
 indent_size = 2
 
-# Workflow YAML is LF: Dependabot and Actions rewrite it with LF, so declaring LF keeps it consistent instead of
-# mixed. git still leaves endings alone (`* -text`). This and CI (editorconfig-checker) enforce it. Other YAML is CRLF.
+# Workflow YAML is LF, because Dependabot and Actions rewrite it with LF, so declaring LF keeps it consistent instead of mixed.
+# Endings are still left alone by git (`* -text`), and this file plus CI (editorconfig-checker) enforce it.
+# Other YAML stays CRLF.
 [.github/workflows/*.{yml,yaml}]
 end_of_line = lf
-
-# Json files
-[*.{json,jsonc}]
-end_of_line = crlf
 
 # Linux scripts
 [*.sh]
 end_of_line = lf
 
-# Windows scripts
-[*.{cmd,bat,ps1}]
-end_of_line = crlf
+# Husky.Net ships an extensionless pre-commit hook with a `/bin/sh` shebang, which matches no extension rule.
+# Pin it by path, so a CRLF cannot break the hook's execution.
+# `.gitattributes` carries the matching pin.
+[.husky/pre-commit]
+end_of_line = lf
+
+# Dockerfiles are LF, because CRLF breaks RUN heredocs and line continuations.
+[{Dockerfile,*.Dockerfile}]
+end_of_line = lf
+
+# .NET-only below, covering C# and ReSharper style.
+# Everything above is the line-ending governance every derived repo carries.
 
 # C# files
 [*.cs]
-end_of_line = crlf
+# Suppressions follow CODESTYLE.md "Analyzer Diagnostics and Suppressions".
+# Prefer a [SuppressMessage] attribute, or the owning project's .editorconfig.
+# Relax a rule repo-wide here only when it applies to every project, never for a brownfield batch.
 dotnet_diagnostic.IDE0055.severity = none
 csharp_indent_block_contents = true
 csharp_indent_braces = false
