@@ -6,6 +6,19 @@ This file is the entry point every coding agent reads first, and it holds only t
 
 Treat this file and `GOVERNANCE.md` as authoritative for cross-cutting rules, and do not restate their rules elsewhere. This project's own conventions and behavioral contracts live in [`CODESTYLE.md`](./CODESTYLE.md), **not** in [`.github/copilot-instructions.md`](./.github/copilot-instructions.md), because that file targets GitHub Copilot / VS Code specifically, while this file and `GOVERNANCE.md` are the agent-agnostic ones every coding agent is directed to read, so any rule a reviewer must honor has to live in one of those two files to be provider-independent.
 
+## Fleet Bootstrap
+
+This repository is governed by a shared template, and the canonical rules, machine-readable spec, and procedures live in `github.com/ptr727/ProjectTemplate`, the repository these rules call the hub. Fetch that repository before acting on anything about conformance, carried content, repository settings, or standing a repository up, because a carried copy here can be stale or absent and the hub is the only authority on what this repository is supposed to hold. This section is byte-locked across every repository in the fleet, so it reads identically wherever it is found, and it is the entry point whenever nothing else present says where the rules are.
+
+Route by what this repository currently holds rather than by what it is expected to hold, since the two differ exactly when this section matters most.
+
+- **No repository yet, or a local tree with no remote.** Follow the hub's `STANDUP.md` from section 0. That file is hub-only and deliberately not carried, because a repository needing it cannot be relied on to hold a current copy. Note that nothing in it creates the GitHub repository, which is an outward-facing write requiring explicit permission, so section 0A is the list handed to the maintainer before anything else starts.
+- **A repository with no carried instruction set, or a partial one.** Carry the baseline per the hub's `STANDUP.md` sections 1A and 2, which resolve what this repository is owed from its declared types and workflow model. Absent files are not drift to re-vendor, they are a baseline that never arrived, and the two are fixed differently.
+- **A repository with the instruction set, current or stale.** Follow the hub's `RESYNC.md`, which runs `AUDIT.md` end to end for the findings and then applies each one in an order that matters, since the rules govern what comes after them, a deletion must precede the re-vendor that would otherwise refresh the file, and only some findings are mechanically detectable at all. An audit that reports drift and stops is half the procedure.
+- **A repository that believes it is conformant.** Run the audit anyway and commit the report, because conformance asserted without a report is conformance nobody can check. This is the same procedure as the case above and is listed separately only because it is the one most often skipped.
+
+Three rules bound every path above. **Read the hub's `main` branch as ground truth**, since that is the promoted and gated state, and read `develop` only to detect divergence. **Reach the hub as a checkout of your own and fetch it immediately before reading it**, because a clone is whatever it last fetched rather than the branch it names, and work only in that checkout rather than in one that another task is using, per [`GOVERNANCE.md`](./GOVERNANCE.md) "Repository Boundaries and Write Safety" and "Hub-Hosted Tooling". And **the audit is read-only**: it produces a report and never edits the repository it measures, so a fix is a separate, reviewable change.
+
 ## Context and Delegation Discipline
 
 An agent session is billed on the context it carries, not the work it does. Every request re-reads the whole accumulated context, so a token added early is paid for again on every request that follows, and a long session bills its last task for every earlier one. These are cost rules. None of them licenses doing less work, skipping verification, or shipping something unreviewed.
@@ -55,17 +68,18 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | --- | --- |
 | Why the rules are shaped this way | `Foundational Principles` |
 | Recording a durable lesson or updating governance | `Durable Knowledge and Self-Improvement` |
-| Any push, API mutation, comment, label, or merge | `Repository Boundaries and Write Safety` |
+| Any push, API mutation, comment, label, or merge, or which checkout the work happens in | `Repository Boundaries and Write Safety` |
 | Quoting data into a comment, commit, test, or doc | `Representative Data in Agent-Authored Text` |
-| Committing, signing, rebasing, force-pushing | `Git and Commit Rules` |
-| Branch choice, promotion, keeping branches in sync | `Branching Model` |
-| Releasing, version bumps, publishing | `Release Model` |
-| A live config repo rather than a code repo | `Operational Repositories` |
-| Onboarding a repo or running a conformance sweep | `Repository Onboarding and Conformance` (hub only, not carried) |
-| Writing a commit message or pull request title | `Pull Request Title and Commit Message Conventions` |
-| Any prose, comment, doc, or line-ending change | `Documentation Style Conventions` |
+| Committing, signing, rebasing, force-pushing | `Git and Commit Rules`, packaged as the `git-commit-conventions` Skill |
+| Branch choice, promotion, keeping branches in sync | `Branching Model`, packaged as the `operational-vs-release-workflow` Skill |
+| Releasing, version bumps, publishing | `Release Model`, packaged as the `operational-vs-release-workflow` Skill |
+| A live config repo rather than a code repo | `Operational Repositories`, packaged as the `operational-vs-release-workflow` Skill |
+| Onboarding a repo or running a conformance sweep | `Repository Onboarding and Conformance` (hub only, not carried). Standing up a new repo from a hub checkout is packaged as the `standup-a-repo` Skill, and resyncing one already stood up the same way is `resync-a-repo`, both hub-context only |
+| Running a fleet gate, the review digest, or the config script | `Hub-Hosted Tooling` |
+| Writing a commit message or pull request title | `Pull Request Title and Commit Message Conventions`, packaged as the `comment-and-doc-style` Skill |
+| Any prose, comment, doc, or line-ending change | `Documentation Style Conventions`, packaged as the `comment-and-doc-style` Skill |
 | Proving work actually happened | `Verification Discipline` |
-| Requesting, answering, or closing a review | `PR Review Etiquette` |
+| Requesting, answering, or closing a review | `PR Review Etiquette`, packaged as the `pr-review-conduct` Skill |
 | Reporting progress or asking the user something | `Communicating with the User` |
 | Editing a workflow YAML file | `Workflow YAML Conventions` |
 | Choosing an OS, runtime, or toolchain target | `Supported Development Platforms` |
@@ -73,3 +87,5 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md). R
 | Editor settings and tasks | `Editor and Tasks` |
 | The About panel, description, or repo toggles | `Repository Details` |
 | Where a file belongs in the tree | `Repository Layout` |
+
+Some of the rules above are also packaged as Claude Code / opencode / Codex Skills, hand-authored at `.agents/skills/` in the hub (not a repo-relative link here, since that path is hub-local and not carried into every fleet repo), so they surface automatically instead of needing to be re-read every session. `scripts/` is hub-hosted and reached rather than carried, per "Hub-Hosted Tooling", so run the installer from a hub checkout: `python3 scripts/skills_install.py` (or the `.sh`/`.ps1` wrapper) once per machine, from `github.com/ptr727/ProjectTemplate`, installs them for every repo touched from that machine. `python3 scripts/skills_install.py --report`, also from a hub checkout, says whether this machine is current. A rule that keeps needing to be restated is a sign the install is missing or stale, not that the rule does not exist. Keeping a repo's own carried `.github/copilot-instructions.md` in sync with the hub, without losing that repo's own "Disproved Claims" ledger entries in the process, is `copilot-instructions-keeper`, a skill about maintaining that file rather than a rule extracted from it, since the file itself is read directly by the Copilot bot and stays fully intact everywhere it is carried. Checking, from inside this repo's own session with no operator watching, whether this repo and this machine are actually current against the hub is `fleet-conformance-check`, new content rather than a rule extracted from a section, the counterpart to `resync-a-repo` that needs no standing hub checkout or named target beyond the repo the session is already in, even though its own check fetches a hub checkout to reach `scripts/skills_install.py`. Opening a pull request against a repository outside this fleet, one the maintainer does not control, follows a different workflow entirely, new content rather than a rule extracted from a section, packaged as `upstream-contribution-workflow` and independent of the target repo's own type or workflow model.

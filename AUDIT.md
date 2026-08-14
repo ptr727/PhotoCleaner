@@ -21,16 +21,16 @@ diff <(jq -S . repo-config/settings.json) <(jq -S . <<<"$live") \
 
 ## Rulesets
 
-Diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` and `bypass_actors[]` before diffing so a reordered but equivalent ruleset does not read as drift). This release carry keeps its `develop` payload at [`repo-config/develop.json`][repo-config-develop].
+Diff each live ruleset against the committed expected payload with a normalized comparison (sort the order-insensitive `rules[]` before diffing so a reordered but equivalent ruleset does not read as drift). `bypass_actors` sits deliberately outside the compared subset: who may bypass a ruleset is a human decision taken in the UI, no payload declares one, and comparing it here would report a finding against every ruleset that has any bypass actor at all, which is the field's normal state rather than a deviation. This release carry keeps its `develop` payload at [`repo-config/develop.json`][repo-config-develop].
 
 ```sh
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-norm='{name,target,enforcement,bypass_actors,conditions,rules} | .rules|=sort_by(.type) | .bypass_actors|=sort_by(.actor_id)'
+norm='{name,target,enforcement,conditions,rules} | .rules|=sort_by(.type)'
 for b in develop main; do
   file="repo-config/$b.json"
   id=$(gh api "repos/$repo/rulesets" --jq ".[]|select(.name==\"$b\").id")
   diff <(jq -S "$norm" "$file") \
-       <(gh api "repos/$repo/rulesets/$id" --jq '{name,target,enforcement,bypass_actors,conditions,rules}' | jq -S "$norm") \
+       <(gh api "repos/$repo/rulesets/$id" --jq '{name,target,enforcement,conditions,rules}' | jq -S "$norm") \
     && echo "$b: in sync" || echo "$b: DRIFT"
 done
 ```
@@ -58,7 +58,7 @@ done
 
 ## Verdict and Follow-Up
 
-A missing required item or a divergent payload is a **defect** (not operational); an equivalent outcome in a non-standard form is a **drift finding**. N/A items are excluded, never counted as failures. Surface findings as repository issues; fixes land as a pull request to `develop` per [GOVERNANCE.md "Branching Model"][governance-branching-model]. To re-apply the whole baseline, run `repo-config/configure.sh` (see [repo-config/README.md][repo-config-readme]).
+A missing required item or a divergent payload is a **defect** (not operational); an equivalent outcome in a non-standard form is a **drift finding**. N/A items are excluded, never counted as failures. Surface findings as repository issues; fixes land as a pull request to `develop` per [GOVERNANCE.md "Branching Model"][governance-branching-model]. To re-apply the whole baseline, run `configure.sh` from a hub checkout against this repo (see [repo-config/README.md][repo-config-readme]).
 
 <!-- Repo -->
 

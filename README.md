@@ -6,20 +6,20 @@ Utility to prepare photos and videos for import into photo managers.
 
 - **Source Code**: [GitHub][github-link] for source, issues, and the CI/CD pipelines.
 - **Versioned Releases**: [GitHub Releases][releases-link] for pre-compiled executables for Windows, Linux, and macOS.
-- **Docker Images**: [Docker Hub][docker-link] for container images with all tools pre-installed.
+- **Docker Images**: [Docker Hub][docker-hub-link] for container images with all tools pre-installed.
 
 ### Build Status <!-- omit from toc -->
 
 [![Release Status][release-status-shield]][actions-link]\
 [![Docker Status][docker-status-shield]][actions-link]\
-[![Last Commit][last-commit-shield]][commit-link]
+[![Last Commit][last-commit-shield]][commits-link]
 
 ### Releases <!-- omit from toc -->
 
 [![GitHub Release][release-version-shield]][releases-link]\
 [![GitHub Pre-Release][pre-release-version-shield]][releases-link]\
-[![Docker Latest][docker-latest-version-shield]][docker-link]\
-[![Docker Develop][docker-develop-version-shield]][docker-link]
+[![Docker Latest][docker-latest-version-shield]][docker-hub-link]\
+[![Docker Develop][docker-develop-version-shield]][docker-hub-link]
 
 ### Release Notes <!-- omit from toc -->
 
@@ -32,7 +32,7 @@ Utility to prepare photos and videos for import into photo managers.
 
 > **Breaking**: commands now exit `2` when they complete with per-file failures.
 
-See [Release History][history-link] for complete release notes and older versions.
+See [Release History][history] for complete release notes and older versions.
 
 ## Table of Contents <!-- omit from toc -->
 
@@ -900,9 +900,36 @@ dotnet tool update --all
 dotnet outdated --upgrade:prompt
 ```
 
+## 3rd Party Tools
+
+The third-party tools, libraries, and actions this project depends on.
+
+| Tool | Role |
+| --- | --- |
+| [AwesomeAssertions][awesomeassertions-link] | Assertion library for .NET tests. |
+| [BenchmarkDotNet][benchmarkdotnet-link] | Benchmarking library for .NET. |
+| [CliWrap][cliwrap-link] | Process execution library for .NET. |
+| [Codecov][codecov-link] | Code coverage reporting service. |
+| [CSharpier][csharpier-link] | C# code formatter. |
+| [cspell][cspell-link] | Spell checker. |
+| [Docker Hub Description][docker-hub-description-link] | GitHub action that publishes a Docker Hub repository overview. |
+| [dotnet-outdated][dotnet-outdated-link] | Outdated NuGet dependency reporter. |
+| [editorconfig-checker][editorconfig-checker-link] | Line-ending and whitespace linter. |
+| [ExifTool][exiftool-link] | Media metadata reader and writer. |
+| [FFmpeg][ffmpeg-link] | Media transcoder. |
+| [GH Release][gh-release-link] | GitHub action that creates a release. |
+| [GitHub Actions][github-actions-link] | CI and automation runner. |
+| [GitHub Dependabot][dependabot-link] | Dependency update bot. |
+| [Husky.Net][husky-link] | Git hook manager for .NET. |
+| [markdownlint-cli2][markdownlint-link] | Markdown linter. |
+| [Nerdbank.GitVersioning][nbgv-link] | Version computation from git height. |
+| [Serilog][serilog-link] | Structured logging library for .NET. |
+| [SQLite][sqlite-link] | Embedded relational database engine. |
+| [xUnit.Net][xunit-link] | Test framework for .NET. |
+
 ## License <!-- omit from toc -->
 
-Licensed under the [MIT License][license-link]\
+Licensed under the [MIT License][license]\
 ![GitHub License][license-shield]
 
 <!-- Shields -->
@@ -918,22 +945,42 @@ Licensed under the [MIT License][license-link]\
 
 <!-- Repo -->
 
-[history-link]: ./HISTORY.md
-[license-link]: ./LICENSE
+[history]: ./HISTORY.md
+[license]: ./LICENSE
 
-<!-- Internal -->
+<!-- Distribution -->
 
 [actions-link]: https://github.com/ptr727/PhotoCleaner/actions
-[commit-link]: https://github.com/ptr727/PhotoCleaner/commits/main
+[commits-link]: https://github.com/ptr727/PhotoCleaner/commits/main
 [discussions-link]: https://github.com/ptr727/PhotoCleaner/discussions
-[docker-link]: https://hub.docker.com/r/ptr727/photocleaner
+[docker-hub-link]: https://hub.docker.com/r/ptr727/photocleaner
 [github-link]: https://github.com/ptr727/PhotoCleaner
 [issues-link]: https://github.com/ptr727/PhotoCleaner/issues
 [releases-link]: https://github.com/ptr727/PhotoCleaner/releases
 
 <!-- External -->
 
-[kei-link]: https://github.com/rhoopr/kei
-[immich-link]: https://immich.app
+[awesomeassertions-link]: https://awesomeassertions.org/
+[benchmarkdotnet-link]: https://benchmarkdotnet.org/
+[cliwrap-link]: https://github.com/Tyrrrz/CliWrap
+[codecov-link]: https://codecov.io/
+[csharpier-link]: https://csharpier.com/
+[cspell-link]: https://cspell.org
+[dependabot-link]: https://github.com/dependabot
+[docker-hub-description-link]: https://github.com/marketplace/actions/docker-hub-description
+[dotnet-outdated-link]: https://github.com/dotnet-outdated/dotnet-outdated
+[editorconfig-checker-link]: https://github.com/editorconfig-checker/editorconfig-checker
+[exiftool-link]: https://exiftool.org/
+[ffmpeg-link]: https://www.ffmpeg.org/
+[gh-release-link]: https://github.com/marketplace/actions/gh-release
+[github-actions-link]: https://github.com/actions
+[husky-link]: https://alirezanet.github.io/Husky.Net/
 [immich-cli-link]: https://docs.immich.app/features/command-line-interface
 [immich-go-link]: https://github.com/simulot/immich-go
+[immich-link]: https://immich.app
+[kei-link]: https://github.com/rhoopr/kei
+[markdownlint-link]: https://github.com/DavidAnson/markdownlint-cli2
+[nbgv-link]: https://github.com/dotnet/Nerdbank.GitVersioning
+[serilog-link]: https://serilog.net/
+[sqlite-link]: https://www.sqlite.org/
+[xunit-link]: https://xunit.net/
