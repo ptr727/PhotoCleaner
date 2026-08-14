@@ -943,11 +943,6 @@ Licensed under the [MIT License][license]\
 [release-status-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PhotoCleaner/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
 [release-version-shield]: https://img.shields.io/github/v/release/ptr727/PhotoCleaner?logo=github&label=GitHub%20Release
 
-<!-- Repo -->
-
-[history]: ./HISTORY.md
-[license]: ./LICENSE
-
 <!-- Distribution -->
 
 [actions-link]: https://github.com/ptr727/PhotoCleaner/actions
@@ -957,6 +952,11 @@ Licensed under the [MIT License][license]\
 [github-link]: https://github.com/ptr727/PhotoCleaner
 [issues-link]: https://github.com/ptr727/PhotoCleaner/issues
 [releases-link]: https://github.com/ptr727/PhotoCleaner/releases
+
+<!-- Repo -->
+
+[history]: ./HISTORY.md
+[license]: ./LICENSE
 
 <!-- External -->
 
