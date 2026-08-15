@@ -1,7 +1,7 @@
 # Codecov configuration.
-#
-# Coverage is report-only for this repo: the patch and project statuses are
-# informational so a coverage delta never blocks a merge.
+# Codecov's coverage statuses are advisory: they report and trend coverage, never gating a PR.
+# - informational: true makes project and patch statuses advisory (always pass), so a coverage delta never blocks a PR.
+# - Distinct from the upload step's fail_ci_if_error: false, which only guards upload errors.
 coverage:
   status:
     project:
@@ -11,7 +11,6 @@ coverage:
       default:
         informational: true
 
-# The benchmarks project is a performance harness, not shipped app code, and is
-# intentionally not unit-tested.
+# The benchmarks project is a performance harness rather than shipped app code, and is intentionally not unit-tested.
 ignore:
   - "PhotoCleanerBenchmarks/**"
