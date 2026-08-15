@@ -8,13 +8,13 @@
 # https://github.com/dotnet/runtime/blob/main/.editorconfig
 
 # https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format
-# dotnet format style --verify-no-changes --severity=info --verbosity=detailed
+# Verify with: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
 
 # Root config
 root = true
 
 # Defaults: CRLF is the default, and only the LF exceptions below are declared.
-# Most LF pins are shared with `.gitattributes`, which git enforces: `*.sh`, the husky pre-commit shebang, and Dockerfiles.
+# Most LF pins are shared with `.gitattributes`, which git enforces: `*.sh`, the husky pre-commit shebang, `uv.lock`, and Dockerfiles.
 # The workflow-YAML pin (`.github/workflows/*`) is `.editorconfig`-only.
 # For that one, git stays passive (`* -text`) and CI (editorconfig-checker) enforces LF.
 # Keep the `[*]` `end_of_line = crlf` default, which the Windows-GUI and WSL-engine workflow requires because Windows tooling misbehaves on LF.
@@ -45,6 +45,11 @@ indent_size = 2
 [.github/workflows/*.{yml,yaml}]
 end_of_line = lf
 
+# Composite action metadata is Actions-owned like the workflows above, and Dependabot rewrites the
+# `uses:` pins inside it with LF exactly as it does theirs, so declaring LF keeps it consistent.
+[.github/actions/**/*.{yml,yaml}]
+end_of_line = lf
+
 # Linux scripts
 [*.sh]
 end_of_line = lf
@@ -55,12 +60,19 @@ end_of_line = lf
 [.husky/pre-commit]
 end_of_line = lf
 
+# The uv tool regenerates uv.lock with LF on every platform, so pin it here.
+# Without the pin an EOL check (editorconfig-checker or CI) fails on every `uv lock` or `uv sync` until the file is manually reconverted.
+# The rationale matches the shebang and Dockerfile pins, where a tool owns the ending.
+# A repo with no lockfile is unaffected, so this pin is forward-declared.
+[uv.lock]
+end_of_line = lf
+
 # Dockerfiles are LF, because CRLF breaks RUN heredocs and line continuations.
 [{Dockerfile,*.Dockerfile}]
 end_of_line = lf
 
 # .NET-only below, covering C# and ReSharper style.
-# Everything above is the line-ending governance every derived repo carries.
+# Everything above is the line-ending governance every derived repo carries, and a non-.NET repo may drop from here down.
 
 # C# files
 [*.cs]
