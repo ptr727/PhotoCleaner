@@ -18,12 +18,13 @@ Summarized for VS Code's generators. The full rules, rationale, and examples are
 
 ## Reviewing Carried Fleet Content
 
-Several of this repository's governance files are carried from a shared template and kept in sync across a fleet of sibling repositories, among them `AGENTS.md`, `CODESTYLE.md`, `WORKFLOW.md`, this file, and the `repo-config/` rulesets. Most of `GOVERNANCE.md` is universal fleet law: every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer, is byte-locked and verified by an automated byte-for-byte match against the template canonical, not by line-by-line review. `AGENTS.md` is the thin router and carries two byte-locked sections of its own, with no repository-specific ones.
+Several of this repository's governance files are carried from a shared template and kept in sync across a fleet of sibling repositories, among them `AGENTS.md`, `CODESTYLE.md`, `WORKFLOW.md`, this file, and the `repo-config/` rulesets. Most of `GOVERNANCE.md` is universal fleet law: every section that states a rule, as opposed to the two that describe this repository's own directory tree and devcontainer, is byte-locked and verified by an automated byte-for-byte match against the template canonical, not by line-by-line review. `AGENTS.md` is the thin router and carries three byte-locked sections of its own, with no repository-specific ones.
 
-Two constraints follow when reviewing that content.
+Three constraints follow when reviewing that content.
 
 - **A reference inside byte-locked text to a path or section this repository does not carry is intentional, not a broken link.** Universal rule text names shared infrastructure (a fleet registry, a reusable config snippet, the other workflow model's ruleset payload) that a given repository legitimately may not contain. Editing the text to "fix" such a reference would break the fleet audit that governs it, so the reference is correct as written. Do not report it as a dead link, a missing file, or a broken cross-reference.
 - **A genuine substantive defect is still worth raising.** Byte-locked is not unreviewable. A self-contradiction, a factual error, or a real typo in the canonical prose is a valid finding, but note that the fix lands at the template and re-vendors to every repository, rather than proposing a local edit the audit would reject.
+- **A reference to a hub script is a pointer to follow, not a broken local path.** The fleet's gates live in one place and a repository runs them from a checkout of that place rather than holding a copy, so `scripts/prose_lint.py` (prose the CI linters pass on), `scripts/repo_gate.py` (repository settings and action pins), `scripts/pr_review.py` (the review digest, and reply plus resolve without a hand-typed id), and `spec/audit.py` (the conformance audit) resolve there and in none of the repositories they measure. [GOVERNANCE.md "Documentation Style Conventions"](../GOVERNANCE.md#documentation-style-conventions) carries the exception that permits such a pointer inside carried text, and [GOVERNANCE.md "Hub-Hosted Tooling"](../GOVERNANCE.md#hub-hosted-tooling) states how one is reached and what to report when it cannot be. Reach for them before writing a check of your own, since a reconstructed gate encodes its author's reading of a rule rather than the rule, and agrees with no other repository.
 
 ## GitHub Copilot Review Runbook
 
@@ -37,7 +38,19 @@ Auto-review on push is configured (via the branch ruleset's `copilot_code_review
 
 **A review with no inline comments is still a completed review, not a failure, and not a reason to ask the maintainer to re-trigger.** Copilot very often posts a single formal review (GraphQL `state: COMMENTED`) whose body ends with "...reviewed N of N changed files ... and generated no comments" and adds **zero** inline threads. That review carries the head `commit.oid` and fully satisfies the loop, and it is the clean-pass success case. Never read "no inline comments" as "the review didn't run," and never re-request or escalate to the maintainer because comments are absent.
 
-**Read the low-confidence findings, which are not inline threads.** A review body can carry a collapsed `<details>` block of findings Copilot withheld from the inline threads, and those findings appear nowhere in `reviewThreads`, so a loop that polls threads alone never sees them and reports a clean pass. **Match the block on more than one phrasing.** Its heading has appeared both as `Suppressed comments (N)` and as "Comments suppressed due to low confidence", so a filter keyed on either one alone silently reports zero suppressed findings on a review that has them, the same false clean this rule exists to prevent, one level up in the detection. They have been right repeatedly, including a rule stated more broadly than its check enforced and a check that skipped fenced blocks in every rule but one. Read the body of every review, investigate each suppressed finding on the same footing as an inline one, and answer it in the PR conversation, since a suppressed finding has no thread to reply on or resolve.
+**The one exception is a review that says it did not review, and it is delivered in exactly that shape.** Copilot answers a pull request it will not take on with a formal review, `state: COMMENTED`, carrying the correct `commit.oid` and **zero** inline threads, whose whole body is a refusal: "Copilot wasn't able to review this pull request because it exceeds the maximum number of files (300). Try reducing the number of changed files and requesting a review from Copilot again." Every coverage check passes, the rule above says an empty review is the clean pass, and the two together read a round that never happened as a round that found nothing. Observed on a pull request of 301 changed files, one over the limit, which was one command from merging on it. **The limit is 300 changed files and the remedy is to split the pull request**, since re-requesting the same head repeats the refusal: the file count is what it declined on and re-requesting does not change it. A repository committing binary or generated data alongside code crosses that line easily. Match the refusal on the body's **opening line** rather than anywhere in it, because a review discussing the wording is not one carrying it, and one line rather than two, because a review's first line is its heading and its second is the overview prose where such a description sits. Match an alternation for the same reason the suppressed heading takes one:
+
+```sh
+# A review whose opening line declines the round. That line is the unit, since a refusal is
+# the whole body and a match further down is a review quoting the wording rather than refusing.
+# The dot spans both spellings of the apostrophe, the typographic one Copilot writes and the
+# ASCII one, and it also keeps this filter usable inside single quotes, which neither survives.
+gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
+  '.[] | select([(.body // "") | split("\n")[] | select(. != "")][0] // ""
+     | test("wasn.t able to review|was not able to review|unable to review")) | {commit_id, body}'
+```
+
+**Read the low-confidence findings, which are not inline threads.** A review body can carry a collapsed `<details>` block of findings Copilot withheld from the inline threads, and those findings appear nowhere in `reviewThreads`, so a loop that polls threads alone never sees them and reports a clean pass. **Match the block on more than one phrasing.** Its heading has appeared both as `Suppressed comments (N)` and as "Comments suppressed due to low confidence", so a filter keyed on either one alone silently reports zero suppressed findings on a review that has them, the same false clean this rule exists to prevent, one level up in the detection. **The section moves as well as it is worded, so match the heading wherever it sits.** It has appeared as its own `<details>` wrapper with a matching `<summary>`, as a bare heading in the body, and as a Markdown heading nested inside the `Review details` wrapper, whose `<summary>` names the wrapper and not the section. A filter reading a wrapper's `<summary>` reports zero on the nested shape, and the count it needs is the heading's own `(N)` rather than the wrapper's. They have been right repeatedly, including a rule stated more broadly than its check enforced and a check that skipped fenced blocks in every rule but one. Read the body of every review, investigate each suppressed finding on the same footing as an inline one, and answer it in the PR conversation, since a suppressed finding has no thread to reply on or resolve.
 
 ```sh
 # `test` with an alternation, not `contains` on one phrasing: the heading wording has changed.
@@ -57,39 +70,15 @@ gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq \
      | {round: (if .commit_id == \"$PR_HEAD\" then \"head\" else \"earlier\" end), id}]"
 ```
 
-**Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. The `requestReviews` mutation below is for **re-requesting on later pushes** (a new head SHA). By then a prior review exists, so its bot node id is readable. A missing bot node id on round 1 therefore means "the auto-review has not landed yet - wait and poll," **not** "ask the maintainer to kick it off."
+**Round 1 is normally auto-seeded, so poll for it before trying to self-trigger.** Auto-review-on-open supplies the first review with no `botIds` call needed, but it can lag one to three minutes, and on some pull requests it never fires at all. After opening a PR (or the first push), **poll** for a Copilot review on the head SHA (see [Verify Review Covered Current Head](#verify-review-covered-current-head)) before concluding none ran. Where it never lands, drive round 1 with the same `requestReviews` mutation every later round uses, which needs nothing this PR has to produce first. A round 1 carrying no review therefore means "wait, then request it yourself," **not** "ask the maintainer to kick it off."
 
 > **The reviewer login differs by API, in three forms rather than two.** In **GraphQL** (`gh api graphql` and `gh pr view --json reviews`, which is GraphQL-backed) the `Bot.login` is `copilot-pull-request-reviewer`, with **no `[bot]` suffix**. In the **REST** API (`gh api repos/.../issues|pulls/...`) the same account's `user.login` is `copilot-pull-request-reviewer[bot]`, **with** the suffix. In a REST **timeline** `review_requested` event the `requested_reviewer` is a third spelling again, login `Copilot` with `type` `Bot`, so a filter written against either of the other two selects nothing there and reports a pull request with requests as having none. Match on the type plus a loose login test rather than on any one spelling, and each query below uses the correct form for its API.
 
 ```sh
-# 1. PR node id + the Copilot reviewer's bot node id (read from any existing
-#    Copilot review; the reviewer login is `copilot-pull-request-reviewer`).
+# 1. PR node id, plus the reviewer bot's node id read across the repo's recent PRs.
+# The bot id is the reviewer account's own, so every PR in the repo carries the same one.
+# The reviewer login is `copilot-pull-request-reviewer` in GraphQL.
 PR_NODE=$(gh pr view <N> --json id --jq '.id')
-BOT_ID=$(gh api graphql -f query='
-{
-  repository(owner: "<owner>", name: "<repo>") {
-    pullRequest(number: <N>) {
-      reviews(first: 50) { nodes { author { __typename login ... on Bot { id } } } }
-    }
-  }
-}' --jq '[.data.repository.pullRequest.reviews.nodes[]
-          | select(.author.login == "copilot-pull-request-reviewer")
-          | .author.id] | first')
-
-# 2. Re-request a Copilot review on the current head.
-gh api graphql -f query='
-mutation($pr: ID!, $bot: ID!) {
-  requestReviews(input: { pullRequestId: $pr, botIds: [$bot], union: true }) {
-    pullRequest { id }
-  }
-}' -F pr="$PR_NODE" -F bot="$BOT_ID"
-```
-
-The bot node id is read from an existing Copilot **formal** review (`pullRequest.reviews`), so step 1 needs at least one prior formal review on the PR, and the auto-review-on-open normally supplies the first one (it may have **no inline comments**, which still counts, and its bot node id is still readable). Poll for it (give auto-review-on-open a few minutes) before deciding it is missing.
-
-**Cold start (round 1 not yet landed): read the id repo-wide, not from this PR.** The Copilot reviewer's bot node id is the reviewer bot *account's* node id and is **stable across every PR in the repo**. So a freshly opened PR that has neither a formal review nor an issue comment yet does **not** need UI seeding to bootstrap the id: read it from any prior Copilot review anywhere in the repo, then feed it into the `requestReviews` mutation to drive round 1. Query the **most recent** PRs (`first: 20` with an explicit newest-first order; plain `last: 20` returns the *oldest* PRs, which may predate Copilot on the repo), and **guard for an empty result**, since an empty `$BOT_ID` means none of the sampled PRs carry a Copilot review. Widen the window (raise the count or paginate) before concluding the repo has never had one and falling back to UI seeding; never feed an empty id into the mutation:
-
-```sh
 BOT_ID=$(gh api graphql -f query='
 {
   repository(owner: "<owner>", name: "<repo>") {
@@ -101,12 +90,22 @@ BOT_ID=$(gh api graphql -f query='
           | select(.author.login == "copilot-pull-request-reviewer")
           | .author.id] | first // empty')
 if [ -z "$BOT_ID" ]; then
-  echo "no Copilot review in the 20 most recent PRs - widen the window, else fall back to UI seeding" >&2
-  return 1 2>/dev/null || exit 1   # stop; do NOT call requestReviews with an empty id
+  echo "no Copilot review in the 20 most recent PRs, so widen the window" >&2
+  return 1 2>/dev/null || exit 1   # Stop. Do NOT call requestReviews with an empty id.
 fi
+
+# 2. Re-request a Copilot review on the current head.
+gh api graphql -f query='
+mutation($pr: ID!, $bot: ID!) {
+  requestReviews(input: { pullRequestId: $pr, botIds: [$bot], union: true }) {
+    pullRequest { id }
+  }
+}' -F pr="$PR_NODE" -F bot="$BOT_ID"
 ```
 
-If Copilot posted **only an issue comment** on this PR and no formal review, you can instead read the id from that comment's author (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort, needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read. Use the mutation for every subsequent re-request.
+**The bot node id belongs to the reviewer account, not to a pull request**, and it is the same id on **every PR in the repo**, so nothing has to land on this PR before step 1 can read it. A PR opened a minute ago, with no review and no comment of its own, needs no UI seeding to bootstrap the id and no prior review to source it from: any Copilot review anywhere in the repo carries it. Query the **most recent** PRs, since a plain `last: 20` returns the *oldest* ones, which may predate Copilot on the repo. **Guard for an empty result**, because an empty `$BOT_ID` says only that none of the PRs sampled carry a Copilot review, so widen the window (raise the count or paginate) before concluding the repo has never had one. Never pass an empty id to the mutation.
+
+A read scoped to this PR (`pullRequest(number: <N>) { reviews }`) returns the same id once a review has landed here, and it buys nothing over the repo-wide read while failing on exactly the round the repo-wide read handles. Where the repo's only Copilot artifact is an issue comment rather than a formal review, read the id from that comment's author instead (`pullRequest.comments` -> author `... on Bot { id }`). Manual UI seeding is the last resort, needed only for a repo that has **never** had a Copilot review, so no prior id exists anywhere to read.
 
 **Do NOT post `@Copilot review` as a PR comment.** That comment triggers the Copilot *coding agent* (`copilot-swe-agent[bot]`), which makes code changes rather than posting a review.
 
@@ -140,7 +139,43 @@ gh api repos/<owner>/<repo>/issues/<N>/comments --jq \
   '[.[] | select(.user.login=="copilot-pull-request-reviewer[bot]")] | last | {created_at, body: .body[:200]}'
 ```
 
-Coverage is confirmed when (1) exits 0, and **a formal review with no inline comments still satisfies path (1)**, because coverage is about the head SHA, not the comment count. For issue comments (path 2), body content is the only reliable signal, and `created_at` is not: `git log -1 --format=%cI` is the **commit** timestamp, not the push timestamp, so amended or rebased commits can have an earlier timestamp and an older Copilot comment could satisfy a time check even though Copilot never saw the current head. Treat path (2) as confirmed only when the comment body explicitly refers to the current changes.
+Coverage is confirmed when (1) exits 0, and **a formal review with no inline comments still satisfies path (1)**, because coverage is about the head SHA, not the comment count. The exception is the refusal above, which is a formal review on the head with no inline comments and covers nothing, so path (1) exits 0 over a round that never ran. Read the body of the review the SHA matched, not only the SHA. For issue comments (path 2), body content is the only reliable signal, and `created_at` is not: `git log -1 --format=%cI` is the **commit** timestamp, not the push timestamp, so amended or rebased commits can have an earlier timestamp and an older Copilot comment could satisfy a time check even though Copilot never saw the current head. Treat path (2) as confirmed only when the comment body explicitly refers to the current changes.
+
+**Coverage of the head is not coverage of the diff, and the second one is stated in a line nothing above reads.** A review body says how many of the pull request's changed files it read, and a round that read fewer than the pull request changed is byte for byte the clean pass in everything else: the same `commit.oid`, the same absent threads, the same "generated no comments". Measured over 332 Copilot review bodies on this repository, five rounds across three pull requests reported reading fewer files than were changed, and all three merged. One of them changed three files, left one unread across **both** its rounds, and reported no comments each time. This is the third instance of the shape the refusal above and the suppressed block below are the first two, so read it the same way: **fail closed on a wording you do not recognize**, since a gate that allows whatever it does not recognize stops gating as the wording drifts, and both of those wordings have drifted once already.
+
+Two spellings carry the count, and both are current rather than one superseding the other. Each opens its own line, which is what separates the round stating its coverage from prose mentioning changed files, that prose being what a review of a change to this rule looks like:
+
+```text
+Copilot reviewed 2 out of 3 changed files in this pull request and generated no comments.
+- **Files reviewed:** 2/3 changed files
+```
+
+The sentence tail after the first spelling reports how many comments the round raised and appears in four wordings. It is not coverage, so it is not part of what has to be recognized, and the counts are. Read them into three verdicts and two exemptions:
+
+- **Counts equal** - the round read the whole diff. This is the clean pass.
+- **Counts unequal** - files in the diff have no review at all. Do **not** treat a re-request as the remedy: measured over four pull requests and seven rounds on this repository, every partial round stayed partial at the identical ratio and no round ever recovered, so re-requesting spends a round and changes nothing. Splitting works where it applies and does not apply to a promotion, whose head is `develop`. **The file table in the body does not tell you which file went unread**, and it looks as though it should, which is why it is written down here: measured over 348 review bodies on this repository and 121 on another in this fleet, that table names the whole changed set on partial and fully covered rounds alike, so a table naming every changed file is what a full round carries too and contradicts nothing. One round of the seven is the exception, stating 16 of 17 and naming 16, omitting `GOVERNANCE.md`, and `status` names an omitted file only in that shape, where the table is short by exactly what the counts leave unread and names nothing outside the diff. Treat that as a lead to check rather than a verdict, one round here naming `GOVENANCE.md`, a path no diff carries. Report the state and hand the merge decision to the maintainer.
+- **Coverage-shaped and unreadable** - the remedy is to fix the reader, not to read past it. The vetted spellings live in `scripts/pr_review.py` and here, and they stay in step because a case reads them out of this file.
+- **Exempt: a body stating no coverage at all.** 28 of those 332 bodies are an overview and a change list and nothing more. That shape is current, interleaves with the counted one throughout, and one pull request carries both across its two rounds, so treating it as a failure cries wolf on about one review in twelve and teaches an agent to work around the gate. It reads as `coverage=unstated`, never as a pass and never as a failure.
+- **Exempt: a refusal.** It carries no coverage line by design, and the refusal rule above has already classified it. Read it here as well and every refusal grows a spurious second failure on top of the one that names its remedy.
+
+`scripts/pr_review.py status <N> --repo <owner>/<repo>` reports this as `coverage=full`, `coverage=PARTIAL`, `coverage=UNVETTED` or `coverage=unstated`, and exits `42` on a partial round. An unreadable wording exits `43` instead, as one of the unrecognized shapes below rather than as a case of its own, since both say the reader is what needs fixing. Read it by hand as:
+
+```sh
+gh pr view <N> --json reviews --jq \
+  '.reviews[] | select(.author.login=="copilot-pull-request-reviewer") | .body
+   | split("\n")[] | select(test("^(Copilot|[-*] \\*\\*Files reviewed:).*changed files?"))'
+```
+
+### A Shape Nothing Recognizes Blocks the Loop and Earns an Issue
+
+**Every rule above keys on a marker in what Copilot sent, so a marker that changes spelling is a section the reader stops finding and reports as absent.** That is not a hypothetical: all three failures on record here have exactly that shape. The suppressed heading was reworded and the count went to zero. The suppressed section moved inside another wrapper and the count went to zero again. The coverage line was never read at all. Each one reported a clean pass over a review it had misread, and each was caught by the maintainer after it had already landed, rather than by the gate.
+
+**So an unrecognized shape is a blocking outcome, and its remedy is an issue rather than a judgment call.** When any reader here meets a heading, a collapsed section, a metadata line, a coverage wording or a reviewer login it has no vetted spelling for, the review loop **does not close**, whatever else the digest says. Do not read past it, do not infer what the new wording probably means, and do not treat a body that looks clean as a clean review, because "looks clean" is precisely what a misread review looks like. Two things follow, in this order:
+
+1. **File an issue on the hub, `ptr727/ProjectTemplate`**, which hosts `scripts/pr_review.py` and holds the vetted inventory. Name each unrecognized shape and quote the review body it came from, so the fix is made against the real wording rather than a paraphrase. The issue is filed even when the shape turns out to be cosmetic, since "cosmetic" is a conclusion drawn after reading the body and not before.
+2. **The merge decision is the maintainer's**, not the agent's and not the script's. An unrecognized shape does not mean the pull request is bad, it means nothing here can vouch for the review of it. Report the state, hand it over, and stop.
+
+`scripts/pr_review.py status <N> --repo <owner>/<repo>` reports this as `shapes=UNRECOGNIZED`, lists each shape under a marker naming the remedy, and exits `43`. `wait` carries the same code, so a wait cannot end on a clean zero over output nothing read. The vetted inventory lives in that script and is small on purpose: measured over 332 Copilot review bodies on this repository, with fenced blocks dropped and text reduced to ASCII, the whole corpus is seven headings, six `<summary>` texts and three metadata labels, and every body carries at least one of them. A body carrying none is itself the unrecognized shape, which is what catches a rewrite that changes everything at once, the refusal wording drifting among it.
 
 ### Bounded Retry Workflow
 
@@ -198,6 +233,10 @@ If a review did not run on the current head, retry:
 ### Reply and Thread Resolution Workflow
 
 Every id below is captured from a live query into a variable and passed from there, never hand-typed, guessed, or pasted as a `PRRT_...` literal. A node id resolves globally, so a fabricated or stale id does not fail, it writes to a real thread on an unrelated repository. This runbook implements [GOVERNANCE.md "Repository Boundaries and Write Safety"](../GOVERNANCE.md#repository-boundaries-and-write-safety): write only to this repo, capture every id from a live query, and never suppress a mutation's output.
+
+**Use the hub's helper, which has nowhere to type an id.** `scripts/pr_review.py reply <N> --repo <owner>/<name> --match "<words from the finding>" --body "<answer>" --resolve` queries the thread id itself and passes it straight to the mutation. That rule is known and read by the agents that break it anyway, three times so far, so the shape is what changes rather than the wording. It selects on the finding's own words rather than a line number, since a fix push moves the line; it refuses on no match and on more than one rather than picking; and it does not resolve a thread whose reply came back without a `url`. Cross-owner targets it refuses outright, which is where the hand-run form below applies, and there the `gh-write-guard` hook is what reads the maintainer's grant. It is hub-hosted per [GOVERNANCE.md "Hub-Hosted Tooling"](../GOVERNANCE.md#hub-hosted-tooling), so it is invoked from a hub checkout and never rebuilt locally.
+
+The hand-run form is below, for a cross-owner target and for the case where the hub cannot be reached and the work cannot wait.
 
 List unresolved threads. Use `first: 100` with cursor-based pagination, and where `hasNextPage` is true, re-run with `after: "<endCursor>"` to retrieve the next page:
 
@@ -260,10 +299,11 @@ Issue-level Copilot comments (those in `issues/<N>/comments`) have no resolution
 
 ### PR Edits and Merge-State Gotchas
 
-- **`gh pr edit --title/--body` is broken here.** It touches the deprecated Projects-classic `projectCards` GraphQL field and **exits non-zero without applying the change** (a stale PR description then survives review rounds). Edit the title/body via the API and verify it took: GraphQL `updatePullRequest(input: { pullRequestId, title, body })`, or REST `gh api -X PATCH repos/<owner>/<repo>/pulls/<N> -F body=@body.md` (the `@` reads the body from a file, so name it explicitly, not the literal `file`).
-- **`main`/`develop` use rulesets, not classic branch protection.** The classic protection REST endpoint (`repos/.../branches/<b>/protection`) 404s, so read the ruleset instead. A `mergeStateStatus` of `BLOCKED` on a green PR is usually just **unresolved review threads** (the ruleset requires thread resolution); resolving them moves it to `CLEAN`. (`BLOCKED` is a `mergeStateStatus` value; don't confuse it with the separate `mergeable` field's `MERGEABLE`/`CONFLICTING`, which reports merge conflicts, not review gates.)
+- **`gh pr edit --title/--body` is broken on `gh` 2.45.x and 2.46.x, and works from 2.47 up.** Those releases touch the deprecated Projects-classic `projectCards` GraphQL field and **exit non-zero without applying the change** (a stale PR description then survives review rounds), which the GitHub CLI maintainers name as broken by deprecated APIs. A distribution package is where that version comes from, so check `gh --version` before concluding the command is unusable, and install from the official repository rather than working around it. Where a host is genuinely stuck on one, edit via the API and verify it took: GraphQL `updatePullRequest(input: { pullRequestId, title, body })`, or REST `gh api -X PATCH repos/<owner>/<repo>/pulls/<N> -F body=@body.md` (the `@` reads the body from a file, so name it explicitly, not the literal `file`). The same version range carries no `--json` flag on `gh pr checks`, so a watcher built on it prints nothing and a quiet result reads as a passing one.
+- **`main`/`develop` use rulesets, not classic branch protection.** The classic protection REST endpoint (`repos/.../branches/<b>/protection`) 404s, so read the ruleset instead. A `mergeStateStatus` of `BLOCKED` on a green PR is most often just **unresolved review threads** (the ruleset requires thread resolution), and resolving them moves it to `CLEAN`. (`BLOCKED` is a `mergeStateStatus` value, so don't confuse it with the separate `mergeable` field's `MERGEABLE`/`CONFLICTING`, which reports merge conflicts, not review gates.)
+- **`BLOCKED` never says which gate, so never infer one.** The same word covers a red check, a required check nothing is running, an unresolved thread, and a missing approval, and the bullet above says "most often" rather than "always" for that reason. Read the checks instead of guessing: `pr_review.py status` prints `checks=N/M` beside the merge word and names a stuck one, and it exits `44` from `wait` where the merge reads `BLOCKED`, the review loop closed, and a check is starved, expected and never posted, running far past what the job costs, or failed. A **queued check with no runner** is the case that reads exactly like patience: a run here polled `BLOCKED` for twenty-five minutes on a pull request whose only unfinished check was an aggregator job GitHub dispatched and never assigned a runner, and the cause came from the maintainer rather than from any field. Nothing agent-side starts that job, because the pool is GitHub-hosted, so the remedy is a re-run of the workflow or waiting on that capacity, and it is **not** a re-request, a rebase, or an empty commit. A job held behind a `needs:` dependency does not enter the rollup until that dependency finishes, so a queued check is never a dependency waiting its turn.
 - **Push -> head-SHA read race.** A `headRefOid` read taken immediately after a push can return the **old** head, so re-read after the push registers, or a coverage poll evaluates the stale SHA.
-- **Copilot is sometimes factually wrong** (e.g. it claimed `actionlint -color` "requires a value" when it is a boolean flag). Verify a finding before fixing, and decline with evidence when it is wrong, which is distinct from dismissing a still-present finding as stale.
+- **Copilot is sometimes factually wrong** (e.g. it claimed `actionlint -color` "requires a value" when it is a boolean flag). Verify a finding before fixing, and decline with evidence when it is wrong, which is distinct from dismissing a still-present finding as stale. The evidence goes under [Disproved Claims](#disproved-claims) as well as in the thread, because the thread closes with the pull request and the next round starts without it.
 
 Reply-body conventions:
 
@@ -273,6 +313,16 @@ Reply-body conventions:
 - Declined false positive on carried fleet content (a broken-link or dead-cross-reference flag inside byte-locked rule text): cite the "Reviewing Carried Fleet Content" section, since the reference is intentional and the text cannot be edited locally.
 
 After the final push, sweep-resolve stale older threads for removed code paths.
+
+### Disproved Claims
+
+**A disproof is proof about this repository, and the thread it was written in is not where the next round looks.** [GOVERNANCE.md "Every Finding Ends in an Action"](../GOVERNANCE.md#every-finding-ends-in-an-action) closes a false finding by disproving it in the thread, addressed to the reviewer so it does not raise the same thing again, and while the pull request is open that is the right place for it. Afterwards it is the wrong one. The pull request merges, the next round begins with no memory of the last, and the second occurrence reaches a maintainer with no way to tell it from a first. Each entry below is a claim that was tested against this repository and found false, kept so the proof is read rather than built twice.
+
+**An entry names the claim, what was run or read to disprove it, the revision it was proved against, and what ends it.** A disproof is true of one tree at one revision, so an entry whose subject moves is deleted by the change that moves it rather than edited to look current, which is the same sweep the [GOVERNANCE.md "Documentation Style Conventions"](../GOVERNANCE.md#documentation-style-conventions) rule already requires of prose asserting a behavior that has changed underneath it. This is deliberately not a list to append to, since an entry outliving the code it was proved against becomes a reason not to check, and that is strictly worse than proving the claim a second time.
+
+**The record answers a repeated claim and never dismisses a new one.** An entry is cited only where the revision it names is still what the tree carries, and the reply carries the proof re-read rather than a pointer to the entry, since a reviewer that cannot open this file learns nothing from being pointed at it. Judge a finding on its merits first and match it against this record second, because reading it the other way round is how a real finding gets closed by a stale proof.
+
+**The entries are this repository's own.** Each names a file and a revision, so a repository holding a copy of this file carries the shape and the rules above rather than these findings, deletes an entry whose subject it does not carry, and records what it has proved itself.
 
 ## When in Doubt
 
