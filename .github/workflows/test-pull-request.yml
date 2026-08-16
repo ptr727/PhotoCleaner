@@ -26,8 +26,13 @@ jobs:
     outputs:
       release: ${{ steps.filter.outputs.release }}
     steps:
+      # Full history: a pull_request run reads the changed-files list from the GitHub API and needs no history.
+      # A workflow_dispatch run has no PR to query, so dorny/paths-filter diffs locally against the default branch instead.
+      # A shallow checkout could leave it with no common ancestor to diff from.
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Filter changed paths step
         id: filter
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
