@@ -1,62 +1,95 @@
 name: Test pull request action
 
-# CI for every branch. Runs on push so the reusable validate-task resolves from the pushed head: a PR that
-# edits a workflow tests its own copy. The aggregator below is the ruleset required-status-check, produced
-# here on the head SHA. There is no build/publish job in this gate - unit-test already builds the projects.
-#
-# No pull_request trigger: a fork PR cannot push to this repo, so it produces no run and cannot satisfy the
-# required check. A maintainer lands such a contribution on an in-repo branch (which pushes, and so validates).
+# Thin caller onto the hub's reusable validate-task.yml and build-release-task.yml.
+# This is the release-with-smoke shape from ptr727/ProjectTemplate docs/reusable-workflows.md "Adopting the Gates".
 on:
-  # All branches, but not tags.
-  push:
-    branches: ['**']
+  pull_request:
+    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Least-privilege token: checkout only. The Codecov upload uses CODECOV_TOKEN (not GITHUB_TOKEN).
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
 
-  # `!github.event.deleted` skips a branch-deletion push (github.sha is all-zeros, so checkout/build fail).
-  validate:
-    name: Validate job
-    if: ${{ !github.event.deleted }}
-    uses: ./.github/workflows/validate-task.yml
-    secrets: inherit
+  # The repo builds one combined release target, executable plus Docker image.
+  # One filter entry excludes a workflow-only change from the smoke build rather than separating targets the repo does not have.
+  changes:
+    name: Detect changed targets job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.filter.outputs.release }}
+    steps:
+      # Full history: a pull_request run reads the changed-files list from the GitHub API and needs no history.
+      # A workflow_dispatch run has no PR to query, so dorny/paths-filter diffs locally against the default branch instead.
+      # A shallow checkout could leave it with no common ancestor to diff from.
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Filter changed paths step
+        id: filter
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            release:
+              - '!.github/workflows/**'
 
-  # Reduced, never-published build of the release targets (executable subset + amd64 Docker image, no push) so a
-  # PR exercises the reusable build pipeline. smoke: true hard-disables every publish path in build-release-task.
+  validate:
+    name: Validate sources job
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    permissions:
+      contents: read
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # Never publishes and never uploads (D1.3): smoke: true disables every publish path in build-release-task.
+  # The enable_nuget and enable_pypi inputs are false, since this repo carries neither leaf.
+  # The Docker Hub secrets are mapped even on smoke, since the hub task logs in to Docker Hub on every build for the higher rate limit.
   smoke-build:
     name: Smoke build job
-    if: ${{ !github.event.deleted }}
-    uses: ./.github/workflows/build-release-task.yml
-    secrets: inherit
+    needs: [changes]
+    if: needs.changes.outputs.release == 'true'
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    permissions:
+      contents: read
+    secrets:
+      DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+      DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
     with:
       smoke: true
       github: false
       dockerhub: false
-      branch: ${{ github.ref_name }}
+      enable_docker: true
+      enable_executable: true
+      enable_nuget: false
+      enable_pypi: false
+      docker_image: ptr727/photocleaner
+      executable_project: ./PhotoCleaner/PhotoCleaner.csproj
+      # On a pull_request event github.ref_name is the PR ref (for example 123/merge), never the target branch.
+      # The logical branch reads base_ref first and only falls back to ref_name on a non-PR trigger.
+      branch: ${{ github.base_ref || github.ref_name }}
 
-  # Single required status check. Its name is the ruleset-bound context - do not rename without updating the
-  # ruleset in lockstep. Must succeed, not merely not-fail.
+  # Treats a skipped smoke-build (an unchanged target) as pass, and blocks on failure or cancelled (D1.5, D7.4).
   check-workflow-status:
     name: Check pull request workflow status job
     runs-on: ubuntu-latest
-    needs: [validate, smoke-build]
-    if: ${{ always() && !github.event.deleted }}
+    needs: [changes, validate, smoke-build]
+    if: always()
     steps:
       - name: Check workflow results step
         run: |
           set -Eeuo pipefail
-          for result in "validate:${{ needs.validate.result }}" "smoke-build:${{ needs.smoke-build.result }}"; do
+          for result in "changes:${{ needs.changes.result }}" "validate:${{ needs.validate.result }}" "smoke-build:${{ needs.smoke-build.result }}"; do
             name="${result%%:*}"
             value="${result#*:}"
-            if [[ "$value" != "success" ]]; then
+            if [[ "$value" != "success" && "$value" != "skipped" ]]; then
               echo "::error::Job '$name' did not succeed ($value)."
               exit 1
             fi
