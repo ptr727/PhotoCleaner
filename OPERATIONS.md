@@ -82,5 +82,5 @@ The Immich API key can be given inline with `--apikey` or read from a file with 
 - [PhotoCleanerTests/](./PhotoCleanerTests/) is the xUnit suite, and [PhotoCleanerBenchmarks/](./PhotoCleanerBenchmarks/) is the benchmark project.
 - [Docker/](./Docker/) holds the multi-architecture `Dockerfile` and the Docker Hub README.
 - [repo-config/](./repo-config/) holds the branch rulesets and the apply script. It sits outside `.github/`, which is Actions-owned.
-- [.github/workflows/](./.github/workflows/) holds the CI and release pipelines. The pull request check and the release chain both reach the hub-hosted `validate-task.yml` and `build-release-task.yml` in ptr727/ProjectTemplate rather than carrying their own copies.
+- [.github/workflows/](./.github/workflows/) holds the CI and release pipelines. The pull request check reaches the hub-hosted `validate-task.yml` and `build-release-task.yml` in ptr727/ProjectTemplate, and the release chain reaches those two plus `publish-plan-task.yml`, rather than carrying their own copies.
 - Analyzer and package configuration is central: `Directory.Build.props` carries the analyzer set, and `Directory.Packages.props` pins every package version.
