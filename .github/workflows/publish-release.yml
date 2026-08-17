@@ -44,7 +44,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@bbb75fd0bc4913e1cdb13e18ca5424414bb22cbc # feature/dollar-reuse test
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@a66caa65244def6f80f76104ab701b9ea035e277 # feature/dollar-reuse test
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -56,7 +56,7 @@ jobs:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@bbb75fd0bc4913e1cdb13e18ca5424414bb22cbc # feature/dollar-reuse test
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@a66caa65244def6f80f76104ab701b9ea035e277 # feature/dollar-reuse test
     permissions:
       contents: write
       # actions: write lets the reusable github-release job delete its release-asset-* transfer artifacts (D5.1).
