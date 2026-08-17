@@ -39,11 +39,11 @@ jobs:
         with:
           filters: |
             release:
-              - '**'
+              - '!.github/workflows/**'
 
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@48fadc69d2345689910393db03a99563b75c48f1 # feature/dollar-reuse test
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@b5f3c28e03eec55af21120e16249df9bb02e91c5 # main promotion
     permissions:
       contents: read
     secrets:
@@ -56,7 +56,7 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: needs.changes.outputs.release == 'true'
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@48fadc69d2345689910393db03a99563b75c48f1 # feature/dollar-reuse test
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@b5f3c28e03eec55af21120e16249df9bb02e91c5 # main promotion
     permissions:
       contents: read
     secrets:
