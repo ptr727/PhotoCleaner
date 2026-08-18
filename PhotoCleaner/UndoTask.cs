@@ -30,8 +30,8 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         CancellationToken cancellationToken = default
     )
     {
-        // Collect only backup files and group them by base path
-        // e.g. img.mov.bak and img.mp4.bak1 -> groups keyed by img.mov and img.mp4
+        // Collect only backup files and group them by base path.
+        // For example, img.mov.bak and img.mp4.bak1 are grouped by img.mov and img.mp4.
         Dictionary<string, List<string>> groups = new(StringComparer.OrdinalIgnoreCase);
         foreach (string file in allFiles)
         {

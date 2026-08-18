@@ -1355,7 +1355,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     // -- Helpers ---------------------------------------------------------------
 
     private static async Task SetContentIdentifierAsync(string filePath, string contentId) =>
-        // exiftool may exit with code 1 for warnings; suppress validation
+        // ExifTool may exit with code 1 for warnings, so suppress validation.
         await Cli.Wrap("exiftool")
             .WithArguments([
                 $"-Keys:ContentIdentifier={contentId}",
