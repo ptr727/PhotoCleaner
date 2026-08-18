@@ -32,7 +32,7 @@ jobs:
   # The schedule always publishes, matching this workflow's own trigger.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@b5f3c28e03eec55af21120e16249df9bb02e91c5 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@537b1837fe90e2288f71034ef96cc4e949937712 # main promotion
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
@@ -44,7 +44,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@b5f3c28e03eec55af21120e16249df9bb02e91c5 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@537b1837fe90e2288f71034ef96cc4e949937712 # main promotion
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -56,7 +56,7 @@ jobs:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@b5f3c28e03eec55af21120e16249df9bb02e91c5 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@537b1837fe90e2288f71034ef96cc4e949937712 # main promotion
     permissions:
       contents: write
       # actions: write lets the reusable github-release job delete its release-asset-* transfer artifacts (D5.1).
@@ -73,8 +73,8 @@ jobs:
       github: true
       dockerhub: true
       enable_docker: true
-      enable_executable: true
+      enable_dotnet_publish: true
       enable_nuget: false
       enable_pypi: false
       docker_image: ptr727/photocleaner
-      executable_project: ./PhotoCleaner/PhotoCleaner.csproj
+      dotnet_publish_project: ./PhotoCleaner/PhotoCleaner.csproj
