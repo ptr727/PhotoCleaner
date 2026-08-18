@@ -791,7 +791,7 @@ internal sealed class ProcessTask(
 
     private string? FindCompanionImagePath()
     {
-        // e.g. IMG_1234.mov -> IMG_1234.heic / IMG_1234.HEIC
+        // For example, IMG_1234.mov -> IMG_1234.heic / IMG_1234.HEIC
         foreach (string extension in s_liveVideoImageExtensions)
         {
             string candidate = Path.ChangeExtension(fileInfo.FullName, extension);
@@ -810,7 +810,7 @@ internal sealed class ProcessTask(
             }
         }
 
-        // e.g. IMG_1234_HEVC.mov -> IMG_1234.heic / IMG_1234.HEIC
+        // For example, IMG_1234_HEVC.mov -> IMG_1234.heic / IMG_1234.HEIC
         string nameNoExt = Path.GetFileNameWithoutExtension(fileInfo.FullName);
         if (nameNoExt.EndsWith("_hevc", StringComparison.OrdinalIgnoreCase))
         {

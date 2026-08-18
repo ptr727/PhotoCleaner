@@ -116,8 +116,8 @@ public sealed class DirectoryCleanerTests
         string root = TempDir();
         try
         {
-            // root/keep contains a file (so root/keep stays, and so does root)
-            // root/empty has no files (should be deleted)
+            // The root/keep directory contains a file, so it and the root remain.
+            // The root/empty directory has no files and should be deleted.
             string keep = Path.Combine(root, "keep");
             string empty = Path.Combine(root, "empty");
             Directory.CreateDirectory(keep);
