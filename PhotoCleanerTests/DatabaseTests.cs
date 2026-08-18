@@ -378,7 +378,7 @@ public sealed class DatabaseTests
                 false
             );
 
-            // rehash=true ignores cache
+            // Rehashing ignores the cache.
             (string sha256, string? sha1) = await Database.ResolveHashesAsync(
                 file,
                 cached,

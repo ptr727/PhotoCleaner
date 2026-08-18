@@ -109,8 +109,10 @@
                 "clear": false
             }
         },
-        // Lint group - the local full doc-lint surface (Docker at :latest), matching the CI lint set.
-        // Run on demand. The pre-commit hook does language formatting only. Every repo carries these.
+        // The lint group is the local full doc-lint surface (Docker at :latest), matching the CI lint set.
+        // Run on demand.
+        // The pre-commit hook does language formatting only.
+        // Every repo carries these tasks.
         {
             "label": "Lint: EditorConfig",
             "type": "process",

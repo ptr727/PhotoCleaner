@@ -2,7 +2,7 @@
 version: 2
 updates:
 
-  # main
+  # Main branch dependencies.
   - package-ecosystem: "nuget"
     target-branch: "main"
     directory: "/"
@@ -22,7 +22,7 @@ updates:
         patterns:
           - "*"
 
-  # develop
+  # Develop branch dependencies.
   - package-ecosystem: "nuget"
     target-branch: "develop"
     directory: "/"

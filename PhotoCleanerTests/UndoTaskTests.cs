@@ -310,8 +310,8 @@ public sealed class UndoTaskTests
         string dir = TempDir();
         try
         {
-            // img.jpg was modified in-place twice (e.g. date-from-path run twice):
-            //   original -> img.jpg.bak, modified -> img.jpg.bak1, img.jpg updated again
+            // The img.jpg file was modified in place twice, such as by two date-from-path runs.
+            // The original became img.jpg.bak, the modified file became img.jpg.bak1, and img.jpg changed again.
             string filePath = Path.Combine(dir, "img.jpg");
             string bakPath = filePath + ".bak";
             string bak1Path = filePath + ".bak1";
@@ -344,7 +344,7 @@ public sealed class UndoTaskTests
         string dir = TempDir();
         try
         {
-            // heic companion has no backup - undo must leave it alone
+            // The HEIC companion has no backup, so undo must leave it alone.
             string heicPath = Path.Combine(dir, "img.heic");
             string movBak = Path.Combine(dir, "img.mov.bak");
             Touch(heicPath);
@@ -364,7 +364,7 @@ public sealed class UndoTaskTests
     }
 
     // -- Scenario: uniquified output via .bak.out companion -------------------
-    // img.mp4 pre-existed; process wrote img_1.mp4 + img.gif.bak + img.gif.bak.out
+    // The img.mp4 file existed before process wrote img_1.mp4, img.gif.bak, and img.gif.bak.out.
 
     [Fact]
     public void Execute_CompanionOutFile_DeletesUniquifiedOutputAndLeavesPreExistingMp4()

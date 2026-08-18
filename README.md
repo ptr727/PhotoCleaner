@@ -335,55 +335,55 @@ exit code should not go on to upload against it.
 
 ```bash
 # Preview what changes would be made without modifying files
-PhotoCleaner process --path /home/user/Photos --dryrun
+PhotoCleaner process --path "${HOME}/Photos" --dryrun
 
 # Process with 8 parallel threads and log to file
-PhotoCleaner process --path /home/user/Photos --threads 8 --logfile /tmp/photocleaner.log
+PhotoCleaner process --path "${HOME}/Photos" --threads 8 --logfile /tmp/photocleaner.log
 
 # Process without creating backup files (faster, but undo is not possible)
-PhotoCleaner process --path /home/user/Photos --skipbackup
+PhotoCleaner process --path "${HOME}/Photos" --skipbackup
 
 # Undo all processing changes in a directory (restores .bak files)
-PhotoCleaner undo --path /home/user/Photos
+PhotoCleaner undo --path "${HOME}/Photos"
 
 # Preview what undo would do without modifying files
-PhotoCleaner undo --path /home/user/Photos --dryrun
+PhotoCleaner undo --path "${HOME}/Photos" --dryrun
 
 # Import (copy) media into date-based subdirectories - source files are kept
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized"
 
 # Import with a custom date format (creates e.g. 2024/06/2024-06-15/ subdirectories)
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --format "yyyy/MM/yyyy-MM-dd"
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --format "yyyy/MM/yyyy-MM-dd"
 
 # Preview what import would do without changing anything
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --dryrun
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --dryrun
 
 # Move instead of copy (source files are removed)
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --move
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --move
 
 # Import and remove empty subdirectories from the target afterward
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --deleteempty
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --deleteempty
 
 # Import with path-based XMP:Subject tagging (sub-directory names become tags)
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --tagpath
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --tagpath
 
 # Import inferring missing EXIF dates from the source path
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --datepath
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --datepath
 
 # Import with explicit XMP:Subject tags applied to every file
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --tags "vacation,family trip"
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --tags "vacation,family trip"
 
 # Import with both path tagging, explicit tags, and date inference
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --tagpath --tags "2018" --datepath
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --tagpath --tags "2018" --datepath
 
 # Import with deduplication: only copy files not already in the database
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Intermediate --db /data/photos.db
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Intermediate" --db /data/photos.db
 
 # Index a directory into the database (stand-alone, no other processing)
-PhotoCleaner index --path /home/user/Source --db /data/dedup.db
+PhotoCleaner index --path "${HOME}/Source" --db /data/dedup.db
 
 # Re-index forcing hash recomputation (useful after file content changes without mtime update)
-PhotoCleaner index --path /home/user/Source --db /data/dedup.db --rehash
+PhotoCleaner index --path "${HOME}/Source" --db /data/dedup.db --rehash
 
 # Sync Immich trash hashes into a local database
 PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /data/trash.db
@@ -392,19 +392,19 @@ PhotoCleaner trash --url http://immich:2283 --apikey YOUR_API_KEY --trashdb /dat
 PhotoCleaner trash --url http://immich:2283 --apikey-file /secrets/immich_api_key.txt --trashdb /data/trash.db
 
 # Import and skip files that were trashed in Immich (prevents re-import)
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --db /data/photos.db --trashdb /data/trash.db
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --db /data/photos.db --trashdb /data/trash.db
 
 # Import and skip files already in another collection (read-only reference)
-PhotoCleaner import --path /home/user/Photos --outpath /home/user/Organized --skipdb /data/existing-collection.db
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --skipdb /data/existing-collection.db
 
 # Verify that Immich can render every file, before uploading
-PhotoCleaner verify --path /home/user/Intermediate --db /data/verify.db
+PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
 
 # Full workflow with Immich trash integration
 PhotoCleaner trash --url http://immich:2283 --apikey $IMMICH_KEY --trashdb /data/trash.db
-PhotoCleaner import --path /home/user/iCloud --outpath /home/user/Intermediate --db /data/photos.db --trashdb /data/trash.db
-PhotoCleaner process --path /home/user/Intermediate --db /data/process.db
-PhotoCleaner verify --path /home/user/Intermediate --db /data/verify.db
+PhotoCleaner import --path "${HOME}/iCloud" --outpath "${HOME}/Intermediate" --db /data/photos.db --trashdb /data/trash.db
+PhotoCleaner process --path "${HOME}/Intermediate" --db /data/process.db
+PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
 ```
 
 ## Processing Flow
