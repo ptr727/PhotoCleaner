@@ -15,13 +15,13 @@
 # Husky.Net ships an extensionless pre-commit hook with a `/bin/sh` shebang, which is the extensionless case the comment above names.
 .husky/pre-commit text eol=lf
 
-# Vanilla `.py` follows the CRLF default, since Python's universal newlines accept CRLF and it is commonly edited on Windows.
-# Pin LF only for a `.py` executed directly via its shebang, by path.
+# Vanilla `.py` follows the `[*]` LF default, since Python's universal newlines accept either line ending.
+# Pin LF only for a `.py` executed directly via its shebang, by path, so it still runs in a Windows-native operational repo.
 # This repo carries no Python, so there is nothing to pin.
 # Do not re-add a blanket `*.py text eol=lf`.
 
 # The uv tool regenerates uv.lock with LF on every platform, so pin it here.
-# That makes git enforce LF on checkout and renormalize, so a CRLF-default repo does not fight the tool on every `uv lock` or `uv sync`.
+# That makes git enforce LF on checkout and renormalize, so a Windows-native operational repo does not fight the tool on every `uv lock` or `uv sync`.
 # A repo with no lockfile is unaffected, so this pin is forward-declared.
 uv.lock text eol=lf
 
