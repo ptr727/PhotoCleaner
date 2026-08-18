@@ -17,7 +17,7 @@ PhotoCleanerBenchmarks/
 .github/
 .husky/
 
-# dotnet local tools (dev-only)
+# .NET local tools (development only)
 .config/
 
 # Benchmark output
