@@ -146,11 +146,12 @@ internal sealed class ImportTask(
 
         string? sha256 = null;
         string? sha1 = null;
+        FileRecord? cached = null;
         if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
             // ResolveHashesAsync returns cached hashes when size and mtime still match disk.
             // The cache is keyed by source path because import inserts source paths.
-            FileRecord? cached = database is null
+            cached = database is null
                 ? null
                 : await database.GetByPathAsync(file, cancellationToken).ConfigureAwait(false);
             Log.Debug("Hashing '{FilePath}'", file);
@@ -341,20 +342,45 @@ internal sealed class ImportTask(
             // Lookups are by source content hash.
             if (database is not null && sha256 is not null && sha1 is not null)
             {
-                Log.Debug("Inserting source '{SourcePath}' with SHA-256 '{Sha256}'", file, sha256);
-                await database
-                    .InsertAsync(
-                        new FileRecord(
+                if (cached is null)
+                {
+                    Log.Debug(
+                        "Inserting source '{SourcePath}' with SHA-256 '{Sha256}'",
+                        file,
+                        sha256
+                    );
+                    await database
+                        .InsertAsync(
+                            new FileRecord(
+                                file,
+                                sha256,
+                                sha1,
+                                sourceInfo.Length,
+                                sourceInfo.LastWriteTimeUtc.Ticks,
+                                false
+                            ),
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    Log.Debug(
+                        "Updating source '{SourcePath}' with SHA-256 '{Sha256}'",
+                        file,
+                        sha256
+                    );
+                    await database
+                        .UpdateHashesAsync(
                             file,
                             sha256,
                             sha1,
                             sourceInfo.Length,
                             sourceInfo.LastWriteTimeUtc.Ticks,
-                            false
-                        ),
-                        cancellationToken
-                    )
-                    .ConfigureAwait(false);
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
             }
 
             return ImportResult.Imported;
