@@ -924,6 +924,83 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ReplacedSource_UpdatesRecordAndNextRunSkips()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+            await SetExifDateAsync(jpg, "2024:06:15 10:00:00");
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                CreateOptions(outDir),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+
+            (int organized1, _, int skipped1, _, _, _, int failed1, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+            organized1.Should().Be(1);
+            skipped1.Should().Be(0);
+            failed1.Should().Be(0);
+
+            DateTime firstMtime = File.GetLastWriteTimeUtc(jpg);
+            await SetExifDateAsync(jpg, "2024:07:15 10:00:00");
+            File.SetLastWriteTimeUtc(jpg, firstMtime.AddSeconds(2));
+            FileInfo replacedInfo = new(jpg);
+            (string replacedSha256, string replacedSha1) = await Database.ComputeHashesAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+
+            (int organized2, _, int skipped2, _, _, _, int failed2, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+            organized2.Should().Be(1);
+            skipped2.Should().Be(0);
+            failed2.Should().Be(0);
+
+            FileRecord? row = await db.GetByPathAsync(
+                jpg,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            row.Should().NotBeNull();
+            row.Sha256.Should().Be(replacedSha256);
+            row.Sha1.Should().Be(replacedSha1);
+            row.FileSize.Should().Be(replacedInfo.Length);
+            row.MtimeTicks.Should().Be(replacedInfo.LastWriteTimeUtc.Ticks);
+
+            (int organized3, _, int skipped3, _, _, _, int failed3, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+            organized3.Should().Be(0);
+            skipped3.Should().Be(1);
+            failed3.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "2024-07", "photo_1.jpg")).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
     // -- Helpers --------------------------------------------------------------
 
     private static async Task<string[]> GetXmpSubjectAsync(string filePath)
