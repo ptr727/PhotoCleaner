@@ -43,7 +43,7 @@ jobs:
 
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@b5f3c28e03eec55af21120e16249df9bb02e91c5 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@537b1837fe90e2288f71034ef96cc4e949937712 # main promotion
     permissions:
       contents: read
     secrets:
@@ -56,7 +56,7 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: needs.changes.outputs.release == 'true'
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@b5f3c28e03eec55af21120e16249df9bb02e91c5 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@537b1837fe90e2288f71034ef96cc4e949937712 # main promotion
     permissions:
       contents: read
     secrets:
@@ -67,11 +67,11 @@ jobs:
       github: false
       dockerhub: false
       enable_docker: true
-      enable_executable: true
+      enable_dotnet_publish: true
       enable_nuget: false
       enable_pypi: false
       docker_image: ptr727/photocleaner
-      executable_project: ./PhotoCleaner/PhotoCleaner.csproj
+      dotnet_publish_project: ./PhotoCleaner/PhotoCleaner.csproj
       # On a pull_request event github.ref_name is the PR ref (for example 123/merge), never the target branch.
       # The logical branch reads base_ref first and only falls back to ref_name on a non-PR trigger.
       branch: ${{ github.base_ref || github.ref_name }}
