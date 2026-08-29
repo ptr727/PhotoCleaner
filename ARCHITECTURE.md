@@ -1,6 +1,6 @@
 # Architecture
 
-PhotoCleaner is a .NET 10 console application that processes media files in preparation for import into photo management systems (Lightroom, Immich, PhotoPrims). It analyzes and transforms media files through validation, modification, and verification phases.
+PhotoCleaner is a .NET 10 console application that processes media files in preparation for import into photo management systems (Lightroom, Immich, PhotoPrism). It analyzes and transforms media files through validation, modification, and verification phases.
 
 ## Project Structure
 
@@ -35,23 +35,21 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
   - `ExifToolJson.cs`: JSON model for ExifTool metadata, including the `ExifTool:Validate` verdict and `ParseValidate` which splits it into error and warning counts
   - `SkippedExtensionTracker.cs`: Thread-safe tracker for unknown file extensions skipped during processing; used by all commands that filter by `MediaUtilities.SupportedExtensions` (`process`, `import`, `index`)
-  - `HttpClientFactory.cs`: Polly resilience pipeline (retry, circuit breaker) and `SocketsHttpHandler` connection pooling
-  - `AssemblyInfo.cs`: Assembly metadata (app name, version) used by `HttpClientFactory` for User-Agent header
+  - `LoggerFactory.cs`: Serilog logger factory, reusing an already-configured `Log.Logger` when one exists rather than always creating a new one
   - `Extensions.cs`: Extension methods for logging and error handling
-- **PhotoCleanerTests/**: Comprehensive test project
-  - `DateInferenceTests.cs`: Core date inference functionality tests (33 tests)
-  - `DateInferenceEdgeCasesTests.cs`: Edge cases and comprehensive scenarios (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation tests (15 tests)
-  - `ProcessTaskTests.cs`: Process task tests (61 tests)
-  - `UndoTaskTests.cs`: Undo task tests (13 tests)
-  - `ExifToolJsonTests.cs`: ExifToolJson unit tests (includes GetDate, IsDngVersionNewer) (33 tests)
-  - `ImportTaskTests.cs`: Import task tests (24 tests)
-  - `DatabaseTests.cs`: Database tests (15 tests)
-  - `IndexTaskTests.cs`: IndexTask tests (7 tests)
-  - `TrashDatabaseTests.cs`: TrashDatabase tests (8 tests)
-  - `TrashCommandTests.cs`: TrashCommand tests with mock HTTP handler (6 tests)
-  - `DirectoryCleanerTests.cs`: DirectoryCleaner static helper tests (6 tests)
-  - `VerifyTaskTests.cs`: Verify protocol parsing and script-contract tests (10 tests)
+- **PhotoCleanerTests/**: Comprehensive test project (`TempDirectoryFixture.cs` is the shared fixture, not a test class)
+  - `DateInferenceTests.cs`: Core date inference functionality tests
+  - `CommandLineTests.cs`: Command line parsing and validation tests
+  - `ProcessTaskTests.cs`: Process task tests
+  - `UndoTaskTests.cs`: Undo task tests
+  - `ExifToolJsonTests.cs`: ExifToolJson unit tests (includes GetDate, IsDngVersionNewer)
+  - `ImportTaskTests.cs`: Import task tests
+  - `DatabaseTests.cs`: Database tests
+  - `IndexTaskTests.cs`: IndexTask tests
+  - `TrashDatabaseTests.cs`: TrashDatabase tests
+  - `TrashCommandTests.cs`: TrashCommand tests with mock HTTP handler
+  - `DirectoryCleanerTests.cs`: DirectoryCleaner static helper tests
+  - `VerifyTaskTests.cs`: Verify protocol parsing and script-contract tests
 
 ## Core Processing Pipeline
 
@@ -93,7 +91,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 
 - Always use array syntax for arguments: `["-arg1", "value"]`
 - Use `BufferedCommandResult` for output capture, `CommandResult` for fire-and-forget
-- JSON trimming pattern: `result.StandardOutput.Trim(' ', '\n', '\r', ' ', '[', ']')`
+- JSON trimming pattern: `result.StandardOutput.AsSpan().Trim([' ', '\n', '\r', '[', ']'])`
 
 ### Media File Processing Conventions
 
@@ -145,7 +143,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 
 ## Development Workflow
 
-See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting commands, and tooling.
+See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands, and tooling.
 
 ### Dependencies
 
@@ -159,20 +157,15 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 
 ### Test Architecture
 
-- **PhotoCleanerTests Project**: 300 comprehensive tests covering all functionality
+- **PhotoCleanerTests Project**: comprehensive test coverage across all commands, see the file list under Project Structure above rather than a count here, which drifts every time a test is added
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
-- **Test Categories**:
-  - `DateInferenceTests.cs`: Core date inference functionality (33 tests)
-  - `DateInferenceEdgeCasesTests.cs`: Date inference edge cases and integration (19 tests)
-  - `CommandLineTests.cs`: Command line parsing and validation (24 tests)
-  - `ProcessTaskTests.cs`: Process task tests (61 tests)
 - **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths, thread configuration and boundary validation), integration scenarios, process task execution, live photo detection (ContentIdentifier matching, `_hevc` suffix naming, mismatch/missing tag scenarios), metadata preservation through conversion
 
 ## Critical Implementation Details
 
 ### Video Conversion Logic
 
-- **Three-tier approach**: Remux (.mts, .m2ts, .mkv) -> Re-encode (.wmv, .avi, .3gp, .gif) -> Audio-only (.mov/.mp4 with PCM)
+- **Three-tier approach**: Remux (.m2t, .mkv) -> Re-encode (.asf, .wmv, .avi, .3gp, .gif) -> Audio-only re-encode (.mov/.mp4 with PCM audio)
 - **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) is written alongside the backup containing the full output path, this is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was already taken. When `options.SkipBackup` is true, no `.bak` or `.bak.out` files are created, and the original is deleted after conversion.
 - **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source.bak> <output> -all:all -overwrite_original` copies all source metadata to the output file. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` handles cross-format date mapping, so no separate date-setting step is needed after conversion.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
@@ -212,12 +205,13 @@ See [`CODESTYLE.md`](../CODESTYLE.md) for build requirements, formatting command
 
 ## File Processing Extensions
 
-Supported: `.3gp`, `.arw`, `.avi`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.m2ts`, `.mkv`, `.mov`, `.mp4`, `.mts`, `.nef`, `.orf`, `.png`, `.rw2`, `.tif`, `.tiff`, `.wmv`
+Supported: `.3gp`, `.arw`, `.asf`, `.avi`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.m2t`, `.m2ts`, `.mkv`, `.mov`, `.mp4`, `.mts`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`, `.wmv`
 
 ## JSON Source Generation
 
-Uses `SourceGenerationContext` for AOT-compatible JSON serialization of `ExifToolJson` metadata.
-Uses `ImmichJsonContext` for AOT-compatible JSON serialization of Immich API models.
+Uses `ExifToolJsonContext` for AOT-compatible JSON serialization of `ExifToolJson` metadata,
+`ImmichJsonContext` for the Immich API models, and `ImmichVerifyJsonContext` for the
+`ImmichVerifyLine` protocol the `verify` command reads from the containerized decoder.
 
 ## Testing Strategy
 
