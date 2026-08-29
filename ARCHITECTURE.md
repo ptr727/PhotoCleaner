@@ -85,7 +85,7 @@ collection carry at least one.
 
 ```csharp
 BufferedCommandResult result = await Cli.Wrap("exiftool")
-    .WithArguments(["-groupNames", "-json", "-validate", "-all", _fileInfo.FullName])
+    .WithArguments(["-groupNames", "-json", "-validate", "-all", filePath])
     .ExecuteBufferedAsync();
 ```
 
