@@ -2,6 +2,8 @@
   <PropertyGroup>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>PhotoCleanerTests</RootNamespace>
+    <!-- Keeps `dotnet test` on the VSTest adapter (xunit.runner.visualstudio) instead of MTP's own entry point, which .NET 10 SDK now hard-blocks under classic `dotnet test`; see https://aka.ms/dotnet-test-mtp-error -->
+    <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="AwesomeAssertions" />
