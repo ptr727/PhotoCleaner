@@ -1,6 +1,6 @@
 # AUDIT.md
 
-How this repository audits itself against its committed baseline and reports drift. This is the repo-scoped adaptation of the fleet-wide AUDIT.md kept at the fleet hub, and the hub's fleet-wide audit remains authoritative. General settings, rulesets, and secret names are hub-hosted ground truth (`repo-config/` and `spec/secrets.json` in `github.com/ptr727/ProjectTemplate`, checked from a hub checkout rather than carried here, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]), and the prose authorities are [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], and [`WORKFLOW.md`][workflow].
+How this repository audits itself against its committed baseline and reports drift. This is the repo-scoped adaptation of the fleet-wide AUDIT.md kept at the fleet hub, and the hub's fleet-wide audit remains authoritative. General settings, rulesets, and secret names are hub-hosted ground truth (`repo-config/` and `spec/secrets.json`, checked from a hub checkout rather than carried here, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]), and the prose authorities are [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], and [`WORKFLOW.md`][workflow].
 
 The audit is read-only: it diffs live state against the committed baseline and reports findings, and it never applies changes. The verdict vocabulary is [`WORKFLOW.md`][workflow]'s: **operational / not operational**, **N/A**, **defect**, and the applicable/absent rule.
 
