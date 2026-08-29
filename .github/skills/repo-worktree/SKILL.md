@@ -5,8 +5,10 @@ description: >-
   including a continuation of a prior session's task, creates its own git worktree on its own
   feature branch before its first file edit, based on the branch work starts on (develop on both
   fleet workflow models unless the task is explicitly about main-only content, never whichever
-  branch a tool defaulted to), with a standalone-clone fallback when an executor cannot write
-  both the standard worktree and its Git metadata. Also wraps the mechanics:
+  branch a tool defaulted to), preferring a registered worktree in the fleet layout and using a
+  standalone-clone fallback only when the executor cannot write to either the standard worktree
+  location or its Git metadata, and no available approval route grants access. Also wraps the
+  mechanics:
   creating a worktree with git worktree add, the fleet layout convention, listing what is in
   flight, preparing Husky.Net or Python pre-commit hooks in the new tree, and removing a
   worktree and its branch after merge. Use this whenever about to create or edit files in a
@@ -99,20 +101,34 @@ git -C ~/repos/<Repo> fetch origin develop
 git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> -b <task-branch> origin/develop
 ```
 
-Before choosing that path, inspect the executor's active write boundaries. A linked worktree
+The registered worktree above is the normal path. It keeps the task visible in `git worktree
+list`, the fleet worktree directory, and IDE worktree discovery. It also leaves the task in a
+durable location the maintainer can inspect after the agent session ends.
+
+Before running that command, inspect the executor's active write boundaries. A linked worktree
 requires write access to both of these locations:
 
 - the intended `~/repos/worktrees/<Repo>-<task-slug>` worktree directory
 - the base clone's `.git/worktrees/` administrative directory, which holds the index and locks
 
-A writable worktree directory does not make the administrative directory writable.
+A writable worktree directory does not make the administrative directory writable. When the
+executor has an approval mechanism, request scoped approval for the standard `git worktree add`
+command. A declared sandbox boundary is the reason to request that approval, not by itself the
+reason to skip the registered worktree.
 
-Use the standard layout when both locations are writable. When either location is outside the
-write boundary, create a standalone clone under a writable temporary root. Name it
-`<temporary-root>/<Repo>-<task-slug>`, fetch immediately, and create the task branch from
-`origin/develop`. A standalone clone keeps its worktree and Git administrative directory under
-the same writable root. It therefore supports edits, explicit-path staging, commits, and branch
-updates without sharing the base clone's index.
+Use the standard layout when both locations are writable or the executor approves the scoped
+write. When approval is unavailable or denied, create a standalone clone under a writable
+temporary root. Name it `<temporary-root>/<Repo>-<task-slug>`, fetch immediately, and create the
+task branch from `origin/develop`. A standalone clone keeps its worktree and Git administrative
+directory under the same writable root. It therefore supports edits, explicit-path staging,
+commits, and branch updates without sharing the base clone's index.
+
+A temporary standalone clone is a degraded handoff, not an equivalent location. The base clone
+does not register it, `git worktree list` does not show it, and an IDE opened on the base clone
+does not discover its changes. The maintainer must navigate to it manually, and the operating
+system may reap it as temporary data. State the absolute path as soon as the fallback is chosen
+and again in the handoff. Do not present work there as ordinarily reviewable from the primary
+workspace.
 
 ```sh
 TASK_ORIGIN="$(git -C <base-clone> remote get-url origin)"
@@ -123,8 +139,8 @@ git -C <temporary-root>/<Repo>-<task-slug> switch -c <task-branch> origin/develo
 
 Do not use a linked worktree under the temporary root when the base clone's Git metadata is
 read-only. If an existing linked worktree must be kept, index operations require the executor's
-scoped approval for that administrative path. Prefer the standalone clone so ordinary Git work
-does not require repeated approval.
+scoped approval for that administrative path. Use the standalone clone only after the standard
+registered path and its approval route are unavailable.
 
 A continuation attaches the task's existing branch rather than forking a fresh one:
 
@@ -145,11 +161,19 @@ A machine not yet migrated to this layout still isolates exactly the same way, s
 is the isolation rather than the path: create the worktree beside whatever layout the machine
 has, and note that the base clone may live elsewhere than `~/repos/<Repo>`.
 
-Claude Code's own `EnterWorktree` tool acts only on an explicit instruction from the user or the
-project instructions, which is why the carried rules state this mandate in so many words. Given
-a `name`, it creates the worktree under `.claude/worktrees/` inside the repo and bases it on the
-GitHub default branch, which is the wrong path and the wrong base here. Create the worktree with
-`git worktree add` as above, then attach with `EnterWorktree` `path:`, not `name:`.
+## Agent-Specific Worktree Tools
+
+Provider-specific mechanics stay separate from the general creation procedure above:
+
+- **Claude Code:** its `EnterWorktree` tool acts only on an explicit instruction from the user or
+  project instructions. Given a `name`, it creates the worktree under `.claude/worktrees/` and
+  bases it on the GitHub default branch. Both differ from the fleet path and base. Create the
+  worktree with `git worktree add`, then attach with `EnterWorktree` `path:`, not `name:`.
+- **Codex:** no provider-specific creation override applies. Use the general `git worktree add`
+  procedure above. Its host-specific writable-root setting lives in `docs/host-setup.md` "Agent
+  Worktree Access".
+- **opencode:** no provider-specific creation override applies. Use the general
+  `git worktree add` procedure above.
 
 ## Preparing Git Hooks
 
@@ -161,9 +185,9 @@ in the new tree.
 - **Husky.Net:** When `.husky/pre-commit` sources `.husky/_/husky.sh` and the local .NET tool
   manifest declares Husky.Net, run `dotnet tool restore`, then `dotnet husky install` from the
   worktree root.
-- **Python pre-commit:** When `.pre-commit-config.yaml` exists, install the repository's declared
-  Python environment, then run `pre-commit install` through that environment. A uv project runs
-  `uv sync --frozen`, then `uv run pre-commit install`.
+- **Python pre-commit:** When `.pre-commit-config.yaml` exists, run `uv tool install pre-commit`
+  once per host if not already installed, then `pre-commit install` from the worktree root.
+  `pre-commit` is never a project dependency, so this is the same regardless of profile.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they
   differ from these standard cases. Do not infer a replacement command from the language alone.
 
@@ -175,11 +199,12 @@ fails, report that boundary and fix the setup. Never bypass the hook to make the
 - `git worktree list`, run in any checkout of a repo, names that repo's base clone and every
   worktree with its branch. On the convention layout, one `ls ~/repos/worktrees/` reads what is
   in flight across the whole fleet.
-- After the task's pull request merges, remove the worktree and its branch from the base clone:
-  `git worktree remove ~/repos/worktrees/<Repo>-<task-slug>`, then `git branch -d <task-branch>`.
-- After the task's pull request merges, remove a temporary standalone clone at its exact
-  `<temporary-root>/<Repo>-<task-slug>` path. The remote branch follows the repository's normal
-  pull request cleanup policy.
+- **Cleanup after merge is the default terminal step.** Run it after a squash merge into `develop`. Run it again after a merge-commit promotion into `main`, unless the user explicitly says to retain a checkout or branch. A merge or release handoff is incomplete while finished task, conflict-resolution, installer, or release worktrees remain registered.
+- **Verify before removing.** Read the pull request's merged state and head SHA from live GitHub state. Confirm the worktree is clean and resolves to that head. A dirty worktree stops cleanup because force-removing it would discard work. A detached helper worktree needs no pull request, but its commit must be contained in the branch whose completed operation created it.
+- **Remove the exact finished worktree, then its local task branch.** Use `git worktree remove <exact-path>`. Try `git branch -d <exact-branch>` after a merge commit. A squash merge does not make the feature tip an ancestor of `develop`, so `-d` cannot recognize it as merged. After the live merged-PR and clean-worktree checks prove that exact branch finished, use `git branch -D <exact-branch>` under the narrow post-squash exception in `git-commit-conventions`. Never apply that exception to an unverified branch or to `develop`.
+- **Remove temporary standalone clones and detached helper worktrees too.** Remove the exact `<temporary-root>/<Repo>-<task-slug>` path after confirming it is clean. The remote feature branch follows the repository's normal pull request cleanup policy. Never delete `develop` after a promotion because it is the permanent integration branch.
+- **Return the base clone to current `develop`.** Fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when needed, and fast-forward it with `git merge --ff-only origin/develop`. A completed promotion or release does not leave the base clone on `main`. Stop and report a dirty base clone or a non-fast-forward instead of switching or reconciling it.
+- **Prove the cleanup.** Finish with `git status --short --branch` in the base clone and `git worktree list`. The expected result is a clean base clone at `origin/develop` and no worktree belonging only to the completed task.
 - A worktree that refuses removal is dirty, and force is not the fix: look at what is
   uncommitted in it first, since discarding uncommitted work runs only on explicit instruction,
   per the `git-commit-conventions` skill.
