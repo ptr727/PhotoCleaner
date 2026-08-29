@@ -254,7 +254,7 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 
 - [`AGENTS.md`](./AGENTS.md): the agent entry point, carrying context and delegation rules plus the map to the sections above.
 - [`GOVERNANCE.md`](./GOVERNANCE.md), [`CODESTYLE.md`](./CODESTYLE.md), [`WORKFLOW.md`](./WORKFLOW.md), [`AUDIT.md`](./AUDIT.md): the governance and audit docs. This file is the cross-cutting-rules authority, `AUDIT.md` the self-audit of settings, rulesets, and secret names.
-- [`.github/copilot-instructions.md`](./.github/copilot-instructions.md): the Copilot review runbook, plus this project's architecture, processing pipeline, per-command details, and test layout.
+- [`.github/copilot-instructions.md`](./.github/copilot-instructions.md): the Copilot bootstrap and review runbook. [`ARCHITECTURE.md`](./ARCHITECTURE.md): this project's architecture, processing pipeline, per-command implementation details, and test layout.
 - [`PhotoCleaner/`](./PhotoCleaner/): the console application. [`PhotoCleanerTests/`](./PhotoCleanerTests/): the xUnit test project. [`PhotoCleanerBenchmarks/`](./PhotoCleanerBenchmarks/): the BenchmarkDotNet project. [`PhotoCleaner.slnx`](./PhotoCleaner.slnx) is the solution.
 - [`Docker/`](./Docker/): the Dockerfile and the Docker Hub overview the release pipeline publishes.
 - [`.github/workflows/`](./.github/workflows/): the pull request gate, the reusable build tasks, and the publisher.
