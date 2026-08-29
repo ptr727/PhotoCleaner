@@ -145,9 +145,9 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             async cmd =>
             {
                 cmd.CommandText = """
-                INSERT OR IGNORE INTO files (path, sha256, sha1, file_size, mtime_ticks, is_processed)
-                VALUES (@path, @sha256, @sha1, @fileSize, @mtimeTicks, @isProcessed)
-                """;
+                    INSERT OR IGNORE INTO files (path, sha256, sha1, file_size, mtime_ticks, is_processed)
+                    VALUES (@path, @sha256, @sha1, @fileSize, @mtimeTicks, @isProcessed)
+                    """;
                 _ = cmd.Parameters.AddWithValue("@path", record.Path);
                 _ = cmd.Parameters.AddWithValue("@sha256", record.Sha256);
                 _ = cmd.Parameters.AddWithValue("@sha1", record.Sha1);
@@ -171,10 +171,10 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             async cmd =>
             {
                 cmd.CommandText = """
-                UPDATE files
-                SET sha256 = @sha256, sha1 = @sha1, file_size = @fileSize, mtime_ticks = @mtimeTicks, is_processed = 0
-                WHERE path = @path
-                """;
+                    UPDATE files
+                    SET sha256 = @sha256, sha1 = @sha1, file_size = @fileSize, mtime_ticks = @mtimeTicks, is_processed = 0
+                    WHERE path = @path
+                    """;
                 _ = cmd.Parameters.AddWithValue("@path", path);
                 _ = cmd.Parameters.AddWithValue("@sha256", sha256);
                 _ = cmd.Parameters.AddWithValue("@sha1", sha1);
