@@ -40,7 +40,8 @@
             "dependsOn": [
                 "CSharpier Format",
                 ".NET Build"
-            ]
+            ],
+            "dependsOrder": "sequence"
         },
         {
             "label": "CSharpier Format",
