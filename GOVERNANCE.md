@@ -253,6 +253,7 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 ## Repository Layout
 
 - [`AGENTS.md`](./AGENTS.md): the agent entry point, carrying context and delegation rules plus the map to the sections above.
+- [`CLAUDE.md`](./CLAUDE.md): imports `AGENTS.md`, since Claude Code reads `CLAUDE.md` and never `AGENTS.md` on its own. Carries no rule of its own.
 - [`GOVERNANCE.md`](./GOVERNANCE.md), [`CODESTYLE.md`](./CODESTYLE.md), [`WORKFLOW.md`](./WORKFLOW.md), [`AUDIT.md`](./AUDIT.md): the governance and audit docs. This file is the cross-cutting-rules authority, `AUDIT.md` the self-audit of settings, rulesets, and secret names.
 - [`.github/copilot-instructions.md`](./.github/copilot-instructions.md): the Copilot bootstrap and review runbook. [`ARCHITECTURE.md`](./ARCHITECTURE.md): this project's architecture, processing pipeline, per-command implementation details, and test layout.
 - [`PhotoCleaner/`](./PhotoCleaner/): the console application. [`PhotoCleanerTests/`](./PhotoCleanerTests/): the xUnit test project. [`PhotoCleanerBenchmarks/`](./PhotoCleanerBenchmarks/): the BenchmarkDotNet project. [`PhotoCleaner.slnx`](./PhotoCleaner.slnx) is the solution.
@@ -260,6 +261,6 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 - [`.github/workflows/`](./.github/workflows/): the pull request gate, the reusable build tasks, and the publisher.
 - [`version.json`](./version.json): the version floor. [`Directory.Build.props`](./Directory.Build.props) and [`Directory.Packages.props`](./Directory.Packages.props): the shared build properties and the central package versions.
 
-Branch rulesets, general settings, and secret names are hub-hosted (`repo-config/` and `spec/secrets.json` in `github.com/ptr727/ProjectTemplate`), checked against this repo from a hub checkout rather than carried here, per "Hub-Hosted Tooling".
+Branch rulesets, general settings, and secret names are hub-hosted (`repo-config/` and `spec/secrets.json`), checked against this repo from a hub checkout rather than carried here, per "Hub-Hosted Tooling".
 
 After editing a doc, run the linters (see [`OPERATIONS.md`](./OPERATIONS.md) "Local Verification") before commit. The Comments, Character Set, and Line Endings rules above are the frequent regressions, so hold them exactly.
