@@ -42,6 +42,19 @@ python3 [path-to-hub]/scripts/prose_lint.py . --diff origin/develop
 
 Publishing never happens as a side effect of a merge. A release is a `workflow_dispatch` of [`publish-release.yml`](./.github/workflows/publish-release.yml), and the same workflow runs on a weekly schedule so the image picks up base-image and tool updates. Merging to `main` publishes nothing on its own.
 
+### Fix a red Dependabot PR
+
+A grouped update (`nuget-deps`, `actions-deps`) can go red for a reason the bump itself cannot fix, because Dependabot only edits version numbers, never source or project files. Two known failure classes: a formatter tool bump (`csharpier` in [`.config/dotnet-tools.json`](./.config/dotnet-tools.json)) changes a formatting rule and flags an untouched file elsewhere in the tree, or a test SDK bump (`Microsoft.NET.Test.Sdk`, `xunit.v3`) turns on the test project's `IsTestingPlatformApplication` flag, which the .NET 10 SDK now refuses to run through the classic VSTest-based `dotnet test` command it uses. Set `<IsTestingPlatformApplication>false</IsTestingPlatformApplication>` on the test project to keep it on the `xunit.runner.visualstudio` adapter path, since [Microsoft's own opt-in](https://aka.ms/dotnet-test-mtp-error) to the new Microsoft.Testing.Platform runner needs a `global.json` change that breaks the `--collect:"XPlat Code Coverage"` argument this repo's CI relies on.
+
+Diagnose from the failing job's own log rather than the checks summary, since a check only names the job that failed:
+
+```sh
+gh pr checks [N] --repo ptr727/PhotoCleaner
+gh api repos/ptr727/PhotoCleaner/actions/jobs/[job-id]/logs
+```
+
+Push the fix as a commit directly onto the Dependabot branch rather than waiting on a rebase. The merge bot's "Disable auto-merge on maintainer push" job exists for exactly this, so a maintainer push onto a Dependabot branch is expected and safe.
+
 ## Backup and Recovery
 
 The repository is the record, and GitHub holds it. Nothing here keeps state outside git.
