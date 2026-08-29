@@ -2,9 +2,9 @@
 
 How this repository is run. It ships a .NET console application and a multi-architecture Docker image, so its operations are the local gates that mirror CI, the release pipeline, and the external tools the application drives at runtime.
 
-## Runbooks
+## Local Verification
 
-### Run the gates the way CI runs them
+What verifying a change in this repository requires, and specifically the part of its contract CI structurally cannot exercise: CI builds, formats-verifies, and unit-tests the code, and runs the lint set, but it never runs the application against a real media library, a real `exiftool`/`ffmpeg` install, or a live Immich server. The `verify` command's Immich decode path and any end-to-end run of `process`/`undo` against real files are exercised only by a local, manual run.
 
 Local and CI runs read the same committed configuration, but they invoke it differently: locally the formatter writes, and in CI it only verifies. The [`.NET Format`](./.vscode/tasks.json) task is the local clean-compile chain, meaning `dotnet csharpier format`, then `dotnet build`, then the style verify. Run the chain and the suite before committing, since the chain never runs the tests and a change that compiles and formats cleanly can still be broken. CSharpier and Husky.Net are local tools declared in [`.config/dotnet-tools.json`](./.config/dotnet-tools.json), and neither the `.NET Format` task nor the two tasks it depends on restores them, so run `dotnet tool restore` on a fresh clone before that task or the chain below. A clone whose package cache does not already hold the tools otherwise fails on the format step:
 
@@ -35,6 +35,8 @@ The prose gate lives in the hub rather than here, so it is consumed from a hub c
 ```sh
 python3 [path-to-hub]/scripts/prose_lint.py . --diff origin/develop
 ```
+
+## Runbooks
 
 ### Cut a release
 
@@ -81,6 +83,5 @@ The Immich API key can be given inline with `--apikey` or read from a file with 
 - [PhotoCleaner/](./PhotoCleaner/) is the console application.
 - [PhotoCleanerTests/](./PhotoCleanerTests/) is the xUnit suite, and [PhotoCleanerBenchmarks/](./PhotoCleanerBenchmarks/) is the benchmark project.
 - [Docker/](./Docker/) holds the multi-architecture `Dockerfile` and the Docker Hub README.
-- [repo-config/](./repo-config/) holds the branch rulesets and the apply script. It sits outside `.github/`, which is Actions-owned.
 - [.github/workflows/](./.github/workflows/) holds the CI and release pipelines. The pull request check reaches the hub-hosted `validate-task.yml` and `build-release-task.yml` in ptr727/ProjectTemplate, and the release chain reaches those two plus `publish-plan-task.yml`, rather than carrying their own copies.
 - Analyzer and package configuration is central: `Directory.Build.props` carries the analyzer set, and `Directory.Packages.props` pins every package version.
