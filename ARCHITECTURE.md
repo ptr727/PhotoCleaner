@@ -159,7 +159,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 
 - **PhotoCleanerTests Project**: comprehensive test coverage across all commands, see the file list under Project Structure above rather than a count here, which drifts every time a test is added
 - **InternalsVisibleTo**: Enables direct testing of internal methods without reflection
-- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, multiple paths, thread configuration and boundary validation), integration scenarios, process task execution, live photo detection (ContentIdentifier matching, `_hevc` suffix naming, mismatch/missing tag scenarios), metadata preservation through conversion
+- **Coverage Areas**: Date inference (filename patterns, path structures, validation), command line interface (parsing, validation, error handling, thread configuration and boundary validation), integration scenarios, process task execution, live photo detection (ContentIdentifier matching, `_hevc` suffix naming, mismatch/missing tag scenarios), metadata preservation through conversion
 
 ## Critical Implementation Details
 
@@ -167,7 +167,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 
 - **Three-tier approach**: Remux (.m2t, .mkv) -> Re-encode (.asf, .wmv, .avi, .3gp, .gif) -> Audio-only re-encode (.mov/.mp4 with PCM audio)
 - **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) is written alongside the backup containing the full output path, this is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was already taken. When `options.SkipBackup` is true, no `.bak` or `.bak.out` files are created, and the original is deleted after conversion.
-- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source.bak> <output> -all:all -overwrite_original` copies all source metadata to the output file. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` handles cross-format date mapping, so no separate date-setting step is needed after conversion.
+- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source> <output> -all:all -overwrite_original` copies all source metadata to the output file. The source is the `.bak` file in the normal case, or the still-live original file itself when `--skipbackup` is set (the original is deleted only after this copy runs). `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` does not reliably set the output's create date across every format pairing, so a separate `SetCreateDateAsync` call follows it, reading the date from the already-parsed `ExifToolJson` and writing it to the output explicitly.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
 ### Live Photo Detection
@@ -222,10 +222,6 @@ Uses `ExifToolJsonContext` for AOT-compatible JSON serialization of `ExifToolJso
 
 ### Command Line Testing Patterns
 
-- **CreateTestCommand() Helper**: Uses `CommandLine.CreateRootCommand()` directly for single source of truth
-- **Type-based Option Extraction**: Identifies options by type (`Option<List<DirectoryInfo>>`, `Option<bool>`, `Option<int>`) using 4-tuple destructuring
-- **Real Directory Testing**: Uses `Directory.GetCurrentDirectory()` for path validation tests
-- **Parse Result Validation**: Tests both success/error states and extracted argument values, including list counts for multiple paths and thread values
-- **Comprehensive Scenarios**: Single path, multiple paths, thread configuration, option properties, argument parsing, validation errors, edge cases, default values
-- **Multiple Path Testing**: Validates 2-path and 3-path scenarios, mixed valid/invalid paths, and proper list indexing
-- **Thread Option Testing**: Validates thread count parsing, default value calculation, short option, and combined option scenarios
+- **Direct construction, no helper**: `new CommandLine([args])` parses directly, and the test reads `cli.Result.Errors` / `cli.Result.GetValue(...)` (or the equivalent per-subcommand options) rather than going through a shared builder.
+- **Real Directory Testing**: Uses `Directory.GetCurrentDirectory()` as a path that is guaranteed to exist, for both success cases and `AcceptExistingOnly()` validator cases.
+- **Comprehensive Scenarios**: Per-option default values, explicit values, flag parsing, validation errors (an unknown option, a missing required option, an out-of-range numeric value), and subcommand registration.
