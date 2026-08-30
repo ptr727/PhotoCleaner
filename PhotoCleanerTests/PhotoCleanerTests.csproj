@@ -12,7 +12,8 @@
     <PackageReference Include="Serilog" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <!-- MTP's own coverage extension, driving the coverage collection the hub validator's `dotnet test` step requests; coverlet.collector is a VSTest data collector MTP ignores without failing -->
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <!-- PrivateAssets alone, deliberately without the IncludeAssets list xunit.analyzers carries below, since that list omits the compile assets and MTP's generated SelfRegisteredExtensions.cs then fails to build with CS0234 -->
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" PrivateAssets="all" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.analyzers">
       <PrivateAssets>all</PrivateAssets>
