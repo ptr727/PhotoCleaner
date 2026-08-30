@@ -2,8 +2,6 @@
   <PropertyGroup>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>PhotoCleanerTests</RootNamespace>
-    <!-- Keeps `dotnet test` on the VSTest adapter (xunit.runner.visualstudio) instead of MTP's own entry point, which .NET 10 SDK now hard-blocks under classic `dotnet test`; see https://aka.ms/dotnet-test-mtp-error -->
-    <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="AwesomeAssertions" />
@@ -13,16 +11,14 @@
     <PackageReference Include="CliWrap" />
     <PackageReference Include="Serilog" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="coverlet.collector">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
+    <!-- MTP's own coverage extension, driving the coverage collection the hub validator's `dotnet test` step requests; coverlet.collector is a VSTest data collector MTP ignores without failing -->
+    <!-- PrivateAssets alone, deliberately without the IncludeAssets list xunit.analyzers carries below, since that list omits the compile assets and MTP's generated SelfRegisteredExtensions.cs then fails to build with CS0234 -->
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" PrivateAssets="all" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.analyzers">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="All" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../PhotoCleaner/PhotoCleaner.csproj" />

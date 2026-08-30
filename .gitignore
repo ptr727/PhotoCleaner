@@ -13,6 +13,11 @@
 .claude
 
 BenchmarkDotNet.Artifacts/
+
+# Coverage output (Microsoft.Testing.Extensions.CodeCoverage)
 coverage/
+[Tt]est[Rr]esults/
+*.cobertura.xml
+*.coverage
 
 secrets/
