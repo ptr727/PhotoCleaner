@@ -12,5 +12,8 @@ coverage:
         informational: true
 
 # The benchmarks project is a performance harness rather than shipped app code, and is intentionally not unit-tested.
+# Microsoft.Testing.Extensions.CodeCoverage also instruments the source generators' output under obj/, which is build
+# product rather than reviewed source and exists in no checkout Codecov can map a path to.
 ignore:
   - "PhotoCleanerBenchmarks/**"
+  - "**/obj/**"
