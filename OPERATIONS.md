@@ -17,7 +17,7 @@ dotnet test
 dotnet husky run
 ```
 
-CI differs in two places. It substitutes `dotnet csharpier check .` for the format step, and it runs the suite as `dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage` so coverlet emits the report the Codecov upload consumes. The style verify is identical. So a local run that formats a file leaves CI clean, while an unformatted commit fails there rather than being fixed.
+CI differs in two places. It substitutes `dotnet csharpier check .` for the format step, and it runs the suite as `dotnet test --coverage --coverage-output-format cobertura --results-directory ./coverage`. That form has `Microsoft.Testing.Extensions.CodeCoverage` emit the report the Codecov upload consumes. CI then renames each `<guid>.cobertura.xml` to `coverage-<guid>.cobertura.xml`, because `codecov-cli`'s file finder matches only `*coverage*.*` and an exact `cobertura.xml`. The style verify is identical. So a local run that formats a file leaves CI clean, while an unformatted commit fails there rather than being fixed.
 
 The lint set runs in containers, matching the `Lint:` tasks in [`.vscode/tasks.json`](./.vscode/tasks.json):
 
@@ -44,7 +44,7 @@ Publishing never happens as a side effect of a merge. A release is a `workflow_d
 
 ### Fix a red Dependabot PR
 
-A grouped update (`nuget-deps`, `actions-deps`) can go red for a reason the bump itself cannot fix, because Dependabot only edits version numbers, never source or project files. Two known failure classes: a formatter tool bump (`csharpier` in [`.config/dotnet-tools.json`](./.config/dotnet-tools.json)) changes a formatting rule and flags an untouched file elsewhere in the tree, or a test SDK bump (`Microsoft.NET.Test.Sdk`, `xunit.v3`) turns on the test project's `IsTestingPlatformApplication` flag, which the .NET 10 SDK now refuses to run through the classic VSTest-based `dotnet test` command it uses. Set `<IsTestingPlatformApplication>false</IsTestingPlatformApplication>` on the test project to keep it on the `xunit.runner.visualstudio` adapter path, since [Microsoft's own opt-in](https://aka.ms/dotnet-test-mtp-error) to the new Microsoft.Testing.Platform runner needs a `global.json` change that breaks the `--collect:"XPlat Code Coverage"` argument this repo's CI relies on.
+A grouped update (`nuget-deps`, `actions-deps`) can go red for a reason the bump itself cannot fix, because Dependabot only edits version numbers, never source or project files. There are two known failure classes. A formatter tool bump (`csharpier` in [`.config/dotnet-tools.json`](./.config/dotnet-tools.json)) changes a formatting rule and flags an untouched file elsewhere in the tree. Or a test-stack bump moves `Microsoft.Testing.Extensions.CodeCoverage`, `xunit.v3`, or `Microsoft.NET.Test.Sdk` onto a Microsoft.Testing.Platform major the others do not carry. All three currently resolve to platform 2.3.3. A skew between them throws `TypeLoadException` and runs zero tests. It still writes a well-formed Cobertura file reporting full coverage, so only the non-zero exit says the run reported nothing. The three move together in the `nuget-deps` group. Read [`WORKFLOW.md`](./WORKFLOW.md) D1.6 and check the resolved platform version before accepting a bump that touches any of them.
 
 Diagnose from the failing job's own log rather than the checks summary, since a check only names the job that failed:
 
@@ -98,3 +98,4 @@ The Immich API key can be given inline with `--apikey` or read from a file with 
 - [Docker/](./Docker/) holds the multi-architecture `Dockerfile` and the Docker Hub README.
 - [.github/workflows/](./.github/workflows/) holds the CI and release pipelines. The pull request check reaches the hub-hosted `validate-task.yml` and `build-release-task.yml` in ptr727/ProjectTemplate, and the release chain reaches those two plus `publish-plan-task.yml`, rather than carrying their own copies.
 - Analyzer and package configuration is central: `Directory.Build.props` carries the analyzer set, and `Directory.Packages.props` pins every package version.
+- [global.json](./global.json) selects Microsoft.Testing.Platform as the test runner for the whole repo. That is what makes `dotnet test` reach the xUnit v3 suite directly, rather than the VSTest host the .NET 10 SDK no longer runs it under. It declares no `sdk` key, so it pins no SDK version and affects nothing but test execution.
