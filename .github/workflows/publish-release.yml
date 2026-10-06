@@ -32,7 +32,7 @@ jobs:
   # The schedule always publishes, matching this workflow's own trigger.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@bc9dc654288d9dac165acdde75379131d04fc537 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@0b7cba39577e35929f4a9ece7dcf25a497f89bef # main promotion
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
@@ -44,7 +44,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@bc9dc654288d9dac165acdde75379131d04fc537 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0b7cba39577e35929f4a9ece7dcf25a497f89bef # main promotion
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -57,7 +57,7 @@ jobs:
     needs: [plan, validate]
     if: >-
       ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@bc9dc654288d9dac165acdde75379131d04fc537 # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@0b7cba39577e35929f4a9ece7dcf25a497f89bef # main promotion
     permissions:
       contents: write
       # actions: write lets the reusable github-release job delete its release-asset-* transfer artifacts (D5.1).
