@@ -16,7 +16,6 @@ permissions: {}
 jobs:
 
   # The repo builds one combined release target, executable plus Docker image.
-  # One filter entry excludes a workflow-only change from the smoke build rather than separating targets the repo does not have.
   changes:
     name: Detect changed targets job
     runs-on: ubuntu-latest
@@ -39,11 +38,20 @@ jobs:
         with:
           filters: |
             release:
-              - '!.github/workflows/**'
+              - 'PhotoCleaner/**'
+              - 'Docker/Dockerfile'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'global.json'
+              - 'version.json'
+              - '.editorconfig'
+              - '.dockerignore'
+              - '.github/actions/dotnet-publish/**'
+              - '.github/actions/docker-prepare/**'
 
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@45399462fff1f706efac3777a0ad3eeb562b13fb # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@0c933694ed15bdc57ea24b9ab58a8f8651951ec0 # 2.0.983
     permissions:
       contents: read
     secrets:
@@ -56,7 +64,7 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: needs.changes.outputs.release == 'true'
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@45399462fff1f706efac3777a0ad3eeb562b13fb # main promotion
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@0c933694ed15bdc57ea24b9ab58a8f8651951ec0 # 2.0.983
     permissions:
       contents: read
     secrets:
