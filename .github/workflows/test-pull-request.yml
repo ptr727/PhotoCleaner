@@ -46,7 +46,10 @@ jobs:
               - 'version.json'
               - '.editorconfig'
               - '.dockerignore'
-              - '.github/actions/**'
+              - '.github/actions/dotnet-publish/**'
+              - '.github/actions/docker-prepare/**'
+              - '.github/actions/docker-build-base/**'
+              - '.github/actions/build-release-asset/**'
 
   validate:
     name: Validate sources job
