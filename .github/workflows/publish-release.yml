@@ -19,6 +19,8 @@ on:
     # Weekly rebuild/publish of main (Mon 02:00 UTC) to pick up base-image updates.
     - cron: '0 2 * * MON'
 
+# The publisher exception to the concurrency convention: ref-scoped and never cancelled, since a cancelled publish can leave a partial tag set or a half-created release.
+# No push trigger exists, so no run takes the github.run_id suffix WORKFLOW.md D7.1 adds for one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false

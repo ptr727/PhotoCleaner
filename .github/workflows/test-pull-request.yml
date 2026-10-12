@@ -39,13 +39,14 @@ jobs:
           filters: |
             release:
               - 'PhotoCleaner/**'
-              - 'Docker/**'
+              - 'Docker/Dockerfile'
               - 'Directory.Build.props'
               - 'Directory.Packages.props'
               - 'global.json'
               - 'version.json'
               - '.editorconfig'
               - '.dockerignore'
+              - '.github/actions/**'
 
   validate:
     name: Validate sources job
