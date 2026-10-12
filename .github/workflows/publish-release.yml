@@ -79,3 +79,19 @@ jobs:
       enable_pypi: false
       docker_image: ptr727/photocleaner
       dotnet_publish_project: ./PhotoCleaner/PhotoCleaner.csproj
+
+  # The hub task pushes only on main, so a develop run reaches it as a no-op.
+  publish-docker-readme:
+    name: Publish Docker Hub readme job
+    needs: [publish]
+    if: ${{ needs.publish.result == 'success' }}
+    permissions:
+      contents: read
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@0c933694ed15bdc57ea24b9ab58a8f8651951ec0 # 2.0.983
+    secrets:
+      DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+      DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+    with:
+      ref: ${{ github.sha }}
+      branch: ${{ github.ref_name }}
+      repositories: '["ptr727/photocleaner"]'
