@@ -16,7 +16,6 @@ permissions: {}
 jobs:
 
   # The repo builds one combined release target, executable plus Docker image.
-  # One filter entry excludes a workflow-only change from the smoke build rather than separating targets the repo does not have.
   changes:
     name: Detect changed targets job
     runs-on: ubuntu-latest
@@ -39,7 +38,14 @@ jobs:
         with:
           filters: |
             release:
-              - '!.github/workflows/**'
+              - 'PhotoCleaner/**'
+              - 'Docker/**'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'global.json'
+              - 'version.json'
+              - '.editorconfig'
+              - '.dockerignore'
 
   validate:
     name: Validate sources job
