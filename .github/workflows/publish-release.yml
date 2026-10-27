@@ -32,7 +32,7 @@ jobs:
   # The schedule always publishes, matching this workflow's own trigger.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@f610e4229f2acbb60d69f6d9386b341c81514534 # 2.0.1148
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@63cf1c9436876d55889260ce43d3900da2fd9b47 # 2.0.1166
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
@@ -44,7 +44,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@f610e4229f2acbb60d69f6d9386b341c81514534 # 2.0.1148
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@63cf1c9436876d55889260ce43d3900da2fd9b47 # 2.0.1166
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -57,7 +57,7 @@ jobs:
     needs: [plan, validate]
     if: >-
       ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@f610e4229f2acbb60d69f6d9386b341c81514534 # 2.0.1148
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@63cf1c9436876d55889260ce43d3900da2fd9b47 # 2.0.1166
     permissions:
       contents: write
       # actions: write lets the reusable github-release job delete its release-asset-* transfer artifacts (D5.1).
@@ -87,7 +87,7 @@ jobs:
     if: ${{ needs.publish.result == 'success' }}
     permissions:
       contents: read
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@f610e4229f2acbb60d69f6d9386b341c81514534 # 2.0.1148
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@63cf1c9436876d55889260ce43d3900da2fd9b47 # 2.0.1166
     secrets:
       DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
       DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
