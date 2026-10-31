@@ -310,6 +310,7 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 - [`PhotoCleaner/`](./PhotoCleaner/): the console application. [`PhotoCleanerTests/`](./PhotoCleanerTests/): the xUnit test project. [`PhotoCleanerBenchmarks/`](./PhotoCleanerBenchmarks/): the BenchmarkDotNet project. [`PhotoCleaner.slnx`](./PhotoCleaner.slnx) is the solution.
 - [`Docker/`](./Docker/): the Dockerfile and the Docker Hub overview the release pipeline publishes.
 - [`.github/workflows/`](./.github/workflows/): the pull request gate, the publisher, and the merge-bot caller, each calling the hub's reusable tasks by pin.
+- [`.secrets/`](./.secrets/): local runtime credentials, ignored except each `.example` and the catalog, per "Repo-Scoped Secrets" above.
 - [`version.json`](./version.json): the version floor. [`Directory.Build.props`](./Directory.Build.props) and [`Directory.Packages.props`](./Directory.Packages.props): the shared build properties and the central package versions.
 
 Branch rulesets, general settings, and secret names are hub-hosted (`repo-config/` and `spec/secrets.json`), checked against this repo from a hub checkout rather than carried here, per "Hub-Hosted Tooling".

@@ -20,4 +20,6 @@ coverage/
 *.cobertura.xml
 *.coverage
 
-secrets/
+**/.secrets/*
+!**/.secrets/*.example
+!**/.secrets/README.md
