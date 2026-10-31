@@ -16,7 +16,7 @@ The result must be exactly two rulesets named `develop` and `main`. A missing ru
 
 ## Secrets
 
-From the same hub checkout, run `uv run --no-project --script spec/audit.py PhotoCleaner` and read its secret findings. It resolves the required set from the hub's `spec/secrets.json` plus this repo's registry entry (`publish[]`/`types[]`/`requiredSecrets[]`). It confirms each required name exists (name only, not values) in the stores its mechanism claims. For PhotoCleaner that is the baseline App pair, the Docker Hub pair, and `CODECOV_TOKEN`, all in both the Actions and Dependabot stores. A workflow run triggered by a Dependabot pull request reads the Dependabot store, and would otherwise silently skip the coverage upload.
+From the same hub checkout, run `uv run --no-project --script spec/audit.py PhotoCleaner` and read its secret findings. It resolves the required set from the hub's `spec/secrets.json` plus this repo's registry entry (`publish[]`/`types[]`/`requiredSecrets[]`). It confirms each required name exists (name only, not values) in the stores its mechanism claims. For PhotoCleaner that is the baseline App pair, the Docker Hub pair, and `CODECOV_TOKEN`, all in both the Actions and Dependabot stores. A workflow run triggered by a Dependabot pull request reads the Dependabot store, so a `CODECOV_TOKEN` missing there silently skips the coverage upload.
 
 ## Verdict and Follow-Up
 
