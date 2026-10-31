@@ -939,7 +939,7 @@ Licensed under the [MIT License][license]\
 [docker-status-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PhotoCleaner/publish-release.yml?event=schedule&logo=github&label=Docker%20Build
 [last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/PhotoCleaner?logo=github&label=Last%20Commit
 [license-shield]: https://img.shields.io/github/license/ptr727/PhotoCleaner?label=License
-[pre-release-version-shield]: https://img.shields.io/github/v/release/ptr727/PhotoCleaner?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[pre-release-version-shield]: https://img.shields.io/github/v/release/ptr727/PhotoCleaner?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release&logo=github
 [release-status-shield]: https://img.shields.io/github/actions/workflow/status/ptr727/PhotoCleaner/publish-release.yml?event=schedule&logo=github&label=Releases%20Build
 [release-version-shield]: https://img.shields.io/github/v/release/ptr727/PhotoCleaner?logo=github&label=GitHub%20Release
 
