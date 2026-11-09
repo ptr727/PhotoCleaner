@@ -4,7 +4,6 @@ name: Test pull request action
 # This is the release-with-smoke shape from ptr727/ProjectTemplate docs/reusable-workflows.md "Adopting the Gates".
 on:
   pull_request:
-    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
