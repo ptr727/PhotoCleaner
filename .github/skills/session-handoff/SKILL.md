@@ -2,22 +2,15 @@
 name: session-handoff
 description: >-
   Writes and resumes the ptr727/ProjectTemplate fleet's session handoff, a standing issue rather
-  than a file: one open issue per track per repository, carrying the `handoff` label, its body the
-  current handoff, replaced in place at each session close once the outgoing body is archived on
-  the same issue as a comment. Use this whenever ending a
-  session or a round of work, whenever starting or resuming one, whenever asked for a handoff or
-  for what the previous round did, whenever the maintainer says only "resume the handoff" or names
-  none, which stands for the whole attended procedure this skill states, and whenever about to
-  re-attempt something a previous round may already have tried, the moment that earns this skill,
-  since a session that does not know a chain exists never goes looking for one. Every session
-  writing one, except an `unattended-handoff` seat, ends in the same order: lessons recorded, the
-  handoff written, the parked decision queue presented, then memories saved last. Triggers even when
-  the session feels too short to be worth a handoff, because the rounds that produce nothing worth
-  writing down are exactly the rounds a later session repeats. The rule is `AGENTS.md` "Session
-  Scope" and the mechanics are the hub's `scripts/handoff.py`. Where a sibling skill owns the
-  moment, it wins: `backlog-burndown` owns a multi-round run's reporting, `unattended-handoff`
-  owns a run with no maintainer present, and `repo-worktree` owns the worktree the handoff names.
-  `agent-conduct` co-fires at the parked-decision obligation and neither defers to the other.
+  than a file: one open `handoff`-labeled issue per track per repository, its body replaced in place
+  at each session close. Use this whenever ending, starting, or resuming a session or a round of
+  work, whenever asked for a handoff or for what the previous round did, whenever the maintainer
+  says only "resume the handoff" or names none, and whenever about to re-attempt something a
+  previous round may have tried. Triggers even when the session feels too short to be worth a
+  handoff. Where a sibling skill owns the moment, it wins: `backlog-burndown` owns a multi-round
+  run's reporting and a run with no maintainer present, `decision-triage` owns asking the whole
+  decision queue at once, and `repo-worktree` owns the worktree the handoff names. `agent-conduct`
+  co-fires at the parked-decision obligation and neither defers to the other.
 ---
 
 # Session Handoff
@@ -41,6 +34,11 @@ The rule is `AGENTS.md` "Session Scope", which keeps it, and it names the handof
 sets the size rule over them. This skill is the judgment that rule cannot state. It says what
 actually earns a place in each of those sections, and what belongs somewhere durable instead. It
 also says how to read a handoff without trusting the parts of it that have gone stale.
+
+The rounds that produce nothing worth writing down are exactly the rounds a later session repeats.
+So a session too short to seem worth a handoff still writes one. The skill's widest trigger is the
+moment before re-attempting something a previous round may already have tried. A session that does
+not know a chain exists never goes looking for one.
 
 ## What a Handoff Is, and Is Not
 
@@ -234,7 +232,7 @@ the whole procedure below. Run every step without being reminded of any of them.
    than picking from it. Take a link carrying `blocked` first, newest update first among them.
    That is because its blocker is a decision only the maintainer can make, and the maintainer is
    now present. Otherwise take the newest update among the rest. An `auto-*` link not carrying
-   `blocked` is skipped unless named, since an `unattended-handoff` worker may hold it right now.
+   `blocked` is skipped unless named, since a `backlog-burndown` away-mode worker may hold it right now.
    Where one is named, confirm with the maintainer that no unattended run is live before working
    it. Where every open link is skipped,
    say so and ask the maintainer which to take. Say which link was picked in one line before
@@ -246,7 +244,7 @@ the whole procedure below. Run every step without being reminded of any of them.
    Otherwise that question goes to the maintainer before any work starts, since the rest of the
    link waits on it. Once answered, record the answer on the decision issue, take its `decision`
    label off, and close it where it held nothing but the question. Leave `blocked` on the handoff
-   while this session works the link, so a running `unattended-handoff` loop does not pick it up
+   while this session works the link, so a running `backlog-burndown` away-mode run does not pick it up
    underneath the session. Settle it in step 6.
 4. **Work the next steps** in a worktree of the session's own, per `repo-worktree`. Drive each pull
    request with `drive-pr` to a mergeable develop -> main promotion pull request. The phrase
@@ -262,15 +260,15 @@ the whole procedure below. Run every step without being reminded of any of them.
    the `blocked` label left on in step 3, take it off once the next round is written. Remove it with
    `gh issue edit "<n>" --repo OWNER/NAME --remove-label blocked`, since the round it marked is
    archived. An `auto-*` lane differs in one way, since it holds one piece of work. Where that work
-   is done, end the track with `close` instead, the outcome as its comment, as `unattended-handoff`
-   closes such a lane. Where work remains, the next round's next steps name the decision issue and
-   the answer. In that case, taking `blocked` off hands the lane back to the unattended loop. Either way the
+   is done, end the track with `close` instead, the outcome as its comment, as `backlog-burndown`
+   "Away Mode" closes such a lane. Where work remains, the next round's next steps name the decision issue and
+   the answer. In that case, taking `blocked` off hands the lane back to an away-mode run. Either way the
    parked decision queue is still presented.
 
 ## Closing a Session
 
-Every session that writes a handoff ends in this order, except an `unattended-handoff` seat, which
-closes as that skill states. Each step leaves the chain whole if the session is interrupted after
+Every session that writes a handoff ends in this order, except a `backlog-burndown` away-mode seat,
+which closes as that skill states. Each step leaves the chain whole if the session is interrupted after
 it.
 
 1. **Record what was learned** per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", which
