@@ -85,6 +85,8 @@ jobs:
       branch: ${{ github.base_ref || github.ref_name }}
 
   # Treats a skipped smoke-build (an unchanged target) as pass, and blocks on failure or cancelled (D1.5, D7.4).
+  # Only a pull_request run takes the ruleset-bound name.
+  # So a dispatch on a pull request's head cannot post the required check without that pull request's gates.
   check-workflow-status:
     name: ${{ github.event_name == 'pull_request' && 'Check pull request workflow status job' || 'Check workflow status job' }}
     runs-on: ubuntu-latest
