@@ -4,29 +4,26 @@ internal sealed class UndoCommand(CommandLine.Options options, CancellationToken
 {
     internal async Task<int> ExecuteAsync() =>
         await CommandRunner
-            .RunAsync(
-                "Undo",
-                () =>
-                {
-                    (IReadOnlyList<string> files, int totalCount) = FileEnumerator.Enumerate(
-                        options.Path,
-                        options.Threads,
-                        cancellationToken
-                    );
+            .RunAsync("Undo", () =>
+            {
+                (IReadOnlyList<string> files, int totalCount) = FileEnumerator.Enumerate(
+                    options.Path,
+                    options.Threads,
+                    cancellationToken
+                );
 
-                    UndoTask undoTask = new(options);
-                    (int restored, int deleted, int failed) = undoTask.Execute(
-                        files,
-                        cancellationToken
-                    );
+                UndoTask undoTask = new(options);
+                (int restored, int deleted, int failed) = undoTask.Execute(
+                    files,
+                    cancellationToken
+                );
 
-                    Log.Information("Total {TotalCount} files", totalCount);
-                    Log.Information("Restored {RestoredCount} files", restored);
-                    Log.Information("Deleted {DeletedCount} files", deleted);
-                    Log.Information("Failed {FailedCount} files", failed);
+                Log.Information("Total {TotalCount} files", totalCount);
+                Log.Information("Restored {RestoredCount} files", restored);
+                Log.Information("Deleted {DeletedCount} files", deleted);
+                Log.Information("Failed {FailedCount} files", failed);
 
-                    return Task.FromResult(failed > 0 ? ExitCode.Failed : ExitCode.Success);
-                }
-            )
+                return Task.FromResult(failed > 0 ? ExitCode.Failed : ExitCode.Success);
+            })
             .ConfigureAwait(false);
 }
