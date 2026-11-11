@@ -18,75 +18,67 @@ internal sealed class ProcessCommand(
 
     internal async Task<int> ExecuteAsync() =>
         await CommandRunner
-            .RunAsync(
-                "Processing",
-                async () =>
-                {
-                    await TrashDatabaseScope
-                        .RunAsync(
-                            options.TrashDbFile,
-                            async trashDatabase =>
-                                await DatabaseScope
-                                    .RunAsync(
-                                        options.DbFile,
-                                        async database =>
+            .RunAsync("Processing", async () =>
+            {
+                await TrashDatabaseScope
+                    .RunAsync(
+                        options.TrashDbFile,
+                        async trashDatabase =>
+                            await DatabaseScope
+                                .RunAsync(
+                                    options.DbFile,
+                                    async database =>
+                                    {
+                                        // Rename duplicate mixed case files
+                                        bool foundConflicts = true;
+                                        while (foundConflicts)
                                         {
-                                            // Rename duplicate mixed case files
-                                            bool foundConflicts = true;
-                                            while (foundConflicts)
-                                            {
-                                                (IReadOnlyList<string> files, _totalCount) =
-                                                    FileEnumerator.Enumerate(
-                                                        options.Path,
-                                                        options.Threads,
-                                                        cancellationToken
-                                                    );
-                                                _fileNames = [.. files];
-                                                foundConflicts = FixCaseConflicts();
-                                            }
+                                            (IReadOnlyList<string> files, _totalCount) =
+                                                FileEnumerator.Enumerate(
+                                                    options.Path,
+                                                    options.Threads,
+                                                    cancellationToken
+                                                );
+                                            _fileNames = [.. files];
+                                            foundConflicts = FixCaseConflicts();
+                                        }
 
-                                            // Process files
-                                            while (!_fileNames.IsEmpty)
-                                            {
-                                                await ExecuteProcessAsync(database, trashDatabase)
-                                                    .ConfigureAwait(false);
-                                            }
-                                        },
-                                        cancellationToken: cancellationToken
-                                    )
-                                    .ConfigureAwait(false),
-                            readOnly: true,
-                            cancellationToken: cancellationToken
-                        )
-                        .ConfigureAwait(false);
+                                        // Process files
+                                        while (!_fileNames.IsEmpty)
+                                        {
+                                            await ExecuteProcessAsync(database, trashDatabase)
+                                                .ConfigureAwait(false);
+                                        }
+                                    },
+                                    cancellationToken: cancellationToken
+                                )
+                                .ConfigureAwait(false),
+                        readOnly: true,
+                        cancellationToken: cancellationToken
+                    )
+                    .ConfigureAwait(false);
 
-                    Log.Information("Total {TotalCount} files", _totalCount);
+                Log.Information("Total {TotalCount} files", _totalCount);
 
-                    _skippedExtensions.LogWarnings();
+                _skippedExtensions.LogWarnings();
 
-                    if (options.DeleteEmpty)
-                    {
-                        int deletedDirs = DirectoryCleaner.DeleteEmptyDirectories(
-                            options.Path,
-                            options.DryRun
-                        );
-                        Log.Information("Deleted {DeletedDirCount} empty directories", deletedDirs);
-                    }
-
-                    Log.Information(
-                        "Skipped {SkippedCount} already processed files",
-                        _skippedCount
+                if (options.DeleteEmpty)
+                {
+                    int deletedDirs = DirectoryCleaner.DeleteEmptyDirectories(
+                        options.Path,
+                        options.DryRun
                     );
-                    Log.Information("Modified {ModifiedCount} files", _modifiedCount);
-                    Log.Information("Deleted {DeletedCount} files", _deletedCount);
-                    Log.Information("Invalid {InvalidCount} files", _invalidCount);
-                    Log.Information("Failed {FailedCount} files", _failedCount);
-
-                    return _failedCount > 0 || _invalidCount > 0
-                        ? ExitCode.Failed
-                        : ExitCode.Success;
+                    Log.Information("Deleted {DeletedDirCount} empty directories", deletedDirs);
                 }
-            )
+
+                Log.Information("Skipped {SkippedCount} already processed files", _skippedCount);
+                Log.Information("Modified {ModifiedCount} files", _modifiedCount);
+                Log.Information("Deleted {DeletedCount} files", _deletedCount);
+                Log.Information("Invalid {InvalidCount} files", _invalidCount);
+                Log.Information("Failed {FailedCount} files", _failedCount);
+
+                return _failedCount > 0 || _invalidCount > 0 ? ExitCode.Failed : ExitCode.Success;
+            })
             .ConfigureAwait(false);
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
