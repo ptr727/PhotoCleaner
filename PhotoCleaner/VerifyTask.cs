@@ -98,42 +98,37 @@ internal sealed class VerifyTask(
         );
 
         await Parallel
-            .ForEachAsync(
-                batches,
-                CreateParallelOptions(cancellationToken),
-                async (batch, token) =>
+            .ForEachAsync(batches, CreateParallelOptions(cancellationToken), async (batch, token) =>
+            {
+                List<string> candidates = new(batch.Length);
+                foreach (string file in batch)
                 {
-                    List<string> candidates = new(batch.Length);
-                    foreach (string file in batch)
+                    try
                     {
-                        try
+                        if (!await ShouldVerifyAsync(file, tally, token).ConfigureAwait(false))
                         {
-                            if (!await ShouldVerifyAsync(file, tally, token).ConfigureAwait(false))
-                            {
-                                continue;
-                            }
-                            candidates.Add(file);
+                            continue;
                         }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch (Exception ex)
-                        {
-                            // One unreadable file must not abort the batch, nor the run.
-                            Log.Error(ex, "Failed to verify '{FilePath}'", file);
-                            tally.Failed();
-                        }
+                        candidates.Add(file);
                     }
-
-                    if (candidates.Count > 0)
+                    catch (OperationCanceledException)
                     {
-                        await preflight.Value.ConfigureAwait(false);
-                        await DecodeBatchAsync(candidates, mount, tally, token)
-                            .ConfigureAwait(false);
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // One unreadable file must not abort the batch, nor the run.
+                        Log.Error(ex, "Failed to verify '{FilePath}'", file);
+                        tally.Failed();
                     }
                 }
-            )
+
+                if (candidates.Count > 0)
+                {
+                    await preflight.Value.ConfigureAwait(false);
+                    await DecodeBatchAsync(candidates, mount, tally, token).ConfigureAwait(false);
+                }
+            })
             .ConfigureAwait(false);
     }
 
