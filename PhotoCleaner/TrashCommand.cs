@@ -10,159 +10,153 @@ internal sealed class TrashCommand(
 {
     internal async Task<int> ExecuteAsync() =>
         await CommandRunner
-            .RunAsync(
-                "Trash",
-                async () =>
-                {
-                    bool partialSync = false;
-                    await TrashDatabaseScope
-                        .RunAsync(
-                            options.TrashDbFile,
-                            async trashDatabase =>
+            .RunAsync("Trash", async () =>
+            {
+                bool partialSync = false;
+                await TrashDatabaseScope
+                    .RunAsync(
+                        options.TrashDbFile,
+                        async trashDatabase =>
+                        {
+                            if (trashDatabase is null)
                             {
-                                if (trashDatabase is null)
+                                throw new InvalidOperationException(
+                                    "Trash database path is required (--trashdb)"
+                                );
+                            }
+
+                            long totalFetched = 0;
+                            long totalInserted = 0;
+                            long countBefore = await trashDatabase
+                                .GetCountAsync(cancellationToken)
+                                .ConfigureAwait(false);
+
+                            bool ownsHttpClient = httpClient is null;
+                            HttpClient client = httpClient ?? CreateDefaultHttpClient();
+                            try
+                            {
+                                int page = 1;
+                                bool hasMore = true;
+
+                                while (hasMore)
                                 {
-                                    throw new InvalidOperationException(
-                                        "Trash database path is required (--trashdb)"
-                                    );
-                                }
+                                    Log.Information("Fetching trashed assets page {Page}", page);
+                                    ImmichSearchRequest request = new() { Page = page };
+                                    ImmichSearchAssets result = await FetchTrashedAssetsAsync(
+                                            client,
+                                            request
+                                        )
+                                        .ConfigureAwait(false);
+                                    List<ImmichAssetDto> assets = result.Items;
 
-                                long totalFetched = 0;
-                                long totalInserted = 0;
-                                long countBefore = await trashDatabase
-                                    .GetCountAsync(cancellationToken)
-                                    .ConfigureAwait(false);
-
-                                bool ownsHttpClient = httpClient is null;
-                                HttpClient client = httpClient ?? CreateDefaultHttpClient();
-                                try
-                                {
-                                    int page = 1;
-                                    bool hasMore = true;
-
-                                    while (hasMore)
+                                    if (assets.Count == 0)
                                     {
-                                        Log.Information(
-                                            "Fetching trashed assets page {Page}",
-                                            page
-                                        );
-                                        ImmichSearchRequest request = new() { Page = page };
-                                        ImmichSearchAssets result = await FetchTrashedAssetsAsync(
-                                                client,
-                                                request
-                                            )
-                                            .ConfigureAwait(false);
-                                        List<ImmichAssetDto> assets = result.Items;
+                                        hasMore = false;
+                                        continue;
+                                    }
 
-                                        if (assets.Count == 0)
+                                    totalFetched += assets.Count;
+
+                                    List<(string Sha1Hex, string? OriginalFileName)> batch = [];
+                                    foreach (ImmichAssetDto asset in assets)
+                                    {
+                                        if (!asset.IsTrashed)
                                         {
-                                            hasMore = false;
+                                            Log.Warning(
+                                                "Skipping non-trashed asset '{FileName}' (id: {AssetId})",
+                                                asset.OriginalFileName,
+                                                asset.Id
+                                            );
                                             continue;
                                         }
 
-                                        totalFetched += assets.Count;
-
-                                        List<(string Sha1Hex, string? OriginalFileName)> batch = [];
-                                        foreach (ImmichAssetDto asset in assets)
+                                        string? sha1Hex = ConvertChecksum(asset.Checksum);
+                                        if (sha1Hex is null)
                                         {
-                                            if (!asset.IsTrashed)
-                                            {
-                                                Log.Warning(
-                                                    "Skipping non-trashed asset '{FileName}' (id: {AssetId})",
-                                                    asset.OriginalFileName,
-                                                    asset.Id
-                                                );
-                                                continue;
-                                            }
-
-                                            string? sha1Hex = ConvertChecksum(asset.Checksum);
-                                            if (sha1Hex is null)
-                                            {
-                                                Log.Warning(
-                                                    "Skipping asset '{FileName}' (id: {AssetId}) with invalid checksum '{Checksum}'",
-                                                    asset.OriginalFileName,
-                                                    asset.Id,
-                                                    asset.Checksum
-                                                );
-                                                continue;
-                                            }
-
-                                            Log.Debug(
-                                                "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
+                                            Log.Warning(
+                                                "Skipping asset '{FileName}' (id: {AssetId}) with invalid checksum '{Checksum}'",
                                                 asset.OriginalFileName,
-                                                sha1Hex
+                                                asset.Id,
+                                                asset.Checksum
                                             );
-                                            batch.Add((sha1Hex, asset.OriginalFileName));
+                                            continue;
                                         }
 
-                                        if (batch.Count > 0)
-                                        {
-                                            await trashDatabase
-                                                .InsertHashesAsync(batch, cancellationToken)
-                                                .ConfigureAwait(false);
-                                        }
-
-                                        Log.Information(
-                                            "Fetched {Count} trashed assets on page {Page}",
-                                            assets.Count,
-                                            page
+                                        Log.Debug(
+                                            "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
+                                            asset.OriginalFileName,
+                                            sha1Hex
                                         );
-
-                                        if (result.NextPage is null)
-                                        {
-                                            hasMore = false;
-                                        }
-                                        else if (
-                                            int.TryParse(result.NextPage, out int nextPage)
-                                            && nextPage > page
-                                        )
-                                        {
-                                            page = nextPage;
-                                        }
-                                        else
-                                        {
-                                            Log.Error(
-                                                "Stopping pagination: invalid NextPage value '{NextPage}' after page {Page}",
-                                                result.NextPage,
-                                                page
-                                            );
-                                            partialSync = true;
-                                            hasMore = false;
-                                        }
+                                        batch.Add((sha1Hex, asset.OriginalFileName));
                                     }
 
-                                    long countAfter = await trashDatabase
-                                        .GetCountAsync(cancellationToken)
-                                        .ConfigureAwait(false);
-                                    totalInserted = Math.Max(0, countAfter - countBefore);
+                                    if (batch.Count > 0)
+                                    {
+                                        await trashDatabase
+                                            .InsertHashesAsync(batch, cancellationToken)
+                                            .ConfigureAwait(false);
+                                    }
 
                                     Log.Information(
-                                        "Fetched {TotalFetched} trashed assets, inserted {TotalInserted} new hashes (total {TotalCount})",
-                                        totalFetched,
-                                        totalInserted,
-                                        countAfter
+                                        "Fetched {Count} trashed assets on page {Page}",
+                                        assets.Count,
+                                        page
                                     );
-                                }
-                                finally
-                                {
-                                    if (ownsHttpClient)
+
+                                    if (result.NextPage is null)
                                     {
-                                        client.Dispose();
+                                        hasMore = false;
+                                    }
+                                    else if (
+                                        int.TryParse(result.NextPage, out int nextPage)
+                                        && nextPage > page
+                                    )
+                                    {
+                                        page = nextPage;
+                                    }
+                                    else
+                                    {
+                                        Log.Error(
+                                            "Stopping pagination: invalid NextPage value '{NextPage}' after page {Page}",
+                                            result.NextPage,
+                                            page
+                                        );
+                                        partialSync = true;
+                                        hasMore = false;
                                     }
                                 }
-                            },
-                            cancellationToken: cancellationToken
-                        )
-                        .ConfigureAwait(false);
 
-                    // Pagination stopping early leaves the database short of the server.
-                    // Callers use it to skip files, so a short one re-imports trashed assets.
-                    // That is a completed run carrying a failure rather than a success.
-                    // A page that throws leaves it short as well, keeping the pages before it.
-                    // That exits Error from the handler above rather than reaching here.
-                    return partialSync ? ExitCode.Failed : ExitCode.Success;
-                }
-            )
+                                long countAfter = await trashDatabase
+                                    .GetCountAsync(cancellationToken)
+                                    .ConfigureAwait(false);
+                                totalInserted = Math.Max(0, countAfter - countBefore);
+
+                                Log.Information(
+                                    "Fetched {TotalFetched} trashed assets, inserted {TotalInserted} new hashes (total {TotalCount})",
+                                    totalFetched,
+                                    totalInserted,
+                                    countAfter
+                                );
+                            }
+                            finally
+                            {
+                                if (ownsHttpClient)
+                                {
+                                    client.Dispose();
+                                }
+                            }
+                        },
+                        cancellationToken: cancellationToken
+                    )
+                    .ConfigureAwait(false);
+
+                // Pagination stopping early leaves the database short of the server.
+                // Callers use it to skip files, so a short one re-imports trashed assets.
+                // That is a completed run carrying a failure rather than a success.
+                // A page that throws leaves it short as well, keeping the pages before it.
+                // That exits Error from the handler above rather than reaching here.
+                return partialSync ? ExitCode.Failed : ExitCode.Success;
+            })
             .ConfigureAwait(false);
 
     private HttpClient CreateDefaultHttpClient()

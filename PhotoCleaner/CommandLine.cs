@@ -283,8 +283,7 @@ internal sealed class CommandLine
     ) =>
         new()
         {
-            Path =
-                parseResult.GetValue(_pathOption)
+            Path = parseResult.GetValue(_pathOption)
                 ?? new DirectoryInfo(Directory.GetCurrentDirectory()),
             Threads = parseResult.GetValue(_threadsOption) is int t and > 0
                 ? t
