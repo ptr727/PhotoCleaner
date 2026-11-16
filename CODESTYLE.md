@@ -110,7 +110,7 @@ The clean-compile task above is necessary and not sufficient. After every code c
 
 1. The **`.NET Format`** clean-compile task (CSharpier, build, then `dotnet format style --verify-no-changes`), defined in [`.vscode/tasks.json`][vscode-tasks].
 2. **`dotnet test`**: the clean-compile chain never runs the xUnit suite, so a change that compiles and formats cleanly can still be broken.
-3. **`dotnet husky run`**: the .NET style tasks the pre-commit hook runs. The hook also runs the prose gate over the staged paths and the EOL gate, which the `Lint: Prose` and `Lint: EOL` tasks run on demand.
+3. **`dotnet husky run`**: the .NET style tasks the pre-commit hook runs. The hook also runs the EOL gate, which `Lint: EOL` reproduces, and the prose gate over the staged lines. `Lint: Prose` reads the whole tree instead, so it skips the hook's check on added comment lines. Only the commit itself runs that check, and its refusal names how to allow a comment.
 
 ## Python
 
