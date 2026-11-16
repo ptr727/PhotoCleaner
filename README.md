@@ -877,7 +877,7 @@ dotnet tool restore
 dotnet husky install
 ```
 
-The pre-commit hook needs Python 3, `uv`, and network access to GitHub. It fetches the shared prose and EOL gates fresh from the template repository on every commit. The fleet's host-tool floor is Python 3.13.
+The pre-commit hook needs Python 3, `uv`, and network access to GitHub. It fetches the shared prose and EOL gates fresh from the template repository on every commit.
 
 ### Update
 

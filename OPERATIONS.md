@@ -32,10 +32,10 @@ python3 hub_fetch_run.py .github/actions/repo-gate/repo_gate.py --check eol
 
 The first four run in containers over a read-only snapshot of the tracked and unignored files, with no network. So build output and a worktree's `.git` file never reach them. The last two are the prose and EOL gates the pre-commit hook also runs. For the four container linters, CI checks the same rules from the same committed configuration, but not through the same tools. It reaches markdownlint, cspell and actionlint through SHA-pinned action wrappers, and only editorconfig-checker runs as a container there. The local commands pull `:latest` deliberately, so a local result can legitimately differ from CI once an upstream release lands ahead of the pinned wrapper. Treat CI as authoritative when the two disagree, and read the difference as a version gap rather than a rule change.
 
-The prose gate's diff-scoped form reads only the lines a branch changes against its base, as the pull request gate does:
+The prose gate's diff-scoped form reads only the lines a branch changes since it forked from `develop`:
 
 ```sh
-python3 hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff origin/develop
+python3 hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff "$(git merge-base origin/develop HEAD)"
 ```
 
 On Windows, a winget Python install provides `py` rather than `python3`. Run each command above as `py -3` there, as the `Lint:` tasks do.
