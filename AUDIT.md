@@ -20,7 +20,7 @@ From the same hub checkout, run `uv run --no-project --script spec/audit.py Phot
 
 ## Verdict and Follow-Up
 
-A missing required item or a divergent payload is a **defect** (not operational). An equivalent outcome in a non-standard form is a **drift finding**. N/A items are excluded, never counted as failures. Surface findings as repository issues, and land fixes as a pull request to `develop` per [GOVERNANCE.md "Branching Model"][governance-branching-model]. To re-apply the whole baseline, run `repo-config/configure.sh apply ptr727/PhotoCleaner release` from a hub checkout.
+A missing required item or a divergent payload is a **defect** (not operational). An equivalent outcome in a non-standard form is a **drift finding**. N/A items are excluded, never counted as failures. Surface findings as repository issues, each naming the hub commit its run read, and land fixes as a pull request to `develop` per [GOVERNANCE.md "Branching Model"][governance-branching-model]. To re-apply the whole baseline, run `repo-config/configure.sh apply ptr727/PhotoCleaner release` from a hub checkout.
 
 <!-- Repo -->
 

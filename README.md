@@ -856,6 +856,8 @@ winget install Microsoft.DotNet.SDK.10
 winget install Microsoft.VisualStudioCode
 winget install Gyan.FFmpeg
 winget install OliverBetz.ExifTool
+winget install Python.Python.3.13
+winget install astral-sh.uv
 ```
 
 #### Linux
@@ -864,18 +866,18 @@ winget install OliverBetz.ExifTool
 apt install dotnet-sdk-10.0
 apt install ffmpeg
 apt install exiftool
+apt install python3
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 #### .NET Tools
 
 ```shell
-dotnet new tool-manifest
-dotnet tool install csharpier
-dotnet tool install husky
-dotnet tool install dotnet-outdated-tool
+dotnet tool restore
 dotnet husky install
-dotnet husky add pre-commit -c "dotnet husky run"
 ```
+
+The pre-commit hook needs Python 3, `uv`, and network access to GitHub. It fetches the shared prose and EOL gates fresh from the template repository on every commit.
 
 ### Update
 
