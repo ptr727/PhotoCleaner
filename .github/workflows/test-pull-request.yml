@@ -31,6 +31,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Filter changed paths step
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -50,7 +51,7 @@ jobs:
 
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@009d3e5ec0d0e94b308142ab9d61589fcfd57787 # 2.0.1421
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@fb2851ff8b92a3372998f57c51e1e9c90bdfe940 # 2.0.1473
     permissions:
       contents: read
     secrets:
@@ -63,7 +64,7 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: needs.changes.outputs.release == 'true'
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@009d3e5ec0d0e94b308142ab9d61589fcfd57787 # 2.0.1421
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@fb2851ff8b92a3372998f57c51e1e9c90bdfe940 # 2.0.1473
     permissions:
       contents: read
     secrets:
