@@ -19,22 +19,26 @@ dotnet husky run
 
 CI differs in two places. It substitutes `dotnet csharpier check .` for the format step, and it runs the suite as `dotnet test --coverage --coverage-output-format cobertura --results-directory ./coverage`. That form has `Microsoft.Testing.Extensions.CodeCoverage` emit the report the Codecov upload consumes. CI then renames each `<guid>.cobertura.xml` to `coverage-<guid>.cobertura.xml`, because `codecov-cli`'s file finder matches only `*coverage*.*` and an exact `cobertura.xml`. The style verify is identical. So a local run that formats a file leaves CI clean, while an unformatted commit fails there rather than being fixed.
 
-The lint set runs in containers, matching the `Lint:` tasks in [`.vscode/tasks.json`](./.vscode/tasks.json):
+The lint set matches the `Lint:` tasks in [`.vscode/tasks.json`](./.vscode/tasks.json). Each runs a template repository script through `hub_fetch_run.py`:
 
 ```sh
-docker run --rm --pull=always -v "$PWD":/workdir -w /workdir davidanson/markdownlint-cli2:latest "**/*.md"
-docker run --rm --pull=always -v "$PWD":/workdir -w /workdir ghcr.io/streetsidesoftware/cspell:latest --no-progress README.md HISTORY.md
-docker run --rm --pull=always -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color
-docker run --rm --pull=always -v "$PWD":/check -w /check mstruebing/editorconfig-checker:latest
+python3 hub_fetch_run.py scripts/docker_lint.py --linter markdownlint
+python3 hub_fetch_run.py scripts/docker_lint.py --linter cspell
+python3 hub_fetch_run.py scripts/docker_lint.py --linter actionlint
+python3 hub_fetch_run.py scripts/docker_lint.py --linter editorconfig-checker
+python3 hub_fetch_run.py .github/actions/prose-gate/prose_lint.py .
+python3 hub_fetch_run.py .github/actions/repo-gate/repo_gate.py --check eol
 ```
 
-Those four are the whole local lint surface, matching the four `Lint:` tasks. CI checks the same four rules from the same committed configuration, but not through the same tools: it reaches markdownlint, cspell and actionlint through SHA-pinned action wrappers, and only editorconfig-checker runs as a container there. The local commands pull `:latest` deliberately, so a local result can legitimately differ from CI once an upstream release lands ahead of the pinned wrapper. Treat CI as authoritative when the two disagree, and read the difference as a version gap rather than a rule change.
+The first four run in containers over a read-only snapshot of the tracked and unignored files, with no network. So build output and a worktree's `.git` file never reach them. The last two are the prose and EOL gates the pre-commit hook also runs. For the four container linters, CI checks the same rules from the same committed configuration, but not through the same tools. It reaches markdownlint, cspell and actionlint through SHA-pinned action wrappers, and only editorconfig-checker runs as a container there. The local commands pull `:latest` deliberately, so a local result can legitimately differ from CI once an upstream release lands ahead of the pinned wrapper. Treat CI as authoritative when the two disagree, and read the difference as a version gap rather than a rule change.
 
-The prose gate lives in the hub rather than here, so it is consumed from a hub checkout and reads only the lines a change touches:
+The prose gate's diff-scoped form reads only the lines a branch changes since it forked from `develop`:
 
 ```sh
-python3 [path-to-hub]/scripts/prose_lint.py . --diff origin/develop
+python3 hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff "$(git merge-base origin/develop HEAD)"
 ```
+
+On Windows, a winget Python install provides `py` rather than `python3`. Run each command above as `py -3` there, as the `Lint:` tasks do.
 
 ## Runbooks
 
@@ -98,5 +102,5 @@ The Immich API key can be given inline with `--apikey` or read from a file with 
 - [Docker/](./Docker/) holds the multi-architecture `Dockerfile` and the Docker Hub README.
 - [.github/workflows/](./.github/workflows/) holds the CI and release pipelines. The pull request check reaches the hub-hosted `validate-task.yml` and `build-release-task.yml` in ptr727/ProjectTemplate, and the release chain reaches those two plus `publish-plan-task.yml`, rather than carrying their own copies.
 - Analyzer and package configuration is central: `Directory.Build.props` carries the analyzer set, and `Directory.Packages.props` pins every package version.
-- [global.json](./global.json) selects Microsoft.Testing.Platform as the test runner for the whole repo. The `test.runner` key is what needs the .NET 10 SDK or later, since that SDK is what reads it. MTP itself predates the key, and an MTP test project is a self-hosting executable. xUnit v3 ships separate VSTest and MTP integrations. Four things put this repo on the MTP one: this key, no `xunit.runner.visualstudio` adapter, no `IsTestingPlatformApplication` opt-out, and `Microsoft.Testing.Extensions.CodeCoverage` rather than a VSTest collector. A move back is not this repo's alone to make, since the coverage invocation lives in the hub-hosted validator. Its `sdk` key selects the SDK line rather than one SDK version. `10.0.100` with `rollForward: latestFeature` means the newest installed 10.0.x SDK, and `allowPrerelease: false` keeps a preview SDK out. So the local hooks run on the same SDK major and C# version as CI, whose `setup-dotnet` installs `10.x`. That holds even where a newer SDK is installed. It also means a 10.0.x release SDK must be present, since a host holding only SDK 11 or a 10.0 preview fails with "A compatible .NET SDK was not found". Analyzer output can still differ between 10.0 feature bands, so a host behind CI's band can see a different code-style diagnostic. The key moves only with the target framework, `11.0.100` alongside `net11.0`. `Directory.Build.props` sets no `LangVersion`, so the C# version follows the target framework rather than whichever SDK runs the build.
+- [global.json](./global.json) selects Microsoft.Testing.Platform as the test runner for the whole repo. The `test.runner` key is what needs the .NET 10 SDK or later, since that SDK is what reads it. MTP itself predates the key, and an MTP test project is a self-hosting executable. xUnit v3 ships separate VSTest and MTP integrations. Four things put this repo on the MTP one: this key, no `xunit.runner.visualstudio` adapter, no `IsTestingPlatformApplication` opt-out, and `Microsoft.Testing.Extensions.CodeCoverage` rather than a VSTest collector. A move back is not this repo's alone to make, since the coverage invocation lives in the hub-hosted validator. Its `sdk` key selects the SDK line rather than one SDK version. `10.0.100` with `rollForward: latestFeature` means the newest installed 10.0.x SDK, and `allowPrerelease: false` keeps a preview SDK out. So the local hooks run on the same SDK major and C# version as CI. CI's hub-hosted `setup-dotnet` step reads this file to choose the line it installs. That holds even where a newer SDK is installed. It also means a 10.0.x release SDK must be present, since a host holding only SDK 11 or a 10.0 preview fails with "A compatible .NET SDK was not found". Analyzer output can still differ between 10.0 feature bands, so a host behind CI's band can see a different code-style diagnostic. The key moves only with the target framework, `11.0.100` alongside `net11.0`. `Directory.Build.props` sets no `LangVersion`, so the C# version follows the target framework rather than whichever SDK runs the build.
 - [.secrets/](./.secrets/) holds local runtime credentials the repo's own debug configurations read, per `GOVERNANCE.md` "Repo-Scoped Secrets". Only each file's `.example` and the [`README.md`](./.secrets/README.md) catalog are tracked.
