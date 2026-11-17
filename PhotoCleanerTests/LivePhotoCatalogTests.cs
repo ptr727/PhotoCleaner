@@ -281,6 +281,12 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
                 stalePath,
                 TestContext.Current.CancellationToken
             );
+            // Leave the stale row without an image hash, so only the sha256 exclusion can apply
+            await db.SetMetadataAsync(
+                stalePath,
+                new FileMetadata("uuid-self", null),
+                TestContext.Current.CancellationToken
+            );
             File.Move(stalePath, videoPath);
 
             // Act
@@ -599,8 +605,8 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
         }
     }
 
-    // The still is a copy of the live video renamed to .heic, as the other live photo tests do.
-    // The ISOBMFF container accepts a ContentIdentifier where a plain JPEG does not.
+    // The still is a different video renamed to .heic, since only a video container accepts a ContentIdentifier here.
+    // Its media data differs from the live video, so the image hash exclusion does not apply to it.
     private Task CreateStillAsync(string path, string? contentId) =>
         CreateMediaAsync(path, contentId, differentiate: true, TempDirectoryFixture.LongVideoFile);
 
