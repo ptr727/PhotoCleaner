@@ -27,6 +27,7 @@ internal sealed class ProcessTask(
     }
 
     private ExifToolJson? _exifToolJson;
+    private string? _preProcessSha256;
     private bool _modified;
     private bool _reprocess;
     private bool _deleted;
@@ -109,6 +110,7 @@ internal sealed class ProcessTask(
                 .IndexFileAsync(fileInfo.FullName, cancellationToken)
                 .ConfigureAwait(false);
             preProcessHash = sha256;
+            _preProcessSha256 = sha256;
             Log.Debug(
                 "File '{FilePath}' has pre-process SHA-256 '{Sha256}'",
                 fileInfo.FullName,
@@ -209,13 +211,7 @@ internal sealed class ProcessTask(
             return false;
         }
 
-        if (database is not null)
-        {
-            await database
-                .DeleteByPathAsync(fileInfo.FullName, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
+        // The row stays, since a Live video pairs against the cataloged ContentIdentifier of a deleted still.
         return true;
     }
 
@@ -381,6 +377,12 @@ internal sealed class ProcessTask(
             return false;
         }
 
+        // With a database the still is found by ContentIdentifier, whatever its name or folder
+        if (database is not null)
+        {
+            return await DeleteLiveVideoByCatalogAsync(duration).ConfigureAwait(false);
+        }
+
         // No matching image candidate then skip
         string? companionPath = FindCompanionImagePath();
         if (companionPath == null)
@@ -442,6 +444,67 @@ internal sealed class ProcessTask(
             duration,
             fileInfo.FullName
         );
+        return DeleteLiveVideo();
+    }
+
+    private async Task<bool> DeleteLiveVideoByCatalogAsync(float duration)
+    {
+        // The row of a still whose file is gone still pairs, since the catalog outlives the file
+        string? videoContentId = _exifToolJson?.ContentIdentifier;
+        if (string.IsNullOrEmpty(videoContentId))
+        {
+            Log.Debug(
+                "No ContentIdentifier, not a live photo video: '{FilePath}'",
+                fileInfo.FullName
+            );
+            return true;
+        }
+
+        FileRecord? videoRecord = await database!
+            .GetByPathAsync(fileInfo.FullName, cancellationToken)
+            .ConfigureAwait(false);
+        string? imagePath = await database
+            .FindImagePathByContentIdentifierAsync(
+                videoContentId,
+                s_liveVideoImageExtensions,
+                _preProcessSha256,
+                videoRecord?.ImageHash,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        if (imagePath is null)
+        {
+            Log.Debug(
+                "No cataloged image has ContentIdentifier '{ContentIdentifier}': '{FilePath}'",
+                videoContentId,
+                fileInfo.FullName
+            );
+            return true;
+        }
+
+        if (duration >= MediaUtilities.LiveVideoDuration)
+        {
+            // Warn in case the video length threshold needs adjustment
+            Log.Warning(
+                "Long {Duration}s video clip has matching image '{ImagePath}': '{FilePath}'",
+                duration,
+                imagePath,
+                fileInfo.FullName
+            );
+            return true;
+        }
+
+        Log.Warning(
+            "Deleting {Duration}s live photo video with matching cataloged image '{ImagePath}': '{FilePath}'",
+            duration,
+            imagePath,
+            fileInfo.FullName
+        );
+        return DeleteLiveVideo();
+    }
+
+    private bool DeleteLiveVideo()
+    {
         if (options.DryRun)
         {
             return false;

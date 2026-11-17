@@ -64,8 +64,10 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
 - **Renames mixed-case extensions**: Converts uppercase or mixed-case extensions to lowercase
   (e.g. `.JPG` -> `.jpg`).
 - **Handles Live Photos**: Removes Apple Live Photo video components. Videos <= 1s are always
-  removed. Videos <= 4s with a candidate companion image (same basename, or basename with `_hevc`
-  suffix stripped) are removed when both files share the same `ContentIdentifier` EXIF tag.
+  removed. Videos <= 4s with a companion image are removed when both files share the same
+  `ContentIdentifier` EXIF tag. With `--db` the image is found by that tag in the database,
+  whatever its name or folder. Without `--db` it is the same-folder file with the same basename,
+  or the basename with the `_hevc` suffix stripped.
   Longer videos with a matching image trigger a warning but are kept.
 - **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, re-encodes WMV, AVI, 3GP, and
   GIF to MP4 (H.264/AAC), and re-encodes PCM audio to AAC in MOV and MP4 files while preserving
@@ -253,8 +255,11 @@ Options:
   directories).
 - `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
-  `file_size`, `mtime_ticks`, `is_processed`). The schema is the same for every command, but
-  the **meaning of the `path` column depends on which command writes the row**, so each
+  `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,
+  `metadata_read`). An older database gains the new columns in place when a writing command opens it.
+  The next `index` or `process` run that finds a file backfills its row. The catalog reads metadata with one exiftool
+  run, which needs ExifTool 12.63 or newer. The schema is the same for every command.
+  The **meaning of the `path` column depends on which command writes the row**, so each
   pipeline stage gets its own DB file:
   - **Import.db** (`import --db Import.db`): rows are keyed by SOURCE path. `sha256` is the
     source content hash. Dedup query: skip a source whose `sha256` is already in this DB.
@@ -280,10 +285,11 @@ Options:
     the hash that ends up in the trash DB) is the rewritten dest SHA-1, so the source-side trash
     check will not match. Those files are caught by `process --trashdb` instead, which hashes the
     dest file directly.
-  - For `process`: files matching a trash hash are deleted from disk and from Process.db. This
-    cleans up files trashed in Immich after upload, before the next `immich-cli` upload would
-    re-upload them. Also acts as the safety net for files that `import --trashdb` could not
-    match because of the source-vs-dest SHA-1 drift described above.
+  - For `process`: files matching a trash hash are deleted from disk. This cleans up files
+    trashed in Immich after upload, before the next `immich-cli` upload would re-upload them.
+    It also acts as the safety net for files that `import --trashdb` could not match because
+    of the source-vs-dest SHA-1 drift described above. Their Process.db rows stay, so a Live
+    Photo video still pairs with a trashed still.
 - `--skipdb <path>`: optional for `import`. Path to a SQLite database with indexed files
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
@@ -412,7 +418,10 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
 1. **File enumeration**: Recursively scans all specified directories.
 2. **Case conflict detection**: Identifies files with the same name but different casing that
    would collide on case-insensitive file systems, then renames them before processing.
-3. **Per-file validation pipeline** (runs in parallel, stops on first action per file):
+3. **Catalog** (with `--db` only): Reads every media file once, in parallel, and records its
+   hashes, `ContentIdentifier` and image data hash in the database. The next step then reuses
+   the cache, so a video is never judged before its still has been seen.
+4. **Per-file validation pipeline** (runs in parallel, stops on first action per file). The steps are:
    0. Act on the exiftool `-validate` verdict, which rides along with the metadata read that
       `process` already performs and so costs nothing extra. A file exiftool reports **errors**
       on is marked invalid and no further step touches it. **Warnings are logged at debug level
@@ -423,16 +432,17 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
    1. Rename to canonical MIME extension, correcting mismatches and stripping compound extensions.
    2. Rename mixed-case extension to lowercase.
    3. Delete short or Live Photo video clips. Videos <= 1s are always deleted, and videos <= 4s
-      with a candidate companion image (direct name match or `_hevc`-suffix match) are deleted
-      when both files share a matching `ContentIdentifier` tag.
+      are deleted when a companion image shares a matching `ContentIdentifier` tag. With `--db`
+      the image is found in the database by that tag. Without it, a direct name match or
+      `_hevc`-suffix match in the same folder is used.
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k)
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
-4. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
-5. **Results summary**: Reports counts of failed, invalid, modified, and successfully processed
+5. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
+6. **Results summary**: Reports counts of failed, invalid, modified, and successfully processed
    files, and lists any unrecognized file extensions. Exits `2` if anything failed or was invalid.
 
 The `import` command applies the same exiftool validation, skipping any file that reports errors

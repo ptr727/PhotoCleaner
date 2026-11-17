@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 
@@ -9,8 +10,28 @@ internal sealed record FileRecord(
     string Sha1,
     long FileSize,
     long MtimeTicks,
-    bool IsProcessed
+    bool IsProcessed,
+    string? ContentIdentifier = null,
+    string? ImageHash = null,
+    bool MetadataRead = false
 );
+
+/// <summary>
+/// Catalog metadata read from one file, where a null member means the tag is absent.
+/// </summary>
+internal sealed record FileMetadata(string? ContentIdentifier, string? ImageHash)
+{
+    /// <summary>
+    /// Maps a catalog read to a row's metadata, or null when exiftool reported an error so the row stays unread.
+    /// </summary>
+    internal static FileMetadata? FromExifTool(ExifToolJson? json) =>
+        json is null || !string.IsNullOrEmpty(json.ExifToolError)
+            ? null
+            : new FileMetadata(
+                string.IsNullOrEmpty(json.ContentIdentifier) ? null : json.ContentIdentifier,
+                string.IsNullOrEmpty(json.ImageDataHash) ? null : json.ImageDataHash
+            );
+}
 
 internal sealed class Database(string dbPath, bool readOnly = false) : IDisposable, IAsyncDisposable
 {
@@ -38,18 +59,75 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                     sha1         TEXT NOT NULL,
                     file_size    INTEGER NOT NULL,
                     mtime_ticks  INTEGER NOT NULL,
-                    is_processed INTEGER NOT NULL DEFAULT 0
+                    is_processed INTEGER NOT NULL DEFAULT 0,
+                    content_identifier TEXT,
+                    image_hash   TEXT,
+                    metadata_read INTEGER NOT NULL DEFAULT 0
                 )
                 """;
             _ = await createCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
+            await UpgradeSchemaAsync(cancellationToken).ConfigureAwait(false);
+
             using SqliteCommand indexCmd = _connection.CreateCommand();
             indexCmd.CommandText = """
                 CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files (sha256);
-                CREATE INDEX IF NOT EXISTS idx_files_sha1 ON files (sha1)
+                CREATE INDEX IF NOT EXISTS idx_files_sha1 ON files (sha1);
+                CREATE INDEX IF NOT EXISTS idx_files_content_identifier ON files (content_identifier);
+                CREATE INDEX IF NOT EXISTS idx_files_image_hash ON files (image_hash)
                 """;
             _ = await indexCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private async Task<HashSet<string>> GetColumnNamesAsync(CancellationToken cancellationToken)
+    {
+        HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
+        using SqliteCommand cmd = _connection!.CreateCommand();
+        cmd.CommandText = "SELECT name FROM pragma_table_info('files')";
+        using SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            _ = columns.Add(reader.GetString(0));
+        }
+
+        return columns;
+    }
+
+    private static readonly string[] s_catalogColumns =
+    [
+        "content_identifier",
+        "image_hash",
+        "metadata_read",
+    ];
+
+    private async Task UpgradeSchemaAsync(CancellationToken cancellationToken)
+    {
+        HashSet<string> columns = await GetColumnNamesAsync(cancellationToken)
+            .ConfigureAwait(false);
+        int present = s_catalogColumns.Count(columns.Contains);
+        if (present == 3)
+        {
+            return;
+        }
+
+        // A database created before the catalog columns existed gains them in place.
+        // Its rows keep metadata_read at 0, so the next catalog backfills the ones still on disk.
+        Log.Information("Upgrading database schema, adding the catalog columns");
+        DbTransaction dbTransaction = await _connection!
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        using SqliteCommand alterCmd = _connection.CreateCommand();
+        alterCmd.Transaction = (SqliteTransaction)dbTransaction;
+        alterCmd.CommandText = """
+            ALTER TABLE files ADD COLUMN content_identifier TEXT;
+            ALTER TABLE files ADD COLUMN image_hash TEXT;
+            ALTER TABLE files ADD COLUMN metadata_read INTEGER NOT NULL DEFAULT 0
+            """;
+        _ = await alterCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await dbTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await dbTransaction.DisposeAsync().ConfigureAwait(false);
     }
 
     private async Task ValidateSchemaAsync(CancellationToken cancellationToken)
@@ -83,7 +161,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             async cmd =>
             {
                 cmd.CommandText =
-                    "SELECT path, sha256, sha1, file_size, mtime_ticks, is_processed FROM files WHERE path = @path LIMIT 1";
+                    "SELECT path, sha256, sha1, file_size, mtime_ticks, is_processed, content_identifier, image_hash, metadata_read FROM files WHERE path = @path LIMIT 1";
                 _ = cmd.Parameters.AddWithValue("@path", path);
                 SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -97,7 +175,14 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                             reader.GetString(2),
                             reader.GetInt64(3),
                             reader.GetInt64(4),
-                            reader.GetInt64(5) != 0
+                            reader.GetInt64(5) != 0,
+                            await reader.IsDBNullAsync(6, cancellationToken).ConfigureAwait(false)
+                                ? null
+                                : reader.GetString(6),
+                            await reader.IsDBNullAsync(7, cancellationToken).ConfigureAwait(false)
+                                ? null
+                                : reader.GetString(7),
+                            reader.GetInt64(8) != 0
                         );
                 }
                 finally
@@ -145,9 +230,18 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             async cmd =>
             {
                 cmd.CommandText = """
-                    INSERT OR IGNORE INTO files (path, sha256, sha1, file_size, mtime_ticks, is_processed)
-                    VALUES (@path, @sha256, @sha1, @fileSize, @mtimeTicks, @isProcessed)
+                    INSERT OR IGNORE INTO files (path, sha256, sha1, file_size, mtime_ticks, is_processed, content_identifier, image_hash, metadata_read)
+                    VALUES (@path, @sha256, @sha1, @fileSize, @mtimeTicks, @isProcessed, @contentIdentifier, @imageHash, @metadataRead)
                     """;
+                _ = cmd.Parameters.AddWithValue(
+                    "@contentIdentifier",
+                    (object?)record.ContentIdentifier ?? DBNull.Value
+                );
+                _ = cmd.Parameters.AddWithValue(
+                    "@imageHash",
+                    (object?)record.ImageHash ?? DBNull.Value
+                );
+                _ = cmd.Parameters.AddWithValue("@metadataRead", record.MetadataRead ? 1 : 0);
                 _ = cmd.Parameters.AddWithValue("@path", record.Path);
                 _ = cmd.Parameters.AddWithValue("@sha256", record.Sha256);
                 _ = cmd.Parameters.AddWithValue("@sha1", record.Sha1);
@@ -165,16 +259,28 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         string sha1,
         long fileSize,
         long mtimeTicks,
+        FileMetadata? metadata = null,
         CancellationToken cancellationToken = default
     ) =>
         ExecuteAsync(
             async cmd =>
             {
+                // New content invalidates the old metadata, so a null argument leaves the row unread.
                 cmd.CommandText = """
                     UPDATE files
-                    SET sha256 = @sha256, sha1 = @sha1, file_size = @fileSize, mtime_ticks = @mtimeTicks, is_processed = 0
+                    SET sha256 = @sha256, sha1 = @sha1, file_size = @fileSize, mtime_ticks = @mtimeTicks, is_processed = 0,
+                        content_identifier = @contentIdentifier, image_hash = @imageHash, metadata_read = @metadataRead
                     WHERE path = @path
                     """;
+                _ = cmd.Parameters.AddWithValue(
+                    "@contentIdentifier",
+                    (object?)metadata?.ContentIdentifier ?? DBNull.Value
+                );
+                _ = cmd.Parameters.AddWithValue(
+                    "@imageHash",
+                    (object?)metadata?.ImageHash ?? DBNull.Value
+                );
+                _ = cmd.Parameters.AddWithValue("@metadataRead", metadata is null ? 0 : 1);
                 _ = cmd.Parameters.AddWithValue("@path", path);
                 _ = cmd.Parameters.AddWithValue("@sha256", sha256);
                 _ = cmd.Parameters.AddWithValue("@sha1", sha1);
@@ -206,22 +312,99 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             cancellationToken
         );
 
-    internal Task SetProcessedAsync(string path, CancellationToken cancellationToken = default) =>
+    internal Task SetMetadataAsync(
+        string path,
+        FileMetadata metadata,
+        CancellationToken cancellationToken = default
+    ) =>
         ExecuteAsync(
             async cmd =>
             {
-                cmd.CommandText = "UPDATE files SET is_processed = 1 WHERE path = @path";
+                cmd.CommandText = """
+                    UPDATE files
+                    SET content_identifier = @contentIdentifier, image_hash = @imageHash, metadata_read = 1
+                    WHERE path = @path
+                    """;
                 _ = cmd.Parameters.AddWithValue("@path", path);
+                _ = cmd.Parameters.AddWithValue(
+                    "@contentIdentifier",
+                    (object?)metadata.ContentIdentifier ?? DBNull.Value
+                );
+                _ = cmd.Parameters.AddWithValue(
+                    "@imageHash",
+                    (object?)metadata.ImageHash ?? DBNull.Value
+                );
                 _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             },
             cancellationToken
         );
 
-    internal Task DeleteByPathAsync(string path, CancellationToken cancellationToken = default) =>
+    /// <summary>
+    /// Finds a cataloged image row carrying the given ContentIdentifier, whether or not its file still exists.
+    /// </summary>
+    internal Task<string?> FindImagePathByContentIdentifierAsync(
+        string contentIdentifier,
+        IReadOnlyCollection<string> imageExtensions,
+        string? excludeSha256,
+        string? excludeImageHash,
+        CancellationToken cancellationToken = default
+    ) =>
         ExecuteAsync(
             async cmd =>
             {
-                cmd.CommandText = "DELETE FROM files WHERE path = @path";
+                // Rows sharing one ContentIdentifier are few, so the extension filter runs here.
+                cmd.CommandText =
+                    "SELECT path, sha256, image_hash FROM files WHERE content_identifier = @contentIdentifier ORDER BY path";
+                _ = cmd.Parameters.AddWithValue("@contentIdentifier", contentIdentifier);
+                SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                try
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        string path = reader.GetString(0);
+
+                        // A row with the video's own bytes or media data is the video, not a still.
+                        if (
+                            reader.GetString(1) == excludeSha256
+                            || (
+                                excludeImageHash is not null
+                                && !await reader
+                                    .IsDBNullAsync(2, cancellationToken)
+                                    .ConfigureAwait(false)
+                                && reader.GetString(2) == excludeImageHash
+                            )
+                        )
+                        {
+                            continue;
+                        }
+
+                        if (
+                            imageExtensions.Contains(
+                                System.IO.Path.GetExtension(path),
+                                StringComparer.OrdinalIgnoreCase
+                            )
+                        )
+                        {
+                            return path;
+                        }
+                    }
+
+                    return null;
+                }
+                finally
+                {
+                    await reader.DisposeAsync().ConfigureAwait(false);
+                }
+            },
+            cancellationToken
+        );
+
+    internal Task SetProcessedAsync(string path, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "UPDATE files SET is_processed = 1 WHERE path = @path";
                 _ = cmd.Parameters.AddWithValue("@path", path);
                 _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             },

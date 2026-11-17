@@ -20,7 +20,7 @@ internal sealed class VerifyTask(
     // Stateless and shared across the parallel loop, rather than rebuilt for every file.
     private readonly IndexTask? _indexTask = database is null
         ? null
-        : new IndexTask(options, database, skippedExtensions);
+        : new IndexTask(options, database, skippedExtensions, readMetadata: false);
 
     // A host path is not a valid container path on every platform.
     // The tree is mounted here and paths are translated across the boundary.
