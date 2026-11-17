@@ -469,7 +469,7 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
-    public async Task ExecuteAsync_VideoSortsBeforeStill_PairsOnlyAfterCatalog()
+    public async Task ExecuteAsync_VideoListedFirst_PairsOnlyWhenStillIsCataloged()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
@@ -512,6 +512,41 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
             // Assert
             before.Should().Be(ProcessTask.ProcessResult.Success);
             after.Should().Be(ProcessTask.ProcessResult.Deleted);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task IndexFileAsync_MetadataReadingOff_LeavesRowUnread()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange - verify indexes without exiftool, so its rows carry no catalog metadata
+            string filePath = Path.Combine(workDir, "IMG_1234.heic");
+            await CreateStillAsync(filePath, "uuid-verify");
+            await using Database db = new(Path.Combine(workDir, "verify.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            // Act
+            _ = await new IndexTask(
+                CreateOptions(workDir, null),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            ).IndexFileAsync(filePath, TestContext.Current.CancellationToken);
+            FileRecord? record = await db.GetByPathAsync(
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+
+            // Assert
+            record.Should().NotBeNull();
+            record.MetadataRead.Should().BeFalse();
+            record.ContentIdentifier.Should().BeNull();
         }
         finally
         {

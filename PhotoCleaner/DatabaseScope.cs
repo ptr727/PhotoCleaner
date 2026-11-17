@@ -12,6 +12,7 @@ internal static class DatabaseScope
         Func<Database?, Task<T>> work,
         bool readOnly = false,
         string label = "database",
+        bool catalogsMetadata = true,
         CancellationToken cancellationToken = default
     )
     {
@@ -30,9 +31,9 @@ internal static class DatabaseScope
         {
             Log.Information("Using {Label} '{DbFile}'", label, dbFile.FullName);
             await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
-            if (!readOnly)
+            if (!readOnly && catalogsMetadata)
             {
-                // Every writing command catalogs files, so an unsupported exiftool stops the run here.
+                // A command that catalogs files stops here on an unsupported exiftool.
                 await MediaUtilities.EnsureImageHashSupportAsync().ConfigureAwait(false);
             }
 
@@ -49,6 +50,7 @@ internal static class DatabaseScope
         Func<Database?, Task> work,
         bool readOnly = false,
         string label = "database",
+        bool catalogsMetadata = true,
         CancellationToken cancellationToken = default
     ) =>
         await RunAsync<object?>(
@@ -60,6 +62,7 @@ internal static class DatabaseScope
                 },
                 readOnly,
                 label,
+                catalogsMetadata,
                 cancellationToken
             )
             .ConfigureAwait(false);

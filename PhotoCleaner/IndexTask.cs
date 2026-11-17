@@ -10,7 +10,8 @@ internal enum IndexStatus
 internal sealed class IndexTask(
     CommandLine.Options options,
     Database database,
-    SkippedExtensionTracker skippedExtensions
+    SkippedExtensionTracker skippedExtensions,
+    bool readMetadata = true
 )
 {
     internal async Task<(
@@ -32,7 +33,7 @@ internal sealed class IndexTask(
         // Metadata is read once per content, so only a new row, new content, or an unread row reads it.
         // An unchanged row keeps what it holds, which is how an old row backfills exactly once.
         FileMetadata? metadata =
-            cached is null || sha256 != cached.Sha256 || !cached.MetadataRead
+            readMetadata && (cached is null || sha256 != cached.Sha256 || !cached.MetadataRead)
                 ? await ReadMetadataAsync(filePath, cancellationToken).ConfigureAwait(false)
                 : null;
 

@@ -27,6 +27,7 @@ internal sealed class ProcessTask(
     }
 
     private ExifToolJson? _exifToolJson;
+    private string? _preProcessSha256;
     private bool _modified;
     private bool _reprocess;
     private bool _deleted;
@@ -109,6 +110,7 @@ internal sealed class ProcessTask(
                 .IndexFileAsync(fileInfo.FullName, cancellationToken)
                 .ConfigureAwait(false);
             preProcessHash = sha256;
+            _preProcessSha256 = sha256;
             Log.Debug(
                 "File '{FilePath}' has pre-process SHA-256 '{Sha256}'",
                 fileInfo.FullName,
@@ -458,14 +460,11 @@ internal sealed class ProcessTask(
             return true;
         }
 
-        FileRecord? videoRecord = await database!
-            .GetByPathAsync(fileInfo.FullName, cancellationToken)
-            .ConfigureAwait(false);
-        string? imagePath = await database
+        string? imagePath = await database!
             .FindImagePathByContentIdentifierAsync(
                 videoContentId,
                 s_liveVideoImageExtensions,
-                videoRecord?.Sha256,
+                _preProcessSha256,
                 cancellationToken
             )
             .ConfigureAwait(false);

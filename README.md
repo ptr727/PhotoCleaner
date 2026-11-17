@@ -256,7 +256,7 @@ Options:
 - `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,
-  `metadata_read`). An older database gains the new columns in place when a command opens it.
+  `metadata_read`). An older database gains the new columns in place when a writing command opens it.
   The next run that finds a file backfills its row. The catalog reads metadata with one exiftool
   run, which needs ExifTool 12.63 or newer. The schema is the same for every command.
   The **meaning of the `path` column depends on which command writes the row**, so each

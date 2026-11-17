@@ -401,17 +401,6 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             cancellationToken
         );
 
-    internal Task DeleteByPathAsync(string path, CancellationToken cancellationToken = default) =>
-        ExecuteAsync(
-            async cmd =>
-            {
-                cmd.CommandText = "DELETE FROM files WHERE path = @path";
-                _ = cmd.Parameters.AddWithValue("@path", path);
-                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            },
-            cancellationToken
-        );
-
     private async Task<T> ExecuteAsync<T>(
         Func<SqliteCommand, Task<T>> operation,
         CancellationToken cancellationToken = default
