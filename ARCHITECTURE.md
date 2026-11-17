@@ -73,15 +73,15 @@ collection carry at least one.
 
 When `--db` is given, `ProcessCommand` first catalogs every media file under `--path` in parallel
 through `IndexTask`, then runs the per-file pipeline above. The second phase hits the size and
-mtime cache, so without `--rehash` hashes and catalog metadata are computed once. A video is therefore never judged before its still has
+mtime cache, so catalog metadata is read once. Hashes are computed once without `--rehash`. A video is therefore never judged before its still has
 been seen. Without `--db` there is no catalog phase and the pipeline runs as before.
 A new file costs two exiftool runs, one in the catalog and one in the pipeline, because parsed metadata is not carried across phases.
 
 ### Catalog Metadata Columns
 
 `IndexTask.IndexFileAsync` fills `content_identifier` and `image_hash` when it inserts a row or sees new content.
-It uses one exiftool run that returns the JSON metadata and the image data hash (`-ImageDataHash -api ImageHashType=SHA256`). `index`, `import` and `process` all populate
-the columns through this path. `verify` indexes without reading metadata, so it needs no exiftool and leaves its rows unread. Other metadata reads leave the hash flag out, since hashing the
+It uses one exiftool run that returns the JSON metadata and the image data hash (`-ImageDataHash -api ImageHashType=SHA256`). `index` and `process` populate
+the columns through this path, and `import` fills them from its own metadata read. `verify` indexes without reading metadata, so it needs no exiftool and leaves its rows unread. Other metadata reads leave the hash flag out, since hashing the
 image data costs extra I/O.
 
 - `metadata_read` separates "not read yet" from "read, tag absent". Rows from an older database
