@@ -460,11 +460,15 @@ internal sealed class ProcessTask(
             return true;
         }
 
-        string? imagePath = await database!
+        FileRecord? videoRecord = await database!
+            .GetByPathAsync(fileInfo.FullName, cancellationToken)
+            .ConfigureAwait(false);
+        string? imagePath = await database
             .FindImagePathByContentIdentifierAsync(
                 videoContentId,
                 s_liveVideoImageExtensions,
                 _preProcessSha256,
+                videoRecord?.ImageHash,
                 cancellationToken
             )
             .ConfigureAwait(false);

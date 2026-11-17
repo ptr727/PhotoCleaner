@@ -50,6 +50,8 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `TrashCommandTests.cs`: TrashCommand tests with mock HTTP handler
   - `DirectoryCleanerTests.cs`: DirectoryCleaner static helper tests
   - `VerifyTaskTests.cs`: Verify protocol parsing and script-contract tests
+  - `LivePhotoCatalogTests.cs`: Live Photo pairing through the catalog and the catalog columns, needs exiftool and ffmpeg
+  - `CatalogSchemaTests.cs`: In-place schema upgrade and metadata mapping tests, need no external tools
 
 ## Core Processing Pipeline
 
@@ -199,7 +201,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 ### Live Photo Detection
 
 - **Short videos** (duration <= `options.ShortVideoDuration`, default `1.0s`, overridable via `--duration`): always deleted regardless of companion file
-- **Pairing with `--db`**: the still is the catalog row of a HEIC/JPG/JPEG file whose `content_identifier` equals the video's, whatever its file name or folder. This covers a still with a different stem, in another date folder, or no longer on disk. The video's own `ContentIdentifier` is read from its metadata. If it is missing or no image row matches, the video is kept.
+- **Pairing with `--db`**: the still is the catalog row of a HEIC/JPG/JPEG file whose `content_identifier` equals the video's, whatever its file name or folder. This covers a still with a different stem, in another date folder, or no longer on disk. The video's own `ContentIdentifier` is read from its metadata. If it is missing or no image row matches, the video is kept. A row never counts as the still when its `sha256` or `image_hash` equals the video's own, since the same media data is the same video. A differently encoded video with an image extension and a shared ContentIdentifier can still pair. That residual risk is accepted, since the loss is one short clip.
 - **Companion file search without `--db`** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file in the same folder by:
   1. Direct basename match (`IMG_1234.mov` -> `IMG_1234.heic`)
   2. Basename minus `_hevc` suffix (`IMG_1234_HEVC.mov` -> `IMG_1234.heic`), the newer iPhone naming

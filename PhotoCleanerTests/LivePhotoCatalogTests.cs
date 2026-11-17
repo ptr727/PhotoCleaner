@@ -413,6 +413,61 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
+    public async Task ExecuteAsync_CopyOfSameVideoUnderImageExtension_KeepsVideo()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange - two copies of one video that differ only in metadata, one named as an image
+            string copyPath = Path.Combine(workDir, "IMG_1234.heic");
+            string videoPath = Path.Combine(workDir, "IMG_1234_QWJj.mp4");
+            await CreateMediaAsync(copyPath, "uuid-copy", differentiate: true);
+            await CreateMediaAsync(videoPath, "uuid-copy", differentiate: false);
+            CommandLine.Options options = CreateOptions(workDir, null);
+            await using Database db = new(Path.Combine(workDir, "photos.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            _ = await new IndexTask(options, db, new SkippedExtensionTracker()).IndexFileAsync(
+                copyPath,
+                TestContext.Current.CancellationToken
+            );
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                options,
+                new FileInfo(videoPath),
+                db,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            // Assert - the copy holds the same media data, so it is no still
+            FileRecord? copyRow = await db.GetByPathAsync(
+                copyPath,
+                TestContext.Current.CancellationToken
+            );
+            copyRow.Should().NotBeNull();
+            copyRow
+                .Sha256.Should()
+                .NotBe(
+                    (
+                        await Database.ComputeHashesAsync(
+                            videoPath,
+                            TestContext.Current.CancellationToken
+                        )
+                    ).sha256
+                );
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(videoPath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
     public async Task ProcessCommand_VideoListedBeforeStill_DeletesVideoOfCatalogedPair()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
@@ -547,15 +602,20 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
     // The still is a copy of the live video renamed to .heic, as the other live photo tests do.
     // The ISOBMFF container accepts a ContentIdentifier where a plain JPEG does not.
     private Task CreateStillAsync(string path, string? contentId) =>
-        CreateMediaAsync(path, contentId, differentiate: true);
+        CreateMediaAsync(path, contentId, differentiate: true, TempDirectoryFixture.LongVideoFile);
 
     private Task CreateVideoAsync(string path, string? contentId) =>
         CreateMediaAsync(path, contentId, differentiate: false);
 
-    private async Task CreateMediaAsync(string path, string? contentId, bool differentiate)
+    private async Task CreateMediaAsync(
+        string path,
+        string? contentId,
+        bool differentiate,
+        string sourceFile = TempDirectoryFixture.LiveVideoFile
+    )
     {
         _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), path);
+        File.Copy(fixture.SourceFile(sourceFile), path);
         // A still carrying a description differs in bytes from a video with the same ContentIdentifier.
         List<string> arguments = [];
         if (contentId is not null)

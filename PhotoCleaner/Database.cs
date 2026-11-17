@@ -346,6 +346,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         string contentIdentifier,
         IReadOnlyCollection<string> imageExtensions,
         string? excludeSha256,
+        string? excludeImageHash,
         CancellationToken cancellationToken = default
     ) =>
         ExecuteAsync(
@@ -353,7 +354,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             {
                 // Rows sharing one ContentIdentifier are few, so the extension filter runs here.
                 cmd.CommandText =
-                    "SELECT path, sha256 FROM files WHERE content_identifier = @contentIdentifier ORDER BY path";
+                    "SELECT path, sha256, image_hash FROM files WHERE content_identifier = @contentIdentifier ORDER BY path";
                 _ = cmd.Parameters.AddWithValue("@contentIdentifier", contentIdentifier);
                 SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -363,8 +364,17 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                     {
                         string path = reader.GetString(0);
 
-                        // A row with the video's own content is the video, e.g. under a stale name.
-                        if (reader.GetString(1) == excludeSha256)
+                        // A row with the video's own bytes or media data is the video, not a still.
+                        if (
+                            reader.GetString(1) == excludeSha256
+                            || (
+                                excludeImageHash is not null
+                                && !await reader
+                                    .IsDBNullAsync(2, cancellationToken)
+                                    .ConfigureAwait(false)
+                                && reader.GetString(2) == excludeImageHash
+                            )
+                        )
                         {
                             continue;
                         }
