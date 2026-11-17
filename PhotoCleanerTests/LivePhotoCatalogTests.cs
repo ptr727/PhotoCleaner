@@ -411,6 +411,114 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_StillTrashedAndDeletedFirst_StillDeletesVideo()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange - the still is processed first and removed because its SHA-1 is in the trash database
+            string stillPath = Path.Combine(workDir, "IMG_1234.heic");
+            string videoPath = Path.Combine(workDir, "IMG_1234_QWJj.mp4");
+            await CreateStillAsync(stillPath, "uuid-trashed-still");
+            await CreateVideoAsync(videoPath, "uuid-trashed-still");
+            (string _, string stillSha1) = await Database.ComputeHashesAsync(
+                stillPath,
+                TestContext.Current.CancellationToken
+            );
+            CommandLine.Options options = CreateOptions(workDir, null);
+            await using Database db = new(Path.Combine(workDir, "photos.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await using TrashDatabase trashDb = new(Path.Combine(workDir, "trash.db"));
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                stillSha1,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+
+            // Act
+            ProcessTask.ProcessResult stillResult = await ProcessTask.ExecuteAsync(
+                options,
+                new FileInfo(stillPath),
+                db,
+                trashDb,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+            ProcessTask.ProcessResult videoResult = await ProcessTask.ExecuteAsync(
+                options,
+                new FileInfo(videoPath),
+                db,
+                trashDb,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            // Assert - the deleted still's row still pairs the video
+            stillResult.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(stillPath).Should().BeFalse();
+            videoResult.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(videoPath + ".bak").Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_VideoSortsBeforeStill_PairsOnlyAfterCatalog()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange - the video name sorts before the still name and is listed first
+            string videoPath = Path.Combine(workDir, "a_video.mp4");
+            string stillPath = Path.Combine(workDir, "z_still.heic");
+            await CreateVideoAsync(videoPath, "uuid-order");
+            await CreateStillAsync(stillPath, "uuid-order");
+            CommandLine.Options options = CreateOptions(workDir, null);
+            await using Database uncataloged = new(Path.Combine(workDir, "before.db"));
+            await uncataloged.InitializeAsync(TestContext.Current.CancellationToken);
+            await using Database cataloged = new(Path.Combine(workDir, "after.db"));
+            await cataloged.InitializeAsync(TestContext.Current.CancellationToken);
+
+            // Act - judged with no still row, then after the catalog batch phase one runs
+            ProcessTask.ProcessResult before = await ProcessTask.ExecuteAsync(
+                options,
+                new FileInfo(videoPath),
+                uncataloged,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+            _ = await new IndexTask(options, cataloged, new SkippedExtensionTracker()).ExecuteAsync(
+                [videoPath, stillPath],
+                TestContext.Current.CancellationToken
+            );
+            ProcessTask.ProcessResult after = await ProcessTask.ExecuteAsync(
+                options,
+                new FileInfo(videoPath),
+                cataloged,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            // Assert
+            before.Should().Be(ProcessTask.ProcessResult.Success);
+            after.Should().Be(ProcessTask.ProcessResult.Deleted);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- Helpers ---------------------------------------------------------------
 
     private async Task RunPairAsync(

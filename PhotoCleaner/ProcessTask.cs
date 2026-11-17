@@ -209,13 +209,7 @@ internal sealed class ProcessTask(
             return false;
         }
 
-        if (database is not null)
-        {
-            await database
-                .DeleteByPathAsync(fileInfo.FullName, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
+        // The row stays, since a Live video pairs against the cataloged ContentIdentifier of a deleted still.
         return true;
     }
 

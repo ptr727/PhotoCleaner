@@ -285,10 +285,11 @@ Options:
     the hash that ends up in the trash DB) is the rewritten dest SHA-1, so the source-side trash
     check will not match. Those files are caught by `process --trashdb` instead, which hashes the
     dest file directly.
-  - For `process`: files matching a trash hash are deleted from disk and from Process.db. This
-    cleans up files trashed in Immich after upload, before the next `immich-cli` upload would
-    re-upload them. Also acts as the safety net for files that `import --trashdb` could not
-    match because of the source-vs-dest SHA-1 drift described above.
+  - For `process`: files matching a trash hash are deleted from disk. This cleans up files
+    trashed in Immich after upload, before the next `immich-cli` upload would re-upload them.
+    It also acts as the safety net for files that `import --trashdb` could not match because
+    of the source-vs-dest SHA-1 drift described above. Their Process.db rows stay, so a Live
+    Photo video still pairs with a trashed still.
 - `--skipdb <path>`: optional for `import`. Path to a SQLite database with indexed files
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
