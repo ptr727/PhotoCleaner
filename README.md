@@ -644,18 +644,22 @@ docker run --rm \
 
 ## Workflow Example
 
-The example mirrors an iCloud Photos library with [rclone][rclone-link], archives the mirror as
-unmodified Originals, and prepares a tagged copy for [Immich][immich-link]. The paths are
-`/photos/mirror` (the rclone mirror), `/photos/originals` (the archive), and `/photos/processed`
-(the working copy that `process` changes and Immich imports).
+A common source is a sync mirror of a cloud photo library, kept current by a sync tool. A sync
+removes a file from the mirror when the photo is deleted at the source, so the mirror is not an
+archive. The workflow below treats the mirror as a read-only source. It copies the mirror, unmodified
+and without tags, into an Originals archive organized by date. It then prepares a tagged copy for
+[Immich][immich-link]. Any sync tool that produces a directory of media files can fill the mirror.
 
-**Run rclone to mirror iCloud Photos**:
+The paths are `/photos/mirror` (the sync mirror), `/photos/originals` (the archive), and
+`/photos/processed` (the working copy that `process` changes and Immich imports).
+
+**Example source: mirror iCloud Photos with rclone**:
 
 <!-- cspell:ignore iclouddrive -->
 
-Configure an `iclouddrive` remote once with `rclone config`, named `icloud` here, then sync with the
-Photos service and the library's All Photos listing. The mirror is one flat directory, without date
-folders or albums:
+[rclone][rclone-link] can mirror iCloud Photos with its `iclouddrive` backend. Configure a remote
+once with `rclone config`, named `icloud` here, then sync with the Photos service and the library's
+All Photos listing. The mirror is one flat directory, without date folders or albums:
 
 ```shell
 #!/bin/bash
@@ -666,7 +670,8 @@ rclone sync "icloud:PrimarySync/All Photos" /photos/mirror --iclouddrive-service
 ```
 
 rclone has no option for date layout, Live Photo handling, or rendition choice, and it provides no
-hashes, so PhotoCleaner does all of that. The mirror holds:
+hashes. PhotoCleaner dates, deduplicates, and pairs files itself, and keeps every rendition.
+This is what the rclone iCloud Photos backend produces:
 
 - Each photo's original.
 - For an edited photo, the edited rendition too, named with `-edited` before the extension, such as
@@ -674,8 +679,8 @@ hashes, so PhotoCleaner does all of that. The mirror holds:
 - Each Live Photo's motion video, as a `.MOV`.
 - For a file whose name collides with another, `_<asset id>` inserted before the extension, such as
   `IMG_1234_AbCdEf.MOV`. The id can contain `+` and a full-width slash.
-
-The file modification time is the capture time. PhotoCleaner does not use it to date a file. The import step explains why.
+- A file modification time equal to the capture time. PhotoCleaner does not use it to date a file,
+  as the import step explains.
 
 **Run PhotoCleaner to sync [Immich][immich-link] trash hashes** (keeps trashed photos out):
 
@@ -697,8 +702,7 @@ docker run --rm \
 
 **Run PhotoCleaner to import the mirror into Originals**:
 
-A sync removes a file from the mirror when the photo is deleted from iCloud, so the mirror is not an
-archive. Copy it, unmodified and without tags, into an Originals directory organized by date. The
+Copy the mirror, unmodified and without tags, into an Originals directory organized by date. The
 mirror is only ever read:
 
 ```shell
@@ -740,7 +744,7 @@ docker run --rm \
     --path /photos/originals \
     --outpath /photos/processed \
     --format yyyy/MM/yyyy-MM-dd \
-    --tags iCloud \
+    --tags mirror \
     --db /photos/db/import.db \
     --trashdb /photos/db/trash.db \
     --threads 4
@@ -770,20 +774,20 @@ is under the Live Photo length bound. File names and date folders do not matter.
 edited rendition. The `-edited` name tells them apart.
 
 The Immich trash database keeps removed photos out at import and at process.
-`import` skips a source file whose hash is in it. `process` deletes a processed file whose hash is in it. These checks match the
-whole-file hash. Any change to the bytes of a file defeats them, a metadata-only change or a tag
-written by `import` included. Matching on
-the image data hash instead is tracked in [issue 278][issue-278-link].
+`import` skips a source file whose hash is in it. `process` deletes a processed file whose hash is
+in it. These checks match the whole-file hash, so a file whose bytes differ from the trashed one is
+not matched. A tag written by `import` changes the bytes too, so `process` is the check that sees
+the files Immich holds. Matching on the image data hash instead is tracked in [issue 278][issue-278-link].
 
-**Switching an existing library from another downloader**:
+**Adopting a new source for an existing library**:
 
-Files already imported under different bytes look new to the import database. This approach works.
+Files already imported under different bytes look new to the import database. One approach is below.
 Run `index` on the new source and on the photo server's stored originals, each into its own
-database, and match the two by `image_hash`. Then record the whole new source in the import database
-with `index --path /photos/mirror --db /photos/db/originals.db`, the database of the mirror import.
-Finally delete the rows of the files that should still be imported. The remaining rows mark files
-that `import` no longer copies, so those files must already be in your archive. This is guidance rather than a supported command sequence, so review
-the matches before deleting any rows.
+database, and match the two by `image_hash`. Then record the mirror with `index` in the
+database of the import into the processing directory, `import.db` above. Finally delete the rows of the files that should still be
+imported. This is guidance rather than a supported command sequence, so review the matches before
+deleting any rows. A fuller guide to building an Originals archive and to removing duplicates
+against a photo server is planned as separate documentation.
 
 **Run PhotoCleaner to verify Immich can render the photos**:
 
