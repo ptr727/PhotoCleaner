@@ -119,10 +119,17 @@ internal sealed class IndexTask(
             ExifToolJson? json = await MediaUtilities
                 .GetCatalogExifToolJsonAsync(filePath, cancellationToken)
                 .ConfigureAwait(false);
-            return new FileMetadata(
-                NullIfEmpty(json?.ContentIdentifier),
-                NullIfEmpty(json?.ImageDataHash)
-            );
+            FileMetadata? metadata = FileMetadata.FromExifTool(json);
+            if (metadata is null)
+            {
+                Log.Warning(
+                    "exiftool reported an error, leaving metadata unread for '{FilePath}': {Error}",
+                    filePath,
+                    json?.ExifToolError
+                );
+            }
+
+            return metadata;
         }
         catch (InvalidOperationException ex)
         {
@@ -130,8 +137,6 @@ internal sealed class IndexTask(
             return null;
         }
     }
-
-    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Design",

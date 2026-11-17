@@ -73,7 +73,7 @@ collection carry at least one.
 
 When `--db` is given, `ProcessCommand` first catalogs every media file under `--path` in parallel
 through `IndexTask`, then runs the per-file pipeline above. The second phase hits the size and
-mtime cache, so no file is read twice. A video is therefore never judged before its still has
+mtime cache, so hashes and catalog metadata are computed once. A video is therefore never judged before its still has
 been seen. Without `--db` there is no catalog phase and the pipeline runs as before.
 
 ### Catalog Metadata Columns
@@ -91,7 +91,7 @@ image data costs extra I/O.
 - ExifTool 12.63 or newer is required, the release that introduced `ImageDataHash`. An older
   version fails the run with a message instead of cataloguing nothing.
 - The image hash is catalog-only. Import dedup stays on the whole-file SHA-256.
-- A read-only open of a database in the old shape fails with a message, because it cannot upgrade.
+- A read-only open cannot upgrade a database in the old shape. Only the hash lookups work there.
 
 ## State Management Pattern
 

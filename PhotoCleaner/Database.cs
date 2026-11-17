@@ -19,7 +19,19 @@ internal sealed record FileRecord(
 /// <summary>
 /// Catalog metadata read from one file, where a null member means the tag is absent.
 /// </summary>
-internal sealed record FileMetadata(string? ContentIdentifier, string? ImageHash);
+internal sealed record FileMetadata(string? ContentIdentifier, string? ImageHash)
+{
+    /// <summary>
+    /// Maps a catalog read to a row's metadata, or null when exiftool reported an error so the row stays unread.
+    /// </summary>
+    internal static FileMetadata? FromExifTool(ExifToolJson? json) =>
+        json is null || !string.IsNullOrEmpty(json.ExifToolError)
+            ? null
+            : new FileMetadata(
+                string.IsNullOrEmpty(json.ContentIdentifier) ? null : json.ContentIdentifier,
+                string.IsNullOrEmpty(json.ImageDataHash) ? null : json.ImageDataHash
+            );
+}
 
 internal sealed class Database(string dbPath, bool readOnly = false) : IDisposable, IAsyncDisposable
 {
@@ -100,13 +112,6 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             return;
         }
 
-        if (present != 0)
-        {
-            throw new InvalidOperationException(
-                $"Database '{dbPath}' has a partial catalog schema, expected all of 'content_identifier', 'image_hash' and 'metadata_read'."
-            );
-        }
-
         // A database created before the catalog columns existed gains them in place.
         // Its rows keep metadata_read at 0, so the next catalog backfills the ones still on disk.
         Log.Information("Upgrading database schema, adding the catalog columns");
@@ -144,19 +149,6 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         {
             throw new InvalidOperationException(
                 $"Database '{dbPath}' has an unsupported schema (missing 'sha256' or 'sha1' column)."
-            );
-        }
-
-        HashSet<string> columns = await GetColumnNamesAsync(cancellationToken)
-            .ConfigureAwait(false);
-        if (
-            !columns.Contains("content_identifier")
-            || !columns.Contains("image_hash")
-            || !columns.Contains("metadata_read")
-        )
-        {
-            throw new InvalidOperationException(
-                $"Database '{dbPath}' has an older schema and cannot be upgraded read-only, open it once with a command that writes to it."
             );
         }
     }
@@ -353,6 +345,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
     internal Task<string?> FindImagePathByContentIdentifierAsync(
         string contentIdentifier,
         IReadOnlyCollection<string> imageExtensions,
+        string? excludeSha256,
         CancellationToken cancellationToken = default
     ) =>
         ExecuteAsync(
@@ -360,7 +353,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             {
                 // Rows sharing one ContentIdentifier are few, so the extension filter runs here.
                 cmd.CommandText =
-                    "SELECT path FROM files WHERE content_identifier = @contentIdentifier ORDER BY path";
+                    "SELECT path, sha256 FROM files WHERE content_identifier = @contentIdentifier ORDER BY path";
                 _ = cmd.Parameters.AddWithValue("@contentIdentifier", contentIdentifier);
                 SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -369,6 +362,13 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                     while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                     {
                         string path = reader.GetString(0);
+
+                        // A row with the video's own content is the video, e.g. under a stale name.
+                        if (reader.GetString(1) == excludeSha256)
+                        {
+                            continue;
+                        }
+
                         if (
                             imageExtensions.Contains(
                                 System.IO.Path.GetExtension(path),

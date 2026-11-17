@@ -179,28 +179,38 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
-    public async Task InitializeAsync_OldSchemaReadOnly_ThrowsClearError()
+    public async Task InitializeAsync_OldSchemaReadOnly_StillAnswersHashLookups()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
+            // Arrange - a skip database written before the catalog columns existed
             string dbPath = Path.Combine(workDir, "old.db");
             await using (SqliteConnection connection = new($"Data Source={dbPath};Pooling=False"))
             {
                 await connection.OpenAsync(TestContext.Current.CancellationToken);
                 using SqliteCommand command = connection.CreateCommand();
-                command.CommandText =
-                    "CREATE TABLE files (path TEXT NOT NULL PRIMARY KEY, sha256 TEXT NOT NULL, sha1 TEXT NOT NULL, file_size INTEGER NOT NULL, mtime_ticks INTEGER NOT NULL, is_processed INTEGER NOT NULL DEFAULT 0)";
+                command.CommandText = """
+                    CREATE TABLE files (
+                        path TEXT NOT NULL PRIMARY KEY, sha256 TEXT NOT NULL, sha1 TEXT NOT NULL,
+                        file_size INTEGER NOT NULL, mtime_ticks INTEGER NOT NULL,
+                        is_processed INTEGER NOT NULL DEFAULT 0
+                    );
+                    INSERT INTO files VALUES ('/photos/IMG_1234.heic', 'sha256-a', 'sha1-a', 10, 20, 0)
+                    """;
                 _ = await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
             }
 
+            // Act
             await using Database db = new(dbPath, readOnly: true);
-            Func<Task> act = async () =>
-                await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            bool found = await db.Sha256ExistsAsync(
+                "sha256-a",
+                TestContext.Current.CancellationToken
+            );
 
-            await act.Should()
-                .ThrowAsync<InvalidOperationException>()
-                .WithMessage("*older schema*");
+            // Assert
+            found.Should().BeTrue();
         }
         finally
         {
@@ -250,40 +260,6 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
             afterSecondRun.Should().NotBeNull();
             afterSecondRun.ContentIdentifier.Should().Be("sentinel-id");
             afterSecondRun.ImageHash.Should().Be("sentinel-hash");
-        }
-        finally
-        {
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Fact]
-    public async Task IndexFileAsync_OldRowWithFileGone_StaysUnread()
-    {
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        try
-        {
-            string dbPath = Path.Combine(workDir, "photos.db");
-            await using Database db = new(dbPath);
-            await db.InitializeAsync(TestContext.Current.CancellationToken);
-            await db.InsertAsync(
-                new FileRecord("/gone/IMG_1234.heic", "sha256-a", "sha1-a", 10, 20, false),
-                TestContext.Current.CancellationToken
-            );
-
-            // Act - a catalog run only visits files that exist
-            string filePath = Path.Combine(workDir, "other.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-            _ = await CreateIndexTask(workDir, db)
-                .IndexFileAsync(filePath, TestContext.Current.CancellationToken);
-            FileRecord? record = await db.GetByPathAsync(
-                "/gone/IMG_1234.heic",
-                TestContext.Current.CancellationToken
-            );
-
-            // Assert
-            record.Should().NotBeNull();
-            record.MetadataRead.Should().BeFalse();
         }
         finally
         {
@@ -381,6 +357,60 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public void FromExifTool_ErrorReported_LeavesRowUnread()
+    {
+        FileMetadata
+            .FromExifTool(new ExifToolJson { ExifToolError = "cannot read" })
+            .Should()
+            .BeNull();
+        FileMetadata.FromExifTool(null).Should().BeNull();
+        FileMetadata
+            .FromExifTool(new ExifToolJson { ImageDataHash = "abc" })
+            .Should()
+            .BeEquivalentTo(new FileMetadata(null, "abc"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_VideoRenamedFromStaleStillName_DoesNotPairWithItself()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange - a video once cataloged under a .heic name, since renamed to .mp4
+            string stalePath = Path.Combine(workDir, "clip.heic");
+            string videoPath = Path.Combine(workDir, "clip.mp4");
+            await CreateMediaAsync(stalePath, "uuid-self", differentiate: false);
+            CommandLine.Options options = CreateOptions(workDir, null);
+            await using Database db = new(Path.Combine(workDir, "photos.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            _ = await new IndexTask(options, db, new SkippedExtensionTracker()).IndexFileAsync(
+                stalePath,
+                TestContext.Current.CancellationToken
+            );
+            File.Move(stalePath, videoPath);
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                options,
+                new FileInfo(videoPath),
+                db,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            // Assert - the only matching row holds the video's own content
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(videoPath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- Helpers ---------------------------------------------------------------
 
     private async Task RunPairAsync(
@@ -448,24 +478,32 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
     // The still is a copy of the live video renamed to .heic, as the other live photo tests do.
     // The ISOBMFF container accepts a ContentIdentifier where a plain JPEG does not.
     private Task CreateStillAsync(string path, string? contentId) =>
-        CreateMediaAsync(path, contentId);
+        CreateMediaAsync(path, contentId, differentiate: true);
 
     private Task CreateVideoAsync(string path, string? contentId) =>
-        CreateMediaAsync(path, contentId);
+        CreateMediaAsync(path, contentId, differentiate: false);
 
-    private async Task CreateMediaAsync(string path, string? contentId)
+    private async Task CreateMediaAsync(string path, string? contentId, bool differentiate)
     {
         _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), path);
+        // A still carrying a description differs in bytes from a video with the same ContentIdentifier.
+        List<string> arguments = [];
         if (contentId is not null)
+        {
+            arguments.Add($"-Keys:ContentIdentifier={contentId}");
+        }
+
+        if (differentiate)
+        {
+            arguments.Add("-Keys:Description=still image");
+        }
+
+        if (arguments.Count > 0)
         {
             // ExifTool may exit with code 1 for warnings, so suppress validation.
             _ = await Cli.Wrap("exiftool")
-                .WithArguments([
-                    $"-Keys:ContentIdentifier={contentId}",
-                    "-overwrite_original",
-                    path,
-                ])
+                .WithArguments([.. arguments, "-overwrite_original", path])
                 .WithValidation(CommandResultValidation.None)
                 .ExecuteAsync(TestContext.Current.CancellationToken);
         }

@@ -343,6 +343,7 @@ internal sealed class ImportTask(
             // Lookups are by source content hash.
             if (database is not null && sha256 is not null && sha1 is not null)
             {
+                FileMetadata? metadata = FileMetadata.FromExifTool(meta);
                 if (cached is null)
                 {
                     Log.Debug(
@@ -359,13 +360,9 @@ internal sealed class ImportTask(
                                 sourceInfo.Length,
                                 sourceInfo.LastWriteTimeUtc.Ticks,
                                 false,
-                                string.IsNullOrEmpty(meta?.ContentIdentifier)
-                                    ? null
-                                    : meta.ContentIdentifier,
-                                string.IsNullOrEmpty(meta?.ImageDataHash)
-                                    ? null
-                                    : meta.ImageDataHash,
-                                meta is not null
+                                metadata?.ContentIdentifier,
+                                metadata?.ImageHash,
+                                metadata is not null
                             ),
                             cancellationToken
                         )
@@ -385,16 +382,7 @@ internal sealed class ImportTask(
                             sha1,
                             sourceInfo.Length,
                             sourceInfo.LastWriteTimeUtc.Ticks,
-                            meta is null
-                                ? null
-                                : new FileMetadata(
-                                    string.IsNullOrEmpty(meta.ContentIdentifier)
-                                        ? null
-                                        : meta.ContentIdentifier,
-                                    string.IsNullOrEmpty(meta.ImageDataHash)
-                                        ? null
-                                        : meta.ImageDataHash
-                                ),
+                            metadata,
                             cancellationToken
                         )
                         .ConfigureAwait(false);
