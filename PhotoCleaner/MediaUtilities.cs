@@ -67,9 +67,63 @@ internal static class MediaUtilities
         return candidate;
     }
 
-    internal static async Task<ExifToolJson?> GetExifToolJsonAsync(
+    // ImageDataHash and the ImageHashType option arrived together in ExifTool 12.63 (2023-06-08).
+    // Source: the ExifTool version history, which lists both under 12.63.
+    internal const double MinimumImageHashExifToolVersion = 12.63;
+
+    private static readonly Lazy<Task> s_imageHashSupport = new(CheckImageHashSupportAsync);
+
+    // Fails with a clear message instead of cataloguing every file as having no image hash.
+    internal static Task EnsureImageHashSupportAsync() => s_imageHashSupport.Value;
+
+    private static async Task CheckImageHashSupportAsync()
+    {
+        BufferedCommandResult result = await Cli.Wrap("exiftool")
+            .WithArguments(["-ver"])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync();
+        if (
+            !double.TryParse(
+                result.StandardOutput.Trim(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double version
+            )
+        )
+        {
+            throw new NotSupportedException(
+                $"Cannot determine the exiftool version from '{result.StandardOutput.Trim()}', version {MinimumImageHashExifToolVersion.ToString(CultureInfo.InvariantCulture)} or newer is required for ImageDataHash."
+            );
+        }
+
+        if (version < MinimumImageHashExifToolVersion)
+        {
+            throw new NotSupportedException(
+                $"exiftool {version.ToString(CultureInfo.InvariantCulture)} is too old, version {MinimumImageHashExifToolVersion.ToString(CultureInfo.InvariantCulture)} or newer is required for ImageDataHash."
+            );
+        }
+    }
+
+    // A catalog read adds the image data hash to the same exiftool run.
+    // Other reads leave it out, because hashing the image data costs extra I/O.
+    internal static async Task<ExifToolJson?> GetCatalogExifToolJsonAsync(
         string filePath,
         CancellationToken cancellationToken = default
+    )
+    {
+        await EnsureImageHashSupportAsync().ConfigureAwait(false);
+        return await ReadExifToolJsonAsync(filePath, true, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static Task<ExifToolJson?> GetExifToolJsonAsync(
+        string filePath,
+        CancellationToken cancellationToken = default
+    ) => ReadExifToolJsonAsync(filePath, false, cancellationToken);
+
+    private static async Task<ExifToolJson?> ReadExifToolJsonAsync(
+        string filePath,
+        bool imageHash,
+        CancellationToken cancellationToken
     )
     {
         Log.Debug("exiftool: Getting metadata for '{FilePath}'", filePath);
@@ -84,7 +138,21 @@ internal static class MediaUtilities
         // A file whose verdict reports an error also makes exiftool exit non-zero, JSON and all.
         // The parsed output decides, not the exit code.
         BufferedCommandResult result = await Cli.Wrap("exiftool")
-            .WithArguments(["-groupNames", "-json", "-validate", "-all", filePath])
+            .WithArguments(
+                imageHash
+                    ?
+                    [
+                        "-groupNames",
+                        "-json",
+                        "-validate",
+                        "-all",
+                        "-ImageDataHash",
+                        "-api",
+                        "ImageHashType=SHA256",
+                        filePath,
+                    ]
+                    : ["-groupNames", "-json", "-validate", "-all", filePath]
+            )
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(cancellationToken);
 

@@ -30,6 +30,12 @@ internal static class DatabaseScope
         {
             Log.Information("Using {Label} '{DbFile}'", label, dbFile.FullName);
             await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            if (!readOnly)
+            {
+                // Every writing command catalogs files, so an unsupported exiftool stops the run here.
+                await MediaUtilities.EnsureImageHashSupportAsync().ConfigureAwait(false);
+            }
+
             return await work(database).ConfigureAwait(false);
         }
         finally

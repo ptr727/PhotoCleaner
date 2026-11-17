@@ -28,6 +28,14 @@ internal sealed class IndexTask(
         (string sha256, string sha1) = await Database
             .ResolveHashesAsync(filePath, cached, options.Rehash, cancellationToken)
             .ConfigureAwait(false);
+
+        // Metadata is read once per content, so only a new row, new content, or an unread row reads it.
+        // An unchanged row keeps what it holds, which is how an old row backfills exactly once.
+        FileMetadata? metadata =
+            cached is null || sha256 != cached.Sha256 || !cached.MetadataRead
+                ? await ReadMetadataAsync(filePath, cancellationToken).ConfigureAwait(false)
+                : null;
+
         if (cached is null)
         {
             Log.Debug("Inserting '{FilePath}' with SHA-256 '{Sha256}'", filePath, sha256);
@@ -39,7 +47,10 @@ internal sealed class IndexTask(
                         sha1,
                         info.Length,
                         info.LastWriteTimeUtc.Ticks,
-                        options.MarkProcessed
+                        options.MarkProcessed,
+                        metadata?.ContentIdentifier,
+                        metadata?.ImageHash,
+                        metadata is not null
                     ),
                     cancellationToken
                 )
@@ -58,10 +69,19 @@ internal sealed class IndexTask(
                     sha1,
                     info.Length,
                     info.LastWriteTimeUtc.Ticks,
+                    metadata,
                     cancellationToken
                 )
                 .ConfigureAwait(false);
             return (IndexStatus.Updated, sha256, sha1, false);
+        }
+
+        if (metadata is not null)
+        {
+            Log.Debug("Backfilling metadata for '{FilePath}'", filePath);
+            await database
+                .SetMetadataAsync(filePath, metadata, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (info.Length != cached.FileSize || info.LastWriteTimeUtc.Ticks != cached.MtimeTicks)
@@ -86,6 +106,32 @@ internal sealed class IndexTask(
 
         return (IndexStatus.Unchanged, sha256, sha1, cached.IsProcessed);
     }
+
+    // A file exiftool cannot parse stays unread and is retried on the next catalog.
+    // A missing or too old exiftool is not caught, so the run fails instead of storing nothing.
+    private static async Task<FileMetadata?> ReadMetadataAsync(
+        string filePath,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            ExifToolJson? json = await MediaUtilities
+                .GetCatalogExifToolJsonAsync(filePath, cancellationToken)
+                .ConfigureAwait(false);
+            return new FileMetadata(
+                NullIfEmpty(json?.ContentIdentifier),
+                NullIfEmpty(json?.ImageDataHash)
+            );
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log.Warning(ex, "Failed to read metadata for '{FilePath}'", filePath);
+            return null;
+        }
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Design",

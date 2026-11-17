@@ -168,6 +168,9 @@ public sealed class ExifToolJson
 
     public string? ContentIdentifier => QuickTimeContentIdentifier ?? MakerNotesContentIdentifier;
 
+    [JsonPropertyName("File:ImageDataHash")]
+    public string? ImageDataHash { get; set; }
+
     public string FileDetails =>
         $"type='{FileType}', extension='{FileTypeExtension}', MIME='{MIMEType}'";
 

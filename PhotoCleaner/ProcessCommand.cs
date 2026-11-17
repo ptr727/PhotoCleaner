@@ -43,7 +43,14 @@ internal sealed class ProcessCommand(
                                             foundConflicts = FixCaseConflicts();
                                         }
 
-                                        // Process files
+                                        // Phase one catalogs every file, so phase two can pair by the database.
+                                        // A video is then never judged before its still has been seen.
+                                        if (database is not null)
+                                        {
+                                            await CatalogAsync(database).ConfigureAwait(false);
+                                        }
+
+                                        // Phase two processes the files
                                         while (!_fileNames.IsEmpty)
                                         {
                                             await ExecuteProcessAsync(database, trashDatabase)
@@ -187,6 +194,28 @@ internal sealed class ProcessCommand(
             Log.Information("Adding {ReprocessCount} files for reprocessing", reProcessNames.Count);
             _fileNames = reProcessNames;
         }
+    }
+
+    private async Task CatalogAsync(Database database)
+    {
+        List<string> mediaFiles =
+        [
+            .. _fileNames.Where(file =>
+                MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(file))
+            ),
+        ];
+        Log.Information("Cataloging {FileCount} files", mediaFiles.Count);
+        IndexTask indexTask = new(options, database, _skippedExtensions);
+        (int inserted, int updated, int unchanged, _, int failed) = await indexTask
+            .ExecuteAsync(mediaFiles, cancellationToken)
+            .ConfigureAwait(false);
+        Log.Information(
+            "Cataloged {InsertedCount} new, {UpdatedCount} updated, {UnchangedCount} unchanged, {FailedCount} failed",
+            inserted,
+            updated,
+            unchanged,
+            failed
+        );
     }
 
     private bool FixCaseConflicts()

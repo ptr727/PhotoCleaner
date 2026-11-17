@@ -29,7 +29,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `ImmichVerifyScript.cs`: The Node script run inside the Immich image, as const strings. Calls Immich's own compiled `MediaRepository`, `defaults`, and `ThumbnailConfig` rather than reimplementing the preview pipeline, so behavior tracks Immich across releases
   - `VerifyResult.cs`: The AOT-compatible `ImmichVerifyLine` JSON model and its `ImmichVerifyJsonContext` source-generated context, together forming the container's output protocol
   - `IndexTask.cs`: Common DB upsert logic used by `process` and `index` commands. `IndexFileAsync` (single-file) returns `(IndexStatus, sha256, sha1, wasProcessed)`. `ExecuteAsync` (batch parallel) returns `(inserted, updated, unchanged, ignored, failed)`. When `options.MarkProcessed` is true, newly inserted rows are marked `is_processed=1` (used by `index --processed` to seed Process.db).
-  - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`, `file_size`, `mtime_ticks`, `is_processed`), indexes on both hash columns, and size/mtime caching via `ResolveHashesAsync` to skip rehashing unchanged files. Every write computes both sha256 and sha1 in a single read pass. Both columns are non-null.
+  - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`, `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`, `metadata_read`). It indexes the hash, `content_identifier` and `image_hash` columns. Size/mtime caching via `ResolveHashesAsync` skips rehashing unchanged files. Every write computes both sha256 and sha1 in a single read pass. Both columns are non-null. A database written before the catalog columns existed is upgraded in place when a writing command opens it.
   - `TrashDatabase.cs`: Simple SQLite wrapper for Immich trash hashes with a single `trash_hashes` table (`sha1` PRIMARY KEY), used by `trash`, `import`, and `process` commands
   - `ImmichApiModels.cs`: AOT-compatible JSON models for Immich API (`ImmichSearchRequest`, `ImmichSearchResponse`, `ImmichAssetDto`) with `ImmichJsonContext` source generation
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
@@ -69,6 +69,30 @@ rides along with the metadata read. Only an error count fails the file (`Process
 Warnings are logged at debug level, because roughly three quarters of healthy files in a real
 collection carry at least one.
 
+### Two-Phase `process`
+
+When `--db` is given, `ProcessCommand` first catalogs every media file under `--path` in parallel
+through `IndexTask`, then runs the per-file pipeline above. The second phase hits the size and
+mtime cache, so no file is read twice. A video is therefore never judged before its still has
+been seen. Without `--db` there is no catalog phase and the pipeline runs as before.
+
+### Catalog Metadata Columns
+
+`IndexTask.IndexFileAsync` fills `content_identifier` and `image_hash` when it inserts a row or sees new content.
+It uses one exiftool run that returns the JSON metadata and the image data hash (`-ImageDataHash -api ImageHashType=SHA256`). `index`, `import` and `process` all populate
+the columns through this path. Other metadata reads leave the hash flag out, since hashing the
+image data costs extra I/O.
+
+- `metadata_read` separates "not read yet" from "read, tag absent". Rows from an older database
+  start at 0. The next catalog reads them if the file still exists, then sets the flag.
+  A row whose file is gone stays unread.
+- A null `content_identifier` or `image_hash` with `metadata_read = 1` means the tag is absent,
+  which is normal for a format with no image hash.
+- ExifTool 12.63 or newer is required, the release that introduced `ImageDataHash`. An older
+  version fails the run with a message instead of cataloguing nothing.
+- The image hash is catalog-only. Import dedup stays on the whole-file SHA-256.
+- A read-only open of a database in the old shape fails with a message, because it cannot upgrade.
+
 ## State Management Pattern
 
 - **Primary Constructor Parameters**: Command and task classes use C# 12 primary constructors. All task classes take `CommandLine.Options options` as their first parameter, plus any non-option runtime params (e.g., `Database`, shared collections). Command classes take `(CommandLine.Options options, CancellationToken cancellationToken)` and pass `options` directly to task constructors.
@@ -106,8 +130,9 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - Uses `ExifToolJson` class with `JsonPropertyName` attributes for precise metadata field mapping
 - Date validation prioritizes `EXIF:DateTimeOriginal` over `QuickTime:CreateDate`
 - Custom `IsDateSet()` and `GetDateString()` methods handle metadata extraction logic
-- `ContentIdentifier` property maps both `QuickTime:ContentIdentifier` and `Keys:ContentIdentifier`
-  group names (both occur in the wild for ISOBMFF files) returning whichever is set
+- `ContentIdentifier` property maps both `QuickTime:ContentIdentifier` and `MakerNotes:ContentIdentifier`
+  group names (both occur in the wild) returning whichever is set
+- `ImageDataHash` maps `File:ImageDataHash`, which only a catalog read requests (see Catalog Metadata Columns)
 
 ### Date Inference System (DateFromPath.cs)
 
@@ -173,10 +198,11 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 ### Live Photo Detection
 
 - **Short videos** (duration <= `options.ShortVideoDuration`, default `1.0s`, overridable via `--duration`): always deleted regardless of companion file
-- **Companion file search** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file by:
+- **Pairing with `--db`**: the still is the catalog row of a HEIC/JPG/JPEG file whose `content_identifier` equals the video's, whatever its file name or folder. This covers a still with a different stem, in another date folder, or no longer on disk. The video's own `ContentIdentifier` is read from its metadata. If it is missing or no image row matches, the video is kept.
+- **Companion file search without `--db`** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file in the same folder by:
   1. Direct basename match (`IMG_1234.mov` -> `IMG_1234.heic`)
   2. Basename minus `_hevc` suffix (`IMG_1234_HEVC.mov` -> `IMG_1234.heic`), the newer iPhone naming
-- **ContentIdentifier confirmation**: a candidate pair is only deleted when both files expose a `ContentIdentifier` tag that matches exactly. If either file lacks the tag, or the tags differ, the video is kept. There is no fallback to name-only deletion.
+- **ContentIdentifier confirmation** (without `--db`): a candidate pair is only deleted when both files expose a `ContentIdentifier` tag that matches exactly. If either file lacks the tag, or the tags differ, the video is kept. There is no fallback to name-only deletion.
 - **Long videos** (>= `LiveVideoDuration` = 4.0s): always kept even with a matching companion, and a warning is logged
 
 ### Undo Architecture (UndoTask.cs)

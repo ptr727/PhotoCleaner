@@ -215,7 +215,8 @@ internal sealed class ImportTask(
             }
         }
 
-        ExifToolJson? meta = await GetFileMetaAsync(file, cancellationToken).ConfigureAwait(false);
+        ExifToolJson? meta = await GetFileMetaAsync(file, database is not null, cancellationToken)
+            .ConfigureAwait(false);
 
         // Warnings are ignored on purpose, since most healthy files carry them.
         (int validateErrors, _) = ExifToolJson.ParseValidate(meta?.Validate);
@@ -357,7 +358,14 @@ internal sealed class ImportTask(
                                 sha1,
                                 sourceInfo.Length,
                                 sourceInfo.LastWriteTimeUtc.Ticks,
-                                false
+                                false,
+                                string.IsNullOrEmpty(meta?.ContentIdentifier)
+                                    ? null
+                                    : meta.ContentIdentifier,
+                                string.IsNullOrEmpty(meta?.ImageDataHash)
+                                    ? null
+                                    : meta.ImageDataHash,
+                                meta is not null
                             ),
                             cancellationToken
                         )
@@ -377,6 +385,16 @@ internal sealed class ImportTask(
                             sha1,
                             sourceInfo.Length,
                             sourceInfo.LastWriteTimeUtc.Ticks,
+                            meta is null
+                                ? null
+                                : new FileMetadata(
+                                    string.IsNullOrEmpty(meta.ContentIdentifier)
+                                        ? null
+                                        : meta.ContentIdentifier,
+                                    string.IsNullOrEmpty(meta.ImageDataHash)
+                                        ? null
+                                        : meta.ImageDataHash
+                                ),
                             cancellationToken
                         )
                         .ConfigureAwait(false);
@@ -434,16 +452,22 @@ internal sealed class ImportTask(
         return destPath;
     }
 
+    // The image hash is a catalog column, so only a run holding a database asks for it.
     private static async Task<ExifToolJson?> GetFileMetaAsync(
         string filePath,
+        bool imageHash,
         CancellationToken cancellationToken = default
     )
     {
         try
         {
-            return await MediaUtilities
-                .GetExifToolJsonAsync(filePath, cancellationToken)
-                .ConfigureAwait(false);
+            return imageHash
+                ? await MediaUtilities
+                    .GetCatalogExifToolJsonAsync(filePath, cancellationToken)
+                    .ConfigureAwait(false)
+                : await MediaUtilities
+                    .GetExifToolJsonAsync(filePath, cancellationToken)
+                    .ConfigureAwait(false);
         }
         catch (IOException ex)
         {

@@ -381,6 +381,12 @@ internal sealed class ProcessTask(
             return false;
         }
 
+        // With a database the still is found by ContentIdentifier, whatever its name or folder
+        if (database is not null)
+        {
+            return await DeleteLiveVideoByCatalogAsync(duration).ConfigureAwait(false);
+        }
+
         // No matching image candidate then skip
         string? companionPath = FindCompanionImagePath();
         if (companionPath == null)
@@ -442,6 +448,62 @@ internal sealed class ProcessTask(
             duration,
             fileInfo.FullName
         );
+        return DeleteLiveVideo();
+    }
+
+    private async Task<bool> DeleteLiveVideoByCatalogAsync(float duration)
+    {
+        // The row of a still whose file is gone still pairs, since the catalog outlives the file
+        string? videoContentId = _exifToolJson?.ContentIdentifier;
+        if (string.IsNullOrEmpty(videoContentId))
+        {
+            Log.Debug(
+                "No ContentIdentifier, not a live photo video: '{FilePath}'",
+                fileInfo.FullName
+            );
+            return true;
+        }
+
+        string? imagePath = await database!
+            .FindImagePathByContentIdentifierAsync(
+                videoContentId,
+                s_liveVideoImageExtensions,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        if (imagePath is null)
+        {
+            Log.Debug(
+                "No cataloged image has ContentIdentifier '{ContentIdentifier}': '{FilePath}'",
+                videoContentId,
+                fileInfo.FullName
+            );
+            return true;
+        }
+
+        if (duration >= MediaUtilities.LiveVideoDuration)
+        {
+            // Warn in case the video length threshold needs adjustment
+            Log.Warning(
+                "Long {Duration}s video clip has matching image '{ImagePath}': '{FilePath}'",
+                duration,
+                imagePath,
+                fileInfo.FullName
+            );
+            return true;
+        }
+
+        Log.Warning(
+            "Deleting {Duration}s live photo video with matching cataloged image '{ImagePath}': '{FilePath}'",
+            duration,
+            imagePath,
+            fileInfo.FullName
+        );
+        return DeleteLiveVideo();
+    }
+
+    private bool DeleteLiveVideo()
+    {
         if (options.DryRun)
         {
             return false;
