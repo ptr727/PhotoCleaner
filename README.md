@@ -651,16 +651,18 @@ unmodified Originals, and prepares a tagged copy for [Immich][immich-link]. The 
 
 **Run rclone to mirror iCloud Photos**:
 
+<!-- cspell:ignore iclouddrive -->
+
 Configure an `iclouddrive` remote once with `rclone config`, named `icloud` here, then sync with the
-Photos service. The library's All Photos listing lands in one flat directory, without date folders or
-albums:
+Photos service and the library's All Photos listing. The mirror is one flat directory, without date
+folders or albums:
 
 ```shell
 #!/bin/bash
 
 set -Eeuo pipefail
 
-rclone sync icloud: /photos/mirror --iclouddrive-service photos
+rclone sync "icloud:PrimarySync/All Photos" /photos/mirror --iclouddrive-service photos
 ```
 
 rclone has no option for date layout, Live Photo handling, or rendition choice, and it provides no
@@ -671,13 +673,13 @@ hashes, so PhotoCleaner does all of that. The mirror holds:
   `IMG_1234-edited.HEIC` beside `IMG_1234.HEIC`.
 - Each Live Photo's motion video, as a `.MOV`.
 - For a file whose name collides with another, `_<asset id>` inserted before the extension, such as
-  `IMG_1234_AbCdEf.MOV`. The id can contain `+` and a fullwidth slash.
+  `IMG_1234_AbCdEf.MOV`. The id can contain `+` and a full-width slash.
 
-The file modification time is the capture time. PhotoCleaner does not use it to date a file, see the import step.
+The file modification time is the capture time. PhotoCleaner does not use it to date a file. The import step explains why.
 
 **Run PhotoCleaner to sync [Immich][immich-link] trash hashes** (keeps trashed photos out):
 
-The `--trashdb` file must exist before a command names it. Skip this step and drop `--trashdb` from the commands below when Immich is not in use.
+This command creates the `--trashdb` file. The `import` and `process` commands below read it and need it to exist. Skip this step and drop `--trashdb` from them when Immich is not in use.
 
 ```shell
 #!/bin/bash
@@ -715,7 +717,7 @@ docker run --rm \
     --threads 4
 ```
 
-`import` files each file by its embedded date. It skips a file whose whole-file SHA-256 is already in
+`import` organizes each file by its embedded date. It skips a file whose whole-file SHA-256 is already in
 the database, so the flat layout and later renames at the source do not matter. A file with no
 embedded date goes to the no-date folder, `0001/01/0001-01-01` with this format, and stays there.
 File times are deliberately not used as a fallback. Rerun the command after every sync to add new
@@ -761,21 +763,21 @@ docker run --rm \
     --threads 4
 ```
 
-`process` removes a Live Photo video when three things hold. The video is a `.mov` or `.mp4`. The
+`process` removes a Live Photo video when all of these hold. The video is a `.mov` or `.mp4`. The
 process database knows a HEIC, JPG, or JPEG still with the same Apple `ContentIdentifier`. The video
 is under the Live Photo length bound. File names and date folders do not matter. It also removes a
 `.mov` or `.mp4` video at or under the `--duration` threshold. `import` keeps the original and the
 edited rendition. The `-edited` name tells them apart.
 
-The Immich trash database keeps removed photos out in two places. `import` skips a source file whose
-hash is in it. `process` deletes a processed file whose hash is in it. These checks match the
+The Immich trash database keeps removed photos out at import and at process.
+`import` skips a source file whose hash is in it. `process` deletes a processed file whose hash is in it. These checks match the
 whole-file hash. Any change to the bytes of a file defeats them, a metadata-only change or a tag
 written by `import` included. Matching on
 the image data hash instead is tracked in [issue 278][issue-278-link].
 
 **Switching an existing library from another downloader**:
 
-Files already imported under different bytes look new to the import database. One approach worked.
+Files already imported under different bytes look new to the import database. This approach works.
 Run `index` on the new source and on the photo server's stored originals, each into its own
 database, and match the two by `image_hash`. Then record the whole new source in the import database
 with `index --path /photos/mirror --db /photos/db/originals.db`, the database of the mirror import.
