@@ -47,15 +47,9 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
         Directory.CreateDirectory(SourceDir);
         try
         {
-            await MediaUtilities.EnsureImageHashSupportAsync();
             await GenerateImagesAsync();
             await GenerateDngFilesAsync();
             await GenerateVideoFilesAsync();
-        }
-        catch (NotSupportedException ex)
-        {
-            IsAvailable = false;
-            SkipReason = ex.Message;
         }
         catch (Exception ex)
             when (ex is System.ComponentModel.Win32Exception
