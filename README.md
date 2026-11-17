@@ -257,7 +257,7 @@ Options:
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,
   `metadata_read`). An older database gains the new columns in place when a writing command opens it.
-  The next `index`, `import` or `process` run that finds a file backfills its row. The catalog reads metadata with one exiftool
+  The next `index` or `process` run that finds a file backfills its row. The catalog reads metadata with one exiftool
   run, which needs ExifTool 12.63 or newer. The schema is the same for every command.
   The **meaning of the `path` column depends on which command writes the row**, so each
   pipeline stage gets its own DB file:
