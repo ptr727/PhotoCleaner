@@ -520,6 +520,39 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
+    public async Task ProcessCommand_VideoListedBeforeStill_DeletesVideoOfCatalogedPair()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Arrange - neither file is indexed, and the still has a different name and folder
+            string videoPath = Path.Combine(workDir, "a-folder", "IMG_1234_QWJj.mp4");
+            string stillPath = Path.Combine(workDir, "z-folder", "IMG_1234.heic");
+            await CreateVideoAsync(videoPath, "uuid-command");
+            await CreateStillAsync(stillPath, "uuid-command");
+            CommandLine.Options options = CreateOptions(
+                workDir,
+                Path.Combine(workDir, "db", "process.db")
+            );
+
+            // Act
+            int exitCode = await new ProcessCommand(
+                options,
+                TestContext.Current.CancellationToken
+            ).ExecuteAsync();
+
+            // Assert
+            exitCode.Should().Be(0);
+            File.Exists(videoPath).Should().BeFalse();
+            File.Exists(videoPath + ".bak").Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
     public async Task IndexFileAsync_MetadataReadingOff_LeavesRowUnread()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
