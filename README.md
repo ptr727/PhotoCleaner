@@ -644,89 +644,40 @@ docker run --rm \
 
 ## Workflow Example
 
-**Run [kei][kei-link] to download photos from iCloud**:
+The example mirrors an iCloud Photos library with [rclone][rclone-link], archives the mirror as
+unmodified Originals, and prepares a tagged copy for [Immich][immich-link]. The paths are
+`/photos/mirror` (the rclone mirror), `/photos/originals` (the archive), and `/photos/processed`
+(the working copy that `process` changes and Immich imports).
 
-kei keeps its settings in a TOML file rather than on the command line, so the same configuration
-serves the one-shot and the long-running forms. A minimal `config.toml`:
+**Run rclone to mirror iCloud Photos**:
 
-```toml
-[auth]
-username = "your@icloud.email"
-
-[download]
-directory = "/photos"
-folder_structure = "%Y/%m/%Y-%m-%d"
-
-[filters]
-media = ["photos", "videos", "live-photos"]
-
-[photos]
-raw_policy = "prefer-raw"
-
-[watch]
-interval = 86400
-```
-
-Authenticate once, interactively, so the session is stored in the data directory:
+Configure an `iclouddrive` remote once with `rclone config`, named `icloud` here, then sync with the
+Photos service. The library's All Photos listing lands in one flat directory, without date folders or
+albums:
 
 ```shell
 #!/bin/bash
 
 set -Eeuo pipefail
 
-docker run -it --rm --name kei \
-    -v /data/appdata/kei/config:/config \
-    -v /data/media/icloud:/photos \
-    -e KEI_DATA_DIR=/config \
-    ghcr.io/rhoopr/kei:latest \
-    kei login
+rclone sync icloud: /photos/mirror --iclouddrive-service photos
 ```
 
-Then sync on demand:
+rclone has no option for date layout, Live Photo handling, or rendition choice, and it provides no
+hashes, so PhotoCleaner does all of that. The mirror holds:
 
-```shell
-#!/bin/bash
+- Each photo's original.
+- For an edited photo, the edited rendition too, named with `-edited` before the extension, such as
+  `IMG_1234-edited.HEIC` beside `IMG_1234.HEIC`.
+- Each Live Photo's motion video, as a `.MOV`.
+- For a file whose name collides with another, `_<asset id>` inserted before the extension, such as
+  `IMG_1234_AbCdEf.MOV`. The id can contain `+` and a fullwidth slash.
 
-set -Eeuo pipefail
+The file modification time is the capture time. PhotoCleaner does not use it to date a file, see the import step.
 
-docker run -it --rm --name kei \
-    -v /data/appdata/kei/config:/config \
-    -v /data/media/icloud:/photos \
-    -e KEI_DATA_DIR=/config \
-    ghcr.io/rhoopr/kei:latest \
-    kei sync \
-        --config /config/config.toml \
-        --recent 30d
-        # --dry-run to preview without writing
-```
+**Run PhotoCleaner to sync [Immich][immich-link] trash hashes** (keeps trashed photos out):
 
-Or run it as a service that keeps mirroring on the `[watch]` interval:
-
-```yaml
-services:
-  kei:
-    image: ghcr.io/rhoopr/kei:latest
-    container_name: kei
-    restart: unless-stopped
-    environment:
-      - TZ=America/Los_Angeles
-      - KEI_DATA_DIR=/config
-    volumes:
-      - /data/media/icloud:/photos
-      - /data/appdata/kei/config:/config
-    secrets:
-      - icloud_password
-    command:
-      - kei
-      - service
-      - run
-      - --config
-      - /config/config.toml
-      - --password-file
-      - /run/secrets/icloud_password
-```
-
-**Run PhotoCleaner to sync [Immich][immich-link] trash hashes** (optional, prevents re-importing trashed files):
+The `--trashdb` file must exist before a command names it. Skip this step and drop `--trashdb` from the commands below when Immich is not in use.
 
 ```shell
 #!/bin/bash
@@ -734,18 +685,19 @@ services:
 set -Eeuo pipefail
 
 docker run --rm \
-    -v /data/media:/db \
+    -v /photos:/photos \
     photocleaner:latest \
     trash \
     --url http://immich:2283 \
     --apikey $IMMICH_API_KEY \
-    --trashdb /db/trash.db
+    --trashdb /photos/db/trash.db
 ```
 
-**Run PhotoCleaner to import new photos**:
+**Run PhotoCleaner to import the mirror into Originals**:
 
-Copy only new files (not already in the DB and not trashed in Immich) from the download
-directory to an intermediate directory, without touching the downloaded originals:
+A sync removes a file from the mirror when the photo is deleted from iCloud, so the mirror is not an
+archive. Copy it, unmodified and without tags, into an Originals directory organized by date. The
+mirror is only ever read:
 
 ```shell
 #!/bin/bash
@@ -753,19 +705,26 @@ directory to an intermediate directory, without touching the downloaded original
 set -Eeuo pipefail
 
 docker run --rm \
-    -v /data/media/icloud:/icloud \
-    -v /data/media/intermediate:/intermediate \
-    -v /data/media:/db \
+    -v /photos:/photos \
     photocleaner:latest \
     import \
-    --path /icloud \
-    --outpath /intermediate \
-    --db /db/photos.db \
-    --trashdb /db/trash.db \
+    --path /photos/mirror \
+    --outpath /photos/originals \
+    --format yyyy/MM/yyyy-MM-dd \
+    --db /photos/db/originals.db \
     --threads 4
 ```
 
-**Run PhotoCleaner to process the intermediate photos**:
+`import` files each file by its embedded date. It skips a file whose whole-file SHA-256 is already in
+the database, so the flat layout and later renames at the source do not matter. A file with no
+embedded date goes to the no-date folder, `0001/01/0001-01-01` with this format, and stays there.
+File times are deliberately not used as a fallback. Rerun the command after every sync to add new
+files.
+
+**Run PhotoCleaner to import Originals for processing**:
+
+A second `import` copies from Originals into the processing directory and adds tags. It skips files
+whose hash is in the Immich trash database:
 
 ```shell
 #!/bin/bash
@@ -773,12 +732,56 @@ docker run --rm \
 set -Eeuo pipefail
 
 docker run --rm \
-    -v /data/media/intermediate:/intermediate \
+    -v /photos:/photos \
     photocleaner:latest \
-    process \
-    --path /intermediate \
+    import \
+    --path /photos/originals \
+    --outpath /photos/processed \
+    --format yyyy/MM/yyyy-MM-dd \
+    --tags iCloud \
+    --db /photos/db/import.db \
+    --trashdb /photos/db/trash.db \
     --threads 4
 ```
+
+**Run PhotoCleaner to process the imported photos**:
+
+```shell
+#!/bin/bash
+
+set -Eeuo pipefail
+
+docker run --rm \
+    -v /photos:/photos \
+    photocleaner:latest \
+    process \
+    --path /photos/processed \
+    --db /photos/db/process.db \
+    --trashdb /photos/db/trash.db \
+    --threads 4
+```
+
+`process` removes a Live Photo video when three things hold. The video is a `.mov` or `.mp4`. The
+process database knows a HEIC, JPG, or JPEG still with the same Apple `ContentIdentifier`. The video
+is under the Live Photo length bound. File names and date folders do not matter. It also removes a
+`.mov` or `.mp4` video at or under the `--duration` threshold. `import` keeps the original and the
+edited rendition. The `-edited` name tells them apart.
+
+The Immich trash database keeps removed photos out in two places. `import` skips a source file whose
+hash is in it. `process` deletes a processed file whose hash is in it. These checks match the
+whole-file hash. Any change to the bytes of a file defeats them, a metadata-only change or a tag
+written by `import` included. Matching on
+the image data hash instead is tracked in [issue 278][issue-278-link].
+
+**Switching an existing library from another downloader**:
+
+Files already imported under different bytes look new to the import database. One approach worked.
+Run `index` on the new source and on the photo server's stored originals, each into its own
+database, and match the two by `image_hash`. Then record the whole new source in the import database
+with `index --path /photos/mirror --db /photos/db/originals.db`, the database of the mirror import.
+Finally delete the rows of the files that should still be imported. The remaining rows mark files
+that `import` no longer copies, so those files must already be in your archive. This is guidance rather than a supported command sequence, so review
+the matches before deleting any rows.
 
 **Run PhotoCleaner to verify Immich can render the photos**:
 
@@ -794,8 +797,8 @@ set -Eeuo pipefail
 
 rc=0
 PhotoCleaner verify \
-    --path /data/media/intermediate \
-    --db /data/media/verify.db \
+    --path /photos/processed \
+    --db /photos/db/verify.db \
     --threads 4 || rc=$?
 
 case $rc in
@@ -813,7 +816,7 @@ esac
 set -Eeuo pipefail
 
 docker run -it --rm --name immichcli \
-    -v /data/media/Test:/upload:ro \
+    -v /photos/processed:/upload:ro \
     -e IMMICH_INSTANCE_URL=https://your.immich.server/api \
     -e IMMICH_API_KEY=yourapikey \
     -e TZ=America/Los_Angeles \
@@ -848,7 +851,7 @@ immich-go upload from-folder --server=https://your.immich.server \
     --client-timeout=60m \
     --on-errors=continue \
     --include-extensions=.mp4,.mov,.tif,.jpg,.png,.dng,.heif,.heic \
-    /data/media/Test
+    /photos/processed
 ```
 
 ## Questions or Issues
@@ -990,9 +993,10 @@ Licensed under the [MIT License][license]\
 [immich-cli-link]: https://docs.immich.app/features/command-line-interface
 [immich-go-link]: https://github.com/simulot/immich-go
 [immich-link]: https://immich.app
-[kei-link]: https://github.com/rhoopr/kei
+[issue-278-link]: https://github.com/ptr727/PhotoCleaner/issues/278
 [markdownlint-link]: https://github.com/DavidAnson/markdownlint-cli2
 [nbgv-link]: https://github.com/dotnet/Nerdbank.GitVersioning
+[rclone-link]: https://rclone.org
 [serilog-link]: https://serilog.net/
 [sqlite-link]: https://www.sqlite.org/
 [xunit-link]: https://xunit.net/
