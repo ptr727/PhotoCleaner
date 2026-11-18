@@ -105,7 +105,7 @@ The trash database is append-only. A restored asset stays in it until you delete
 
 ## Live Photos
 
-`process` removes a Live Photo's motion video when three things hold. The video is a `.mov` or `.mp4` under the Live Photo length bound of 4 seconds. The process database knows a HEIC, JPG, or JPEG still with the same Apple `ContentIdentifier`. File names and date folders do not matter when `process` runs with `--db`. Without `--db`, it pairs only files in the same folder with the same base name, and confirms them by `ContentIdentifier`. See "Live Photo Detection" in [ARCHITECTURE][architecture-livephoto] for the full rules.
+`process` removes a Live Photo's motion video when three things hold. The video is a `.mov` or `.mp4` under the Live Photo length bound of 4 seconds. The process database knows a HEIC, JPG, or JPEG still with the same Apple `ContentIdentifier`. File names and date folders do not matter when `process` runs with `--db`. Without `--db`, it pairs only files in the same folder with the same base name, or the base name plus `_HEVC`. It confirms each pair by `ContentIdentifier`. See "Live Photo Detection" in [ARCHITECTURE][architecture-livephoto] for the full rules.
 
 A cloud export may deliver the motion parts as short videos with no sidecar of their own. A `.mov` or `.mp4` video at or under the `--duration` threshold is deleted in any case.
 
@@ -114,7 +114,7 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
 - **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
 - **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one, except that `import` with a database skips a copy whose bytes are identical to a file already imported.
-- **`process` renames a file whose extension disagrees with its content.** It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so check a short or static GIF after the run.
+- **`process` renames a file whose extension disagrees with its content.** It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so a short or static GIF can vanish. Keep backups, and check short GIFs before you run with `--skipbackup`.
 - **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
 
 ## Known Issues
