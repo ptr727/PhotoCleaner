@@ -29,7 +29,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         bool move = false,
         bool rehash = false,
         bool tagPath = false,
-        bool datePath = false
+        bool datePath = false,
+        bool imageHash = false
     ) =>
         new()
         {
@@ -53,6 +54,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             ImmichApiKey = null,
             TrashDbFile = null,
             SkipDbFile = null,
+            ImageHash = imageHash,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,
@@ -1729,6 +1731,216 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             Directory.Delete(srcDir, recursive: true);
             Directory.Delete(outDir, recursive: true);
             File.Delete(skipDbPath);
+        }
+    }
+
+    // -- ImageHash: a metadata-only copy matches by image data hash, opt-in only --
+
+    private static async Task<string?> GetImageHashAsync(string filePath) =>
+        (
+            await MediaUtilities.GetCatalogExifToolJsonAsync(
+                filePath,
+                TestContext.Current.CancellationToken
+            )
+        )?.ImageDataHash;
+
+    private async Task<(string original, string copy)> CreateMetadataOnlyCopyAsync(string srcDir)
+    {
+        string original = Path.Combine(srcDir, "original", "IMG_1234.jpg");
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(original)!);
+        File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), original);
+        string copy = Path.Combine(srcDir, "IMG_1234.jpg");
+        File.Copy(original, copy);
+        await SetXmpSubjectAsync(copy, "extra");
+        return (original, copy);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_ImageHash_MetadataOnlyCopyOfImportedFile_SkippedOnlyWhenEnabled(
+        bool imageHash
+    )
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            (string original, string copy) = await CreateMetadataOnlyCopyAsync(srcDir);
+            (string sha256, string sha1) = await Database.ComputeHashesAsync(
+                original,
+                TestContext.Current.CancellationToken
+            );
+            (string copySha256, _) = await Database.ComputeHashesAsync(
+                copy,
+                TestContext.Current.CancellationToken
+            );
+            copySha256.Should().NotBe(sha256);
+            string? originalImageHash = await GetImageHashAsync(original);
+            originalImageHash.Should().NotBeNullOrEmpty();
+            (await GetImageHashAsync(copy)).Should().Be(originalImageHash);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertAsync(
+                new FileRecord(
+                    "/already/imported/IMG_1234.jpg",
+                    sha256,
+                    sha1,
+                    1L,
+                    0L,
+                    false,
+                    ImageHash: originalImageHash,
+                    MetadataRead: true
+                ),
+                TestContext.Current.CancellationToken
+            );
+
+            ImportTask task = new(
+                CreateOptions(outDir, imageHash: imageHash),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, int skipped, _, int trashSkipped, _, int failed, _) =
+                await task.ExecuteAsync(
+                    [copy],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
+
+            organized.Should().Be(imageHash ? 0 : 1);
+            skipped.Should().Be(imageHash ? 1 : 0);
+            trashSkipped.Should().Be(0);
+            failed.Should().Be(0);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_ImageHash_MetadataOnlyCopyOfTrashedFile_SkippedOnlyWhenEnabled(
+        bool imageHash
+    )
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string trashDbPath = TempDb();
+        try
+        {
+            (string original, string copy) = await CreateMetadataOnlyCopyAsync(srcDir);
+            (_, string sha1) = await Database.ComputeHashesAsync(
+                original,
+                TestContext.Current.CancellationToken
+            );
+            string? originalImageHash = await GetImageHashAsync(original);
+            originalImageHash.Should().NotBeNullOrEmpty();
+
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                sha1,
+                "IMG_1234.jpg",
+                originalImageHash,
+                TestContext.Current.CancellationToken
+            );
+
+            ImportTask task = new(
+                CreateOptions(outDir, imageHash: imageHash),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: trashDb,
+                new()
+            );
+            (int organized, _, int skipped, _, int trashSkipped, _, int failed, _) =
+                await task.ExecuteAsync(
+                    [copy],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
+
+            organized.Should().Be(imageHash ? 0 : 1);
+            trashSkipped.Should().Be(imageHash ? 1 : 0);
+            skipped.Should().Be(0);
+            failed.Should().Be(0);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(trashDbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ImageHash_FileWithoutImageHash_NeverMatchesRowsWithoutOne()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        string trashDbPath = TempDb();
+        try
+        {
+            string gif = Path.Combine(srcDir, "clip.gif");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.GifFile), gif);
+            (await GetImageHashAsync(gif)).Should().BeNull();
+
+            // Rows without an image hash, as a format exiftool cannot hash leaves them
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertAsync(
+                new FileRecord(
+                    "/already/imported/other.gif",
+                    "sha256-other",
+                    "sha1-other",
+                    1L,
+                    0L,
+                    false,
+                    MetadataRead: true
+                ),
+                TestContext.Current.CancellationToken
+            );
+            await using TrashDatabase trashDb = new(trashDbPath);
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                "0000000000000000000000000000000000000000",
+                "other.gif",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+
+            ImportTask task = new(
+                CreateOptions(outDir, imageHash: true),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: trashDb,
+                new()
+            );
+            (int organized, _, int skipped, _, int trashSkipped, _, int failed, _) =
+                await task.ExecuteAsync(
+                    [gif],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
+
+            organized.Should().Be(1);
+            skipped.Should().Be(0);
+            trashSkipped.Should().Be(0);
+            failed.Should().Be(0);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+            File.Delete(trashDbPath);
         }
     }
 }

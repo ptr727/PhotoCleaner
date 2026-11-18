@@ -39,6 +39,11 @@ internal sealed class ImportCommand(
                                                 options.DbFile,
                                                 async database =>
                                                 {
+                                                    if (options.ImageHash)
+                                                    {
+                                                        trashDatabase?.WarnIfImageHashMissing();
+                                                    }
+
                                                     ImportTask task = new(
                                                         options,
                                                         database,

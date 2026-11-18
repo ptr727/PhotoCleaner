@@ -26,6 +26,7 @@ internal sealed class CommandLine
     private readonly Option<bool> _markProcessedOption = CreateMarkProcessedOption();
     private readonly Option<FileInfo?> _trashDbFileOption = CreateTrashDbFileOption();
     private readonly Option<FileInfo?> _skipDbFileOption = CreateSkipDbFileOption();
+    private readonly Option<bool> _imageHashOption = CreateImageHashOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -94,7 +95,21 @@ internal sealed class CommandLine
             _durationOption,
             _reprocessOption,
             _trashDbFileOption,
+            _imageHashOption,
         };
+        command.Validators.Add(result =>
+        {
+            if (
+                result.GetValue(_imageHashOption)
+                && (
+                    result.GetValue(_dbFileOption) is null
+                    || result.GetValue(_trashDbFileOption) is null
+                )
+            )
+            {
+                result.AddError("--imagehash requires both --db and --trashdb.");
+            }
+        });
         command.SetAction(
             (parseResult, cancellationToken) =>
                 new ProcessCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
@@ -124,7 +139,19 @@ internal sealed class CommandLine
             _rehashOption,
             _trashDbFileOption,
             _skipDbFileOption,
+            _imageHashOption,
         };
+        command.Validators.Add(result =>
+        {
+            if (
+                result.GetValue(_imageHashOption)
+                && result.GetValue(_dbFileOption) is null
+                && result.GetValue(_trashDbFileOption) is null
+            )
+            {
+                result.AddError("--imagehash requires --db or --trashdb.");
+            }
+        });
         command.SetAction(
             (parseResult, cancellationToken) =>
                 new ImportCommand(CreateOptions(parseResult), cancellationToken).ExecuteAsync()
@@ -195,6 +222,19 @@ internal sealed class CommandLine
             Description = "SQLite database to store Immich trash hashes",
             Required = true,
         };
+        Option<FileInfo?> processDbOption = new("--processdb")
+        {
+            Description =
+                "Process database used to record the image data hash of each trashed asset (read-only)",
+        };
+        processDbOption.Validators.Add(result =>
+        {
+            FileInfo? file = result.GetValue(processDbOption);
+            if (file is not null && !file.Exists)
+            {
+                result.AddError($"File does not exist: '{file.FullName}'");
+            }
+        });
 
         Command command = new("trash", "Sync trashed asset hashes from Immich")
         {
@@ -202,6 +242,7 @@ internal sealed class CommandLine
             apiKeyOption,
             apiKeyFileOption,
             requiredTrashDbOption,
+            processDbOption,
         };
         command.Validators.Add(result =>
         {
@@ -233,6 +274,7 @@ internal sealed class CommandLine
                 new TrashCommand(
                     CreateOptions(
                         parseResult,
+                        dbPathOverride: parseResult.GetValue(processDbOption),
                         immichUrl: parseResult.GetValue(requiredUrlOption),
                         immichApiKey: ResolveApiKey(
                             parseResult.GetValue(apiKeyOption),
@@ -306,6 +348,7 @@ internal sealed class CommandLine
             ImmichApiKey = immichApiKey,
             TrashDbFile = trashDbFile ?? parseResult.GetValue(_trashDbFileOption),
             SkipDbFile = parseResult.GetValue(_skipDbFileOption),
+            ImageHash = parseResult.GetValue(_imageHashOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -420,6 +463,13 @@ internal sealed class CommandLine
         return option;
     }
 
+    private static Option<bool> CreateImageHashOption() =>
+        new("--imagehash")
+        {
+            Description =
+                "Also match files by image data hash, so a copy differing only in metadata counts as already imported or trashed",
+        };
+
     private static Option<bool> CreateReprocessOption() =>
         new("--reprocess") { Description = "Re-run every file even if the database marks it done" };
 
@@ -533,6 +583,9 @@ internal sealed class CommandLine
         public required string? ImmichApiKey { get; init; }
         public required FileInfo? TrashDbFile { get; init; }
         public required FileInfo? SkipDbFile { get; init; }
+
+        // Not required, so an Options built without it keeps whole-file matching only.
+        public bool ImageHash { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

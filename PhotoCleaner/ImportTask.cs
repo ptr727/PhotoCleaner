@@ -147,6 +147,8 @@ internal sealed class ImportTask(
         string? sha256 = null;
         string? sha1 = null;
         FileRecord? cached = null;
+        ExifToolJson? meta = null;
+        bool metaRead = false;
         if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
             // ResolveHashesAsync returns cached hashes when size and mtime still match disk.
@@ -213,10 +215,30 @@ internal sealed class ImportTask(
                     return ImportResult.Skipped;
                 }
             }
+
+            // Opt-in, since equal image data with different metadata is treated as one file.
+            if (options.ImageHash && (trashDatabase is not null || database is not null))
+            {
+                meta = await GetFileMetaAsync(file, true, cancellationToken).ConfigureAwait(false);
+                metaRead = true;
+                ImportResult? imageHashResult = await CheckImageHashAsync(
+                        file,
+                        FileMetadata.FromExifTool(meta)?.ImageHash,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+                if (imageHashResult is not null)
+                {
+                    return imageHashResult.Value;
+                }
+            }
         }
 
-        ExifToolJson? meta = await GetFileMetaAsync(file, database is not null, cancellationToken)
-            .ConfigureAwait(false);
+        if (!metaRead)
+        {
+            meta = await GetFileMetaAsync(file, database is not null, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         // Warnings are ignored on purpose, since most healthy files carry them.
         (int validateErrors, _) = ExifToolJson.ParseValidate(meta?.Validate);
@@ -421,6 +443,52 @@ internal sealed class ImportTask(
             );
             return ImportResult.Failed;
         }
+    }
+
+    private async Task<ImportResult?> CheckImageHashAsync(
+        string file,
+        string? imageHash,
+        CancellationToken cancellationToken
+    )
+    {
+        if (string.IsNullOrEmpty(imageHash))
+        {
+            Log.Debug("No image data hash for '{FilePath}'", file);
+            return null;
+        }
+
+        if (
+            trashDatabase is not null
+            && await trashDatabase
+                .ImageHashExistsAsync(imageHash, cancellationToken)
+                .ConfigureAwait(false)
+        )
+        {
+            Log.Information(
+                "Skipping file trashed in Immich '{FilePath}' with image data hash '{ImageHash}'",
+                file,
+                imageHash
+            );
+            return ImportResult.TrashedInImmich;
+        }
+
+        string? knownPath = database is null
+            ? null
+            : await database
+                .FindPathByImageHashAsync(imageHash, cancellationToken)
+                .ConfigureAwait(false);
+        if (knownPath is not null)
+        {
+            Log.Information(
+                "Skipping already imported '{FilePath}' with image data hash '{ImageHash}' matching '{KnownPath}'",
+                file,
+                imageHash,
+                knownPath
+            );
+            return ImportResult.Skipped;
+        }
+
+        return null;
     }
 
     private string BuildDestinationPath(

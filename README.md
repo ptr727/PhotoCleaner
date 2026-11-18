@@ -85,11 +85,14 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
   absent (opt-in, applied before the file is moved to a date-based directory so the source
   path is still available).
+  The opt-in `--imagehash` also skips a file whose image data hash is already in the database.
 - **Syncs Immich trash hashes** (via `trash` command): Connects to an Immich server via its
   REST API, fetches all trashed asset checksums (SHA-1), and stores them in a local SQLite
   database. This trash DB can then be used with `import --trashdb` to skip files that were
   already imported and trashed in Immich, and with `process --trashdb` to delete files trashed
   in Immich after upload, preventing re-import of known duplicates.
+  With `--processdb`, `trash` also records each trashed asset's image data hash, which
+  `--imagehash` then matches.
 - **Verifies files render in Immich** (via `verify` command): Answers whether a file will survive
   Immich's preview generation, which metadata checks cannot predict. Immich's own thumbnail
   pipeline is run inside the `immich-server` image, so the verdict is the one Immich will reach
@@ -148,6 +151,7 @@ Options:
   --duration <duration>         Maximum duration in seconds below which a video is considered a short clip and deleted [default: 1]
   --reprocess                   Re-run every file even if the database marks it done
   --trashdb <trashdb>           SQLite database with Immich trash hashes (read-only)
+  --imagehash                   Also match files by image data hash, so a copy differing only in metadata counts as already imported or trashed
 ```
 
 ```text
@@ -180,6 +184,7 @@ Options:
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
   --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
   --skipdb <skipdb>              SQLite database with indexed files to be skipped (read-only)
+  --imagehash                    Also match files by image data hash, so a copy differing only in metadata counts as already imported or trashed
 ```
 
 ```text
@@ -205,6 +210,7 @@ Options:
   --apikey <apikey>              Immich API key (mutually exclusive with --apikey-file)
   --apikey-file <apikey-file>    File containing the Immich API key (mutually exclusive with --apikey)
   --trashdb <trashdb> (REQUIRED) SQLite database to store Immich trash hashes
+  --processdb <processdb>        Process database used to record the image data hash of each trashed asset (read-only)
 ```
 
 ```text
@@ -264,6 +270,7 @@ Options:
   pipeline stage gets its own DB file:
   - **Import.db** (`import --db Import.db`): rows are keyed by SOURCE path. `sha256` is the
     source content hash. Dedup query: skip a source whose `sha256` is already in this DB.
+    With `--imagehash`, a source whose `image_hash` is in this DB is skipped too.
   - **Process.db** (`process --db Process.db`): rows are keyed by DEST path. `sha256` is the
     current dest content hash. `is_processed = 1` means the dest file's pipeline ran to completion.
     `--reprocess` ignores the flag.
@@ -285,7 +292,8 @@ Options:
     SHA-1 differs from the source SHA-1. The hash Immich stored on a prior upload (and therefore
     the hash that ends up in the trash DB) is the rewritten dest SHA-1, so the source-side trash
     check will not match. Those files are caught by `process --trashdb` instead, which hashes the
-    dest file directly.
+    dest file directly. With `--imagehash` and a trash DB synced with `--processdb`, `import`
+    matches them by image data hash instead.
   - For `process`: files matching a trash hash are deleted from disk. This cleans up files
     trashed in Immich after upload, before the next `immich-cli` upload would re-upload them.
     It also acts as the safety net for files that `import --trashdb` could not match because
@@ -295,6 +303,23 @@ Options:
 - `--skipdb <path>`: optional for `import`. Path to a SQLite database with indexed files
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
+- `--imagehash`: optional (`import`, `process`). Also matches files by the image data hash, which
+  ExifTool computes from the image data alone and stores in `image_hash`. Two files with equal
+  image data and different metadata then count as one file. This match is deliberately weaker
+  than a byte match, so it is opt-in and default runs match by whole-file hash only.
+  - For `import`, a source whose image data hash is in `--trashdb` is skipped as trashed in Immich.
+    A source whose image data hash is in `--db` is skipped as already imported, and the log names
+    the row it matched. Requires `--db` or `--trashdb`.
+  - For `process`, a file whose cataloged image data hash is in `--trashdb` is deleted like a
+    SHA-1 match. Requires both `--db` and `--trashdb`.
+  - The whole-file checks run first. A format ExifTool cannot hash has no image data hash, so it
+    keeps whole-file matching only. An empty hash never matches.
+  - A trash DB holds image data hashes only when `trash` ran with `--processdb`.
+- `--processdb <path>`: optional (`trash` only). Path to the Process.db of the files that were
+  uploaded, opened read-only. For each trashed asset, `trash` looks up the row with the asset's
+  SHA-1 and records that row's `image_hash` in the trash DB. An asset with no such row, or a row
+  with no image hash, is recorded by SHA-1 alone. A later run with this option fills the image
+  hash of a row recorded without it. Without this option `trash` records SHA-1 hashes only.
 - `--url <url>`: **required** for `trash`. The Immich server URL (e.g. `http://immich:2283`).
 - `--apikey <key>` / `--apikey-file <path>`: the Immich API key for `trash`. Supply it via
   exactly one of these two mutually exclusive options (one is required). Create the key in Immich
@@ -402,6 +427,12 @@ PhotoCleaner trash --url http://immich:2283 --apikey-file /secrets/immich_api_ke
 # Import and skip files that were trashed in Immich (prevents re-import)
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --db /data/photos.db --trashdb /data/trash.db
 
+# Sync Immich trash hashes, also recording each asset's image data hash from the process database
+PhotoCleaner trash --url http://immich:2283 --apikey-file /secrets/immich_api_key.txt --trashdb /data/trash.db --processdb /data/process.db
+
+# Import and also skip files whose image data matches an imported or trashed file (opt-in)
+PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --db /data/photos.db --trashdb /data/trash.db --imagehash
+
 # Import and skip files already in another collection (read-only reference)
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --skipdb /data/existing-collection.db
 
@@ -496,6 +527,9 @@ directories to `outpath/date/filename`:
      hash, size, and mtime. This is the load-bearing detail: rows in Import.db identify
      sources, not destinations, so subsequent runs of `process`/`index` against a separate
      Process.db cannot clobber the dedup key. The DB file is created automatically on first use.
+   - `--imagehash` (opt-in): when the whole-file checks find no match, the source's image data
+     hash is read with exiftool. A match in the trash DB counts as trashed in Immich. A match in
+     Import.db counts as skipped, and the log names the matched row.
 3. **Date resolution**: reads EXIF metadata via `exiftool`. Uses `EXIF:DateTimeOriginal` or
    `QuickTime:CreateDate` (whichever is set). Falls back to `DateTime.MinValue` when no date
    is found. Those files land in a `"0001/01/01"` bucket (with the default `yyyy/MM/dd` format),
@@ -528,13 +562,20 @@ were already imported and trashed in Immich.
 2. **Fetch**: paginates through `POST /api/search/metadata` with a `trashedAfter` filter to
    retrieve all trashed assets. Each page returns up to 1000 assets.
 3. **Store**: converts each asset's Base64-encoded SHA-1 checksum to lowercase hex and inserts
-   it into the `trash_hashes` table using `INSERT OR IGNORE`. The operation is idempotent -
-   running `trash` again safely adds any newly trashed assets.
+   it into the `trash_hashes` table, keeping a row that already exists. The operation is
+   idempotent, so running `trash` again safely adds any newly trashed assets.
+   With `--processdb`, the row also gets the `image_hash` of the processed file with that SHA-1.
+   A row recorded without one gains it on a later run with `--processdb`.
 4. **Report**: logs the total number of fetched assets, newly inserted hashes, and total
    hash count in the database.
 
+The `trash_hashes` table holds `sha1` (the primary key), `original_file_name`, and `image_hash`.
+An older trash database gains the `image_hash` column in place when `trash` opens it. `import` and
+`process` open it read-only, so until then `--imagehash` logs a warning and matches by SHA-1 only.
+
 The trash database is append-only. If an asset is restored (un-trashed) in Immich, its hash
 remains in the database. Delete its row to un-block it. Deleting the database file and re-running `trash` also drops the hashes of purged assets.
+With `--imagehash`, also delete any other row carrying the same `image_hash`.
 
 ## Verify Flow
 
@@ -779,7 +820,9 @@ The Immich trash database keeps removed photos out at import and at process.
 `import` skips a source file whose hash is in it. `process` deletes a processed file whose hash is
 in it. These checks match the whole-file hash, so a file whose bytes differ from the trashed one is
 not matched. A tag written by `import` changes the bytes too, so `process` is the check that sees
-the files Immich holds. Matching on the image data hash instead is tracked in [issue 278][issue-278-link].
+the files Immich holds. To also match by image data hash, pass `--processdb` to `trash` and
+`--imagehash` to `import` and `process`. A trashed photo then stays out when only its metadata
+differs, including the untagged source of a tagged upload.
 
 **Adopting a new source for an existing library**:
 
@@ -790,6 +833,10 @@ database of the import into the processing directory, `import.db` above. Finally
 imported. This is guidance rather than a supported command sequence, so review the matches before
 deleting any rows. The [Operations Guide][guide] covers building an Originals archive and removing duplicates
 against a photo server.
+
+Where the new bytes differ only in metadata, `import --imagehash` skips them without this step.
+The import database records the `image_hash` of each source it imports. A row written before that
+column existed holds none until `index` reads its file again. A re-encoded copy still looks new.
 
 **Run PhotoCleaner to verify Immich can render the photos**:
 
@@ -1002,7 +1049,6 @@ Licensed under the [MIT License][license]\
 [immich-cli-link]: https://docs.immich.app/features/command-line-interface
 [immich-go-link]: https://github.com/simulot/immich-go
 [immich-link]: https://immich.app
-[issue-278-link]: https://github.com/ptr727/PhotoCleaner/issues/278
 [markdownlint-link]: https://github.com/DavidAnson/markdownlint-cli2
 [nbgv-link]: https://github.com/dotnet/Nerdbank.GitVersioning
 [rclone-link]: https://rclone.org

@@ -10,7 +10,7 @@ public sealed class TrashCommandTests
     private static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"trashcmd_{Path.GetRandomFileName()}.db");
 
-    private static CommandLine.Options CreateOptions(string dbPath) =>
+    private static CommandLine.Options CreateOptions(string dbPath, string? processDbPath = null) =>
         new()
         {
             Path = new DirectoryInfo(Path.GetTempPath()),
@@ -24,7 +24,7 @@ public sealed class TrashCommandTests
             Move = false,
             TagPath = false,
             Tags = null,
-            DbFile = null,
+            DbFile = processDbPath is null ? null : new FileInfo(processDbPath),
             Rehash = false,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
@@ -312,6 +312,70 @@ public sealed class TrashCommandTests
         finally
         {
             File.Delete(dbPath);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_ProcessDb_RecordsImageHashOnlyWhenGiven(bool withProcessDb)
+    {
+        string dbPath = TempDb();
+        string processDbPath = TempDb();
+        try
+        {
+            byte[] sha1a = new byte[20];
+            sha1a[0] = 0x01;
+            byte[] sha1b = new byte[20];
+            sha1b[0] = 0x02;
+
+            // The process database knows the uploaded file behind the first asset only
+            await using (Database processDb = new(processDbPath))
+            {
+                await processDb.InitializeAsync(TestContext.Current.CancellationToken);
+                await processDb.InsertAsync(
+                    new FileRecord(
+                        "/processed/IMG_1234.HEIC",
+                        "sha256-a",
+                        Convert.ToHexStringLower(sha1a),
+                        10L,
+                        0L,
+                        true,
+                        ImageHash: "imagehash-a",
+                        MetadataRead: true
+                    ),
+                    TestContext.Current.CancellationToken
+                );
+            }
+
+            using MockImmichHandler handler = new();
+            handler.EnqueueResponse(
+                MakeResponse([Convert.ToBase64String(sha1a), Convert.ToBase64String(sha1b)])
+            );
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath, withProcessDb ? processDbPath : null),
+                TestContext.Current.CancellationToken,
+                client
+            );
+            int exitCode = await command.ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            (await db.GetCountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+            (await db.ImageHashExistsAsync("imagehash-a", TestContext.Current.CancellationToken))
+                .Should()
+                .Be(withProcessDb);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(processDbPath);
         }
     }
 

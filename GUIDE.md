@@ -43,6 +43,8 @@ Moving to a new source for a library that the photo server already holds risks a
 
 Compare the catalogs with SQLite, using the `files` table of each database. Review the matches before you act on them.
 
+`import --imagehash` applies the second key against the import database during the import itself. It skips a source whose `image_hash` a row already holds, and logs the row it matched. It is opt-in, because two files with equal image data and different metadata then count as one.
+
 An import database records that bytes were imported once. It does not record that an upload succeeded or that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Confirm the upload first. Evidence is that the photo server holds the asset in its library or its trash, found by checksum or by the visual comparison below. The upload tool's own log showing the upload is evidence too, and so is a `trash_hashes` row for the uploaded file. Import history alone is not evidence. Then skip the file rather than re-importing it.
 
 ## Re-encoded Copies and the Limits of Each Key
@@ -102,9 +104,11 @@ The `trash` command syncs the hashes of the assets that are in the photo server'
 
 The server stores and trashes the tagged copy that was uploaded, so its hash differs from the untagged source that `import` reads. `process` reads the tagged files, so it is the check that matches what the server holds. Pass `--trashdb` to `process` as well as to `import`, and give `process` a `--db` too. It checks the trash database only when it has a database.
 
+To match by image data as well, run `trash` with `--processdb` naming the process database. It then records the `image_hash` of each trashed processed file. Pass `--imagehash` to `import` and `process` to treat a file with a recorded `image_hash` as trashed. This catches a copy whose metadata differs, such as the untagged source of a tagged upload. A format ExifTool cannot hash has no `image_hash` and is still matched by SHA-1 alone.
+
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
-The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex. Run `sha1sum` on the restored original downloaded from the server, which prints that form. A file name can repeat, so do not select the row by name.
+The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex. Run `sha1sum` on the restored original downloaded from the server, which prints that form. A file name can repeat, so do not select the row by name. With `--imagehash`, also delete any other row carrying the same `image_hash`.
 
 ## Live Photos
 
