@@ -30,7 +30,7 @@ Never run `process`, or any other command that changes files, on the mirror or o
 
 An `import` from the mirror skips every file whose whole-file SHA-256 is already in its database. A rename at the source therefore adds no second copy. Rerun the command after each sync to add what is new.
 
-Pass `--trashdb` to both imports where a trash database exists. A file whose hash is in the trash database is never copied. The [Workflow Example][readme-workflow] lists the commands for the whole chain with rclone as the source.
+Leave `--trashdb` off the import into Originals, so the archive keeps every file the mirror delivered, including one the owner later trashed. Pass `--trashdb` to the second import and to `process`, where a trash database exists. See "Keeping Removed Photos Out" for what each check can match. The [Workflow Example][readme-workflow] lists the commands for the whole chain with rclone as the source.
 
 ## Adopting a New Source for a Library the Server Already Holds
 
@@ -86,7 +86,7 @@ In the same migration, the owner reviewed the whole remainder and rejected all o
 Use this to tell an import database that a whole source is known, and then un-mark the files that should still import.
 
 1. Run `index` over the whole source into the import database, for example `index --path /mnt/photos/newsource --db /mnt/photos/db/import.db`.
-1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one.
+1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one. Import skips a file whose SHA-256 is in any row, so also delete the rows of every byte-identical twin, such as a `(1)` copy.
 1. Run `import` with `--dryrun` and check that its count matches the number of rows you deleted.
 1. Run `import` for real.
 1. Run `import` again and confirm that it imports nothing.
@@ -95,7 +95,9 @@ Add `--tags` with a tag of its own, for example `--tags newsource`, to the real 
 
 ## Keeping Removed Photos Out
 
-The `trash` command syncs the hashes of the assets that are in the photo server's trash into a trash database. `import` and `process` both take `--trashdb`. `import` skips a source file whose hash is in it, and `process` deletes a matching processed file.
+The `trash` command syncs the hashes of the assets that are in the photo server's trash into a trash database. `import` and `process` both take `--trashdb`. `import` skips a source file whose hash is in it, and `process` deletes a matching processed file. Both compare the whole-file SHA-1.
+
+A tag written by `import` changes the bytes, so a tagged copy no longer matches the hash of what the server trashed. `process` is the check that sees the files the server holds. Pass `--trashdb` to `process` as well as to `import`.
 
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
@@ -103,17 +105,17 @@ The trash database is append-only. A restored asset stays in it until you delete
 
 ## Live Photos
 
-`process` removes a Live Photo's motion video when the process database knows a still with the same Apple `ContentIdentifier`. File names and date folders do not matter. See "Live Photo Detection" in [ARCHITECTURE][architecture-livephoto] for the full rules.
+`process` removes a Live Photo's motion video when three things hold. The video is a `.mov` or `.mp4` under the Live Photo length bound of 4 seconds. The process database knows a HEIC, JPG, or JPEG still with the same Apple `ContentIdentifier`. File names and date folders do not matter. See "Live Photo Detection" in [ARCHITECTURE][architecture-livephoto] for the full rules.
 
-A cloud export may deliver the motion parts as short videos with no sidecar of their own. Videos at or under the `--duration` threshold are deleted in any case.
+A cloud export may deliver the motion parts as short videos with no sidecar of their own. A `.mov` or `.mp4` video at or under the `--duration` threshold is deleted in any case.
 
 ## What to Check in a Cloud Export Before Importing
 
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
-- **A file with no embedded date lands in the no-date folder.** With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
-- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one.
-- **`process` renames a file whose extension disagrees with its content.** It also converts animated GIFs to video.
-- **Short videos are deleted.** A video at or under the `--duration` threshold is removed, one second by default.
+- **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
+- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one, except that `import` with a database skips a copy whose bytes are identical to a file already imported.
+- **`process` renames a file whose extension disagrees with its content.** It also converts every GIF to an MP4 video, animated or not.
+- **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
 
 ## Known Issues
 
