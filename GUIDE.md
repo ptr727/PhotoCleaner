@@ -85,7 +85,7 @@ In the same migration, the owner reviewed the whole remainder and rejected all o
 
 Use this to tell an import database that a whole source is known, and then un-mark the files that should still import.
 
-1. Run `index` over the whole source into the import database, for example `index --path /mnt/photos/newsource --db /mnt/photos/db/import.db`.
+1. Run `index` over the whole source into the database of the import into the processing directory, not the one for Originals. For example `index --path /mnt/photos/newsource --db /mnt/photos/db/import.db`.
 1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one. Import skips a file whose SHA-256 is in any row, so also delete the rows of every byte-identical twin, such as a `(1)` copy.
 1. Run `import` with `--dryrun` and check that its count matches the number of rows you deleted.
 1. Run `import` for real.
@@ -97,7 +97,7 @@ Add `--tags` with a tag of its own, for example `--tags newsource`, to the real 
 
 The `trash` command syncs the hashes of the assets that are in the photo server's trash into a trash database. `import` and `process` both take `--trashdb`. `import` skips a source file whose hash is in it, and `process` deletes a matching processed file. Both compare the whole-file SHA-1.
 
-A tag written by `import` changes the bytes, so a tagged copy no longer matches the hash of what the server trashed. `process` is the check that sees the files the server holds. Pass `--trashdb` to `process` as well as to `import`.
+The server stores and trashes the tagged copy that was uploaded, so its hash differs from the untagged source that `import` reads. `process` reads the tagged files, so it is the check that matches what the server holds. Pass `--trashdb` to `process` as well as to `import`.
 
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
@@ -120,7 +120,7 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 ## Known Issues
 
 - [Issue 280][issue-280-link]: a rename collision with `--skipbackup` deletes the file that holds the target name. Check for same-stem files first, or keep the backups.
-- [Issue 281][issue-281-link]: an animated GIF with an odd width or height fails conversion.
+- [Issue 281][issue-281-link]: a GIF with an odd width or height fails conversion, animated or not.
 
 <!-- Repo -->
 
