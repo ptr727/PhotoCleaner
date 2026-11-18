@@ -62,8 +62,8 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   (MIME type) and normalizes to the preferred extension (e.g. `.jpeg` -> `.jpg`). It also
   strips compound extensions (e.g. `photo.heic.jpg` -> `photo.jpg`). When another file already holds
   the corrected name, the renamed file takes the next free name (e.g. `photo_1.jpg`).
-- **Renames mixed-case extensions**: Converts uppercase or mixed-case extensions to lowercase
-  (e.g. `.JPG` -> `.jpg`).
+- **Renames mixed-case extensions**: Converts mixed-case extensions to lowercase
+  (e.g. `.Jpg` -> `.jpg`). An all-uppercase extension such as `.JPG` is kept.
 - **Handles Live Photos**: Removes Apple Live Photo video components. Videos <= 1s are always
   removed. Videos <= 4s with a companion image are removed when both files share the same
   `ContentIdentifier` EXIF tag. With `--db` the image is found by that tag in the database,
