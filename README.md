@@ -786,8 +786,8 @@ Run `index` on the new source and on the photo server's stored originals, each i
 database, and match the two by `image_hash`. Then record the mirror with `index` in the
 database of the import into the processing directory, `import.db` above. Finally delete the rows of the files that should still be
 imported. This is guidance rather than a supported command sequence, so review the matches before
-deleting any rows. A fuller guide to building an Originals archive and to removing duplicates
-against a photo server is planned as separate documentation.
+deleting any rows. The [Operations Guide][guide] covers building an Originals archive and removing duplicates
+against a photo server.
 
 **Run PhotoCleaner to verify Immich can render the photos**:
 
@@ -976,6 +976,7 @@ Licensed under the [MIT License][license]\
 
 <!-- Repo -->
 
+[guide]: ./GUIDE.md
 [history]: ./HISTORY.md
 [license]: ./LICENSE
 
