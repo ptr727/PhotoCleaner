@@ -26,6 +26,7 @@ internal sealed class VerifyCommand(
                             return await task.ExecuteAsync(files, cancellationToken)
                                 .ConfigureAwait(false);
                         },
+                        catalogsMetadata: false,
                         cancellationToken: cancellationToken
                     )
                     .ConfigureAwait(false);

@@ -1263,10 +1263,10 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         deferred.First().Should().BeOneOf("/photos/IMG.jpg", "/photos/IMG.dng");
     }
 
-    // -- TrashDb: file matching trash hash is deleted from disk and DB --------
+    // -- TrashDb: file matching trash hash is deleted from disk, its row stays --
 
     [Fact]
-    public async Task ExecuteAsync_TrashDb_MatchingFile_DeletedFromDiskAndDb()
+    public async Task ExecuteAsync_TrashDb_MatchingFile_DeletedFromDiskAndRowKept()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
         string dbPath = Path.Combine(workDir, "Process.db");
@@ -1305,7 +1305,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 filePath,
                 cancellationToken: TestContext.Current.CancellationToken
             );
-            row.Should().BeNull();
+            row.Should().NotBeNull();
         }
         finally
         {

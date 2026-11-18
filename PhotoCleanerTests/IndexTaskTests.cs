@@ -59,7 +59,12 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
-            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask task = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
 
             (IndexStatus status, string sha256, string? sha1, bool wasProcessed) =
                 await task.IndexFileAsync(
@@ -94,7 +99,12 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
-            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask task = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
 
             // First call inserts
             await task.IndexFileAsync(
@@ -130,7 +140,12 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
-            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask task = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
 
             // Insert and mark as processed
             await task.IndexFileAsync(
@@ -186,7 +201,12 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
-            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask task = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
 
             await task.IndexFileAsync(
                 filePath,
@@ -223,7 +243,12 @@ public sealed class IndexTaskTests
             await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             // Insert with no-rehash first
-            IndexTask noRehashTask = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask noRehashTask = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
             (_, string firstHash, _, _) = await noRehashTask.IndexFileAsync(
                 filePath,
                 cancellationToken: TestContext.Current.CancellationToken
@@ -233,7 +258,8 @@ public sealed class IndexTaskTests
             IndexTask rehashTask = new(
                 CreateOptions(rehash: true),
                 db,
-                new SkippedExtensionTracker()
+                new SkippedExtensionTracker(),
+                readMetadata: false
             );
             (IndexStatus status, string rehashResult, _, _) = await rehashTask.IndexFileAsync(
                 filePath,
@@ -260,7 +286,12 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
-            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask task = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
 
             (int inserted, int updated, int unchanged, int ignored, int failed) =
                 await task.ExecuteAsync(
@@ -294,7 +325,8 @@ public sealed class IndexTaskTests
             IndexTask task = new(
                 CreateOptions(markProcessed: true),
                 db,
-                new SkippedExtensionTracker()
+                new SkippedExtensionTracker(),
+                readMetadata: false
             );
 
             (IndexStatus status, _, _, bool wasProcessed) = await task.IndexFileAsync(
@@ -331,7 +363,12 @@ public sealed class IndexTaskTests
             await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             // Insert WITHOUT --processed (is_processed = 0).
-            IndexTask noFlag = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask noFlag = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
             await noFlag.IndexFileAsync(
                 filePath,
                 cancellationToken: TestContext.Current.CancellationToken
@@ -342,7 +379,8 @@ public sealed class IndexTaskTests
             IndexTask withFlag = new(
                 CreateOptions(markProcessed: true),
                 db,
-                new SkippedExtensionTracker()
+                new SkippedExtensionTracker(),
+                readMetadata: false
             );
             (IndexStatus status, _, _, bool wasProcessed) = await withFlag.IndexFileAsync(
                 filePath,
@@ -376,7 +414,12 @@ public sealed class IndexTaskTests
         {
             await using Database db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
-            IndexTask task = new(CreateOptions(), db, new SkippedExtensionTracker());
+            IndexTask task = new(
+                CreateOptions(),
+                db,
+                new SkippedExtensionTracker(),
+                readMetadata: false
+            );
 
             // Pre-insert changedFile and unchangedFile
             await task.IndexFileAsync(

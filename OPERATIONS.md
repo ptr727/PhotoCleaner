@@ -87,7 +87,7 @@ The operational point is that `0` and `2` both mean the command ran to completio
 
 The application shells out to external tools rather than reimplementing them, so their versions decide its behavior:
 
-- **exiftool** reads and writes metadata, invoked through `MediaUtilities.GetExifToolJsonAsync`. It is installed in the Docker image, and a native run needs it on `PATH`.
+- **exiftool** reads and writes metadata, invoked through `MediaUtilities.GetExifToolJsonAsync`. It is installed in the Docker image, and a native run needs it on `PATH`. Catalog reads need version 12.63 or newer for `ImageDataHash`.
 - **ffmpeg** handles video, and is installed in the image alongside exiftool.
 - **Docker** is a runtime dependency of `verify` alone, which runs the Immich decoder inside the `immich-server` image. The preflight exits `1` when the `docker` command is missing or the image cannot be prepared, so an unreachable daemon fails the run rather than condemning files.
 

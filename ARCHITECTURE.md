@@ -29,7 +29,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `ImmichVerifyScript.cs`: The Node script run inside the Immich image, as const strings. Calls Immich's own compiled `MediaRepository`, `defaults`, and `ThumbnailConfig` rather than reimplementing the preview pipeline, so behavior tracks Immich across releases
   - `VerifyResult.cs`: The AOT-compatible `ImmichVerifyLine` JSON model and its `ImmichVerifyJsonContext` source-generated context, together forming the container's output protocol
   - `IndexTask.cs`: Common DB upsert logic used by `process` and `index` commands. `IndexFileAsync` (single-file) returns `(IndexStatus, sha256, sha1, wasProcessed)`. `ExecuteAsync` (batch parallel) returns `(inserted, updated, unchanged, ignored, failed)`. When `options.MarkProcessed` is true, newly inserted rows are marked `is_processed=1` (used by `index --processed` to seed Process.db).
-  - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`, `file_size`, `mtime_ticks`, `is_processed`), indexes on both hash columns, and size/mtime caching via `ResolveHashesAsync` to skip rehashing unchanged files. Every write computes both sha256 and sha1 in a single read pass. Both columns are non-null.
+  - `Database.cs`: SQLite wrapper with a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`, `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`, `metadata_read`). It indexes the hash, `content_identifier` and `image_hash` columns. Size/mtime caching via `ResolveHashesAsync` skips rehashing unchanged files. Every write computes both sha256 and sha1 in a single read pass. Both columns are non-null. A database written before the catalog columns existed is upgraded in place when a writing command opens it.
   - `TrashDatabase.cs`: Simple SQLite wrapper for Immich trash hashes with a single `trash_hashes` table (`sha1` PRIMARY KEY), used by `trash`, `import`, and `process` commands
   - `ImmichApiModels.cs`: AOT-compatible JSON models for Immich API (`ImmichSearchRequest`, `ImmichSearchResponse`, `ImmichAssetDto`) with `ImmichJsonContext` source generation
   - `DateFromPath.cs`: Static utility class for date inference from filenames/paths
@@ -50,6 +50,8 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `TrashCommandTests.cs`: TrashCommand tests with mock HTTP handler
   - `DirectoryCleanerTests.cs`: DirectoryCleaner static helper tests
   - `VerifyTaskTests.cs`: Verify protocol parsing and script-contract tests
+  - `LivePhotoCatalogTests.cs`: Live Photo pairing through the catalog and the catalog columns, needs exiftool and ffmpeg
+  - `CatalogSchemaTests.cs`: In-place schema upgrade and metadata mapping tests, need no external tools
 
 ## Core Processing Pipeline
 
@@ -68,6 +70,31 @@ Before that chain runs, `CheckExifToolValidation` acts on the `ExifTool:Validate
 rides along with the metadata read. Only an error count fails the file (`ProcessResult.Invalid`).
 Warnings are logged at debug level, because roughly three quarters of healthy files in a real
 collection carry at least one.
+
+### Two-Phase `process`
+
+When `--db` is given, `ProcessCommand` first catalogs every media file under `--path` in parallel
+through `IndexTask`, then runs the per-file pipeline above. The second phase hits the size and
+mtime cache, so catalog metadata is read once. Hashes are computed once without `--rehash`. A video is therefore never judged before its still has
+been seen. Without `--db` there is no catalog phase and the pipeline runs as before.
+A new file costs two exiftool runs, one in the catalog and one in the pipeline, because parsed metadata is not carried across phases.
+
+### Catalog Metadata Columns
+
+`IndexTask.IndexFileAsync` fills `content_identifier` and `image_hash` when it inserts a row or sees new content.
+It uses one exiftool run that returns the JSON metadata and the image data hash (`-ImageDataHash -api ImageHashType=SHA256`). `index` and `process` populate
+the columns through this path, and `import` fills them from its own metadata read. `verify` indexes without reading metadata, so it needs no exiftool and leaves its rows unread. Other metadata reads leave the hash flag out, since hashing the
+image data costs extra I/O.
+
+- `metadata_read` separates "not read yet" from "read, tag absent". Rows from an older database
+  start at 0. The next catalog reads them if the file still exists, then sets the flag.
+  A row whose file is gone stays unread.
+- A null `content_identifier` or `image_hash` with `metadata_read = 1` means the tag is absent,
+  which is normal for a format with no image hash.
+- ExifTool 12.63 or newer is required, the release that introduced `ImageDataHash`. An older
+  version fails the run with a message instead of cataloguing nothing.
+- The image hash is catalog-only. Import dedup stays on the whole-file SHA-256.
+- A read-only open cannot upgrade a database in the old shape. Only the hash lookups work there.
 
 ## State Management Pattern
 
@@ -106,8 +133,9 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - Uses `ExifToolJson` class with `JsonPropertyName` attributes for precise metadata field mapping
 - Date validation prioritizes `EXIF:DateTimeOriginal` over `QuickTime:CreateDate`
 - Custom `IsDateSet()` and `GetDateString()` methods handle metadata extraction logic
-- `ContentIdentifier` property maps both `QuickTime:ContentIdentifier` and `Keys:ContentIdentifier`
-  group names (both occur in the wild for ISOBMFF files) returning whichever is set
+- `ContentIdentifier` property maps both `QuickTime:ContentIdentifier` and `MakerNotes:ContentIdentifier`
+  group names (both occur in the wild) returning whichever is set
+- `ImageDataHash` maps `File:ImageDataHash`, which only a catalog read requests (see Catalog Metadata Columns)
 
 ### Date Inference System (DateFromPath.cs)
 
@@ -133,7 +161,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **`import` subcommand** (formerly `organize`): Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from `--outpath` after all files are imported. `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool. It is filtered by `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) checked via `meta.FileTypeExtension`, and uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every imported file. `--datepath` (default `false`) infers the EXIF creation date from the source file path when no date is already embedded, then applies the date to the destination file before restoring mtime. **`--db <sqlite-file>` (Import.db) is the source-side dedup DB**: rows are keyed by `path = source_path` (NOT dest path) and hold the source file's hash/size/mtime. On each source file, import calls `GetByPathAsync(source_path)` for source-side hash caching, then `Sha256ExistsAsync(source_hash)` to skip already-imported sources. New imports insert a row at the source path. **No command outside `import` writes to source-keyed rows**, so dedup cannot be clobbered by later runs of `process`/`index`. `--trashdb <sqlite-file>` skips files whose **source-file** SHA-1 is in Trash.db. When import rewrites the destination via `--tags`/`--tagpath`/`--datepath`, its SHA-1 differs from the source SHA-1. Immich stored the destination SHA-1 from a prior upload, so the trash match is missed here and caught later by `process --trashdb`. `--skipdb <sqlite-file>` skips files whose SHA-256 matches a reference DB (read-only). Cross-collection dedup is typically implemented by pointing `--skipdb` at another collection's Import.db. `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
 - **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. `--processed` (optional) marks newly-INSERTED rows with `is_processed = 1`, which is useful when seeding a Process.db from existing files so `process` treats them as already-done. The flag does not flip the flag on existing rows. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
 - **`trash` subcommand**: Syncs trashed asset checksums from an Immich server into a local SQLite trash database. `--url` (Immich server URL, required), `--trashdb <sqlite-file>` (trash database, required), and the API key supplied by exactly one of `--apikey` (inline) or `--apikey-file` (path to a file whose trimmed contents are the key). The two API-key options are mutually exclusive and exactly one must be provided; `--apikey-file` must reference an existing, non-empty, readable file (existence enforced by an option validator, non-empty/readable by a command-level validator; read failures are translated to validation errors, never thrown). The key is resolved at parse time by `CommandLine.ResolveApiKey`/`ReadApiKeyFile` (file contents preferred and `.Trim()`-med) and flows into `Options.ImmichApiKey`. Uses `POST /api/search/metadata` with `trashedAfter` to fetch all trashed assets, converts Base64 SHA-1 checksums to hex, and inserts them via `INSERT OR IGNORE`. Full sync (idempotent, append-only). No `--dryrun`.
-- **`--trashdb` Flag** (import, process): SQLite database file with Immich trash hashes (synced by `trash`). In `import`, files matching the trash DB are skipped, preventing re-import of photos the user trashed in Immich. The check is against the **source-file** SHA-1, so files whose destination SHA-1 was mutated by `import` itself (`--tags`/`--tagpath`/`--datepath`) will not match here even though Immich stored the mutated SHA-1. The `process --trashdb` command catches those on the next pass. In `process`, matching files are **deleted from disk and from Process.db** before the per-file processing pipeline runs (cleanup of files trashed in Immich after upload, and the safety net for the import source-vs-dest SHA-1 drift). The Trash.db check is the durable safety net beyond Immich's ~30-day trash retention.
+- **`--trashdb` Flag** (import, process): SQLite database file with Immich trash hashes (synced by `trash`). In `import`, files matching the trash DB are skipped, preventing re-import of photos the user trashed in Immich. The check is against the **source-file** SHA-1. Files whose destination SHA-1 `import` mutated (`--tags`/`--tagpath`/`--datepath`) do not match here, although Immich stored the mutated SHA-1. The `process --trashdb` command catches those on the next pass. In `process`, matching files are **deleted from disk** before the per-file pipeline runs. This cleans up files trashed in Immich after upload and catches the import source-vs-dest SHA-1 drift. Their Process.db rows stay, so a Live Photo video still pairs with a trashed still. The Trash.db check is the durable safety net beyond Immich's ~30-day trash retention.
 - **Optional `--skipdb` Flag** (import only): SQLite database of files to skip (read-only SHA-256 check). Files whose SHA-256 matches a record in this DB are skipped without being recorded. Use this to skip files already present in another collection.
 - **Optional `--rehash` Flag** (process, import, index): Forces SHA-256 recomputation for every file, ignoring the size/mtime cache. SHA-1 is also recomputed when `--trashdb` is in use. Useful after filesystem operations that preserve mtime but change content.
 - **Optional `--duration` Flag** (process only): Overrides `ShortVideoDuration` (default `1.0`s). Videos in a live-photo-compatible format whose duration is <= this value are always deleted. Must be `> 0`. Stored in `CommandLine.Options.ShortVideoDuration` and read by `DeleteLivePhotosAsync`.
@@ -173,10 +201,11 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 ### Live Photo Detection
 
 - **Short videos** (duration <= `options.ShortVideoDuration`, default `1.0s`, overridable via `--duration`): always deleted regardless of companion file
-- **Companion file search** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file by:
+- **Pairing with `--db`**: the still is the catalog row of a HEIC/JPG/JPEG file whose `content_identifier` equals the video's, whatever its file name or folder. This covers a still with a different stem, in another date folder, or no longer on disk. The video's own `ContentIdentifier` is read from its metadata. If it is missing or no image row matches, the video is kept. A row never counts as the still when its `sha256` or `image_hash` equals the video's own, since the same media data is the same video. A differently encoded video with an image extension and a shared ContentIdentifier can still pair. That residual risk is accepted, since the loss is one short clip.
+- **Companion file search without `--db`** (`FindCompanionImagePath()`): looks for a HEIC/JPG/JPEG file in the same folder by:
   1. Direct basename match (`IMG_1234.mov` -> `IMG_1234.heic`)
   2. Basename minus `_hevc` suffix (`IMG_1234_HEVC.mov` -> `IMG_1234.heic`), the newer iPhone naming
-- **ContentIdentifier confirmation**: a candidate pair is only deleted when both files expose a `ContentIdentifier` tag that matches exactly. If either file lacks the tag, or the tags differ, the video is kept. There is no fallback to name-only deletion.
+- **ContentIdentifier confirmation** (without `--db`): a candidate pair is only deleted when both files expose a `ContentIdentifier` tag that matches exactly. If either file lacks the tag, or the tags differ, the video is kept. There is no fallback to name-only deletion.
 - **Long videos** (>= `LiveVideoDuration` = 4.0s): always kept even with a matching companion, and a warning is logged
 
 ### Undo Architecture (UndoTask.cs)

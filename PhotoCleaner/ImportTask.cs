@@ -215,7 +215,8 @@ internal sealed class ImportTask(
             }
         }
 
-        ExifToolJson? meta = await GetFileMetaAsync(file, cancellationToken).ConfigureAwait(false);
+        ExifToolJson? meta = await GetFileMetaAsync(file, database is not null, cancellationToken)
+            .ConfigureAwait(false);
 
         // Warnings are ignored on purpose, since most healthy files carry them.
         (int validateErrors, _) = ExifToolJson.ParseValidate(meta?.Validate);
@@ -342,6 +343,7 @@ internal sealed class ImportTask(
             // Lookups are by source content hash.
             if (database is not null && sha256 is not null && sha1 is not null)
             {
+                FileMetadata? metadata = FileMetadata.FromExifTool(meta);
                 if (cached is null)
                 {
                     Log.Debug(
@@ -357,7 +359,10 @@ internal sealed class ImportTask(
                                 sha1,
                                 sourceInfo.Length,
                                 sourceInfo.LastWriteTimeUtc.Ticks,
-                                false
+                                false,
+                                metadata?.ContentIdentifier,
+                                metadata?.ImageHash,
+                                metadata is not null
                             ),
                             cancellationToken
                         )
@@ -377,6 +382,7 @@ internal sealed class ImportTask(
                             sha1,
                             sourceInfo.Length,
                             sourceInfo.LastWriteTimeUtc.Ticks,
+                            metadata,
                             cancellationToken
                         )
                         .ConfigureAwait(false);
@@ -434,16 +440,22 @@ internal sealed class ImportTask(
         return destPath;
     }
 
+    // The image hash is a catalog column, so only a run holding a database asks for it.
     private static async Task<ExifToolJson?> GetFileMetaAsync(
         string filePath,
+        bool imageHash,
         CancellationToken cancellationToken = default
     )
     {
         try
         {
-            return await MediaUtilities
-                .GetExifToolJsonAsync(filePath, cancellationToken)
-                .ConfigureAwait(false);
+            return imageHash
+                ? await MediaUtilities
+                    .GetCatalogExifToolJsonAsync(filePath, cancellationToken)
+                    .ConfigureAwait(false)
+                : await MediaUtilities
+                    .GetExifToolJsonAsync(filePath, cancellationToken)
+                    .ConfigureAwait(false);
         }
         catch (IOException ex)
         {
