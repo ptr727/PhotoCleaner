@@ -533,7 +533,7 @@ were already imported and trashed in Immich.
    hash count in the database.
 
 The trash database is append-only. If an asset is restored (un-trashed) in Immich, its hash
-remains in the database. Delete the database file and re-run `trash` to rebuild from scratch.
+remains in the database. Delete its row to un-block it. Deleting the database file and re-running `trash` also drops the hashes of purged assets.
 
 ## Verify Flow
 
