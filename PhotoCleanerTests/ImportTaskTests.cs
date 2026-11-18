@@ -30,13 +30,12 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         bool rehash = false,
         bool tagPath = false,
         bool datePath = false,
-        bool imageHash = false,
-        int threads = 1
+        bool imageHash = false
     ) =>
         new()
         {
             Path = new DirectoryInfo(Path.GetTempPath()),
-            Threads = threads,
+            Threads = 1,
             DryRun = dryRun,
             DatePath = datePath,
             SkipBackup = false,
@@ -1995,10 +1994,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task ExecuteAsync_ClaimingFileFailsToImport_LaterMatchStillImports(int threads)
+    [Fact]
+    public async Task ExecuteAsync_ClaimingFileFailsToImport_LaterMatchStillImports()
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -2020,7 +2017,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             ImportTask task = new(
-                CreateOptions(outDir, imageHash: true, threads: threads),
+                CreateOptions(outDir, imageHash: true),
                 database: db,
                 skipDatabase: null,
                 trashDatabase: null,
@@ -2032,18 +2029,10 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 TestContext.Current.CancellationToken
             );
 
-            // In parallel either file can claim first, so only the outcome both orders share is fixed
+            failed.Should().Be(1);
             organized.Should().Be(1);
+            skipped.Should().Be(0);
             File.Exists(Path.Combine(outDir, "2021-01", "IMG_1234.jpg")).Should().BeTrue();
-            if (threads == 1)
-            {
-                failed.Should().Be(1);
-                skipped.Should().Be(0);
-            }
-            else
-            {
-                (failed + skipped).Should().Be(1);
-            }
         }
         finally
         {

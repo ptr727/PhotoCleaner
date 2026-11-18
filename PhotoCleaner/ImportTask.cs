@@ -613,7 +613,7 @@ internal sealed class ImportTask(
         return destPath;
     }
 
-    // The image hash is a catalog column, so only a run holding a database asks for it.
+    // Only a run holding a database or matching by image hash asks for the image hash.
     private static async Task<ExifToolJson?> GetFileMetaAsync(
         string filePath,
         bool imageHash,

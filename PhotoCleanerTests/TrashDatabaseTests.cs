@@ -443,6 +443,52 @@ public sealed class TrashDatabaseTests
         }
     }
 
+    [Fact]
+    public async Task InsertHashesAsync_ExistingRow_KeepsNameAndImageHash()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertHashesAsync(
+                [("aaa111", "IMG_1234.HEIC", "imagehash-a"), ("bbb222", "IMG_5678.HEIC", null)],
+                TestContext.Current.CancellationToken
+            );
+
+            // A later sync passes no name, a different hash for the first row, and a hash for the second
+            await db.InsertHashesAsync(
+                [("aaa111", null, "imagehash-x"), ("bbb222", null, "imagehash-b")],
+                TestContext.Current.CancellationToken
+            );
+
+            await using SqliteConnection connection = new($"Data Source={dbPath};Pooling=False");
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT sha1 || '|' || IFNULL(original_file_name, '') || '|' || IFNULL(image_hash, '') FROM trash_hashes ORDER BY sha1";
+            List<string> rows = [];
+            await using (
+                SqliteDataReader reader = await command.ExecuteReaderAsync(
+                    TestContext.Current.CancellationToken
+                )
+            )
+            {
+                while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+                {
+                    rows.Add(reader.GetString(0));
+                }
+            }
+
+            rows.Should()
+                .Equal("aaa111|IMG_1234.HEIC|imagehash-a", "bbb222|IMG_5678.HEIC|imagehash-b");
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
     private static async Task CreateOldSchemaAsync(string dbPath)
     {
         await using SqliteConnection connection = new($"Data Source={dbPath};Pooling=False");
