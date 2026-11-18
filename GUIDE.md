@@ -30,11 +30,11 @@ Never run `process`, or any other command that changes files, on the mirror or o
 
 An `import` from the mirror skips every file whose whole-file SHA-256 is already in its database. A rename at the source therefore adds no second copy. Rerun the command after each sync to add what is new.
 
-Leave `--trashdb` off the import into Originals, so the archive keeps every file the mirror delivered, including one the owner later trashed. Pass `--trashdb` to the second import and to `process`, where a trash database exists. See "Keeping Removed Photos Out" for what each check can match. The [Workflow Example][readme-workflow] lists the commands for the whole chain with rclone as the source.
+Leave `--trashdb` off the import into Originals, so the archive keeps every file the mirror delivered, including one the owner later trashed. Passing `--trashdb` on that first import is a valid variant that keeps trashed files out of the archive too. Pass `--trashdb` to the second import and to `process`, where a trash database exists. See "Keeping Removed Photos Out" for what each check can match. The [Workflow Example][readme-workflow] lists the commands for the whole chain with rclone as the source.
 
 ## Adopting a New Source for a Library the Server Already Holds
 
-Moving to a new source for a library that the photo server already holds risks a second copy of every photo. The import database does not help, because it has never seen these files. Find what the server already holds before importing, using the strongest evidence first.
+Moving to a new source for a library that the photo server already holds risks a second copy of every photo. The import database helps only for bytes it has seen. A new source that delivers bytes identical to an earlier import is already recorded and is skipped. Files whose bytes differ look new to it. Find what the server already holds before importing, using the strongest evidence first.
 
 1. **Byte-identical.** Run `index` on the new source and on the server's stored originals, each into its own database. Files with the same SHA-256 are the same file.
 1. **Same `image_hash`.** The catalog reads `image_hash` from the image data. It stays equal across metadata-only rewrites, such as new tags or a changed date. It differs for a real re-encode.
@@ -43,7 +43,7 @@ Moving to a new source for a library that the photo server already holds risks a
 
 Compare the catalogs with SQLite, using the `files` table of each database. Review the matches before you act on them.
 
-An import database records that bytes were imported once. It does not record that an upload succeeded or that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Confirm that its upload succeeded, then skip it rather than re-importing it.
+An import database records that bytes were imported once. It does not record that an upload succeeded or that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Confirm the upload first. Evidence is that the photo server holds the asset, found by checksum or by the visual comparison below. The upload tool's own log showing the upload is evidence too. Import history alone is not evidence. Then skip the file rather than re-importing it.
 
 ## Re-encoded Copies and the Limits of Each Key
 
@@ -71,7 +71,7 @@ HEIC needs a decoder that assembles its tiles, for example `heif-convert`. Choos
 
 ### The Rule for Ambiguity
 
-Skipping a file wrongly loses a photo without any sign. Importing a file wrongly only creates a duplicate. The server's duplicate finder, where it has one, or owner review can remove it later. Import anything ambiguous.
+Skipping a file wrongly loses a photo without any sign. Importing a file wrongly either creates a duplicate or brings back a photo the owner had removed. The owner can remove either again in the photo server, after which the trash sync records it. Import anything ambiguous.
 
 ### Show the Remainder to the Owner Before Uploading
 
@@ -87,11 +87,14 @@ Use this to tell an import database that a whole source is known, and then un-ma
 
 1. Run `index` over the whole source into the database of the import into the processing directory, not the one for Originals. For example `index --path /mnt/photos/newsource --db /mnt/photos/db/import.db`.
 1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one. Import skips a file whose SHA-256 is in any row, so also delete the rows of every byte-identical twin, such as a `(1)` copy.
-1. Run `import` with `--dryrun` and check that its count matches the number of rows you deleted.
-1. Run `import` for real.
+1. Where an Originals archive stage exists, copy the new source into Originals first, with the import that has its own database.
+1. Run the import that reads Originals with `--dryrun`, and read its count there. Without an archive stage, run `import` on the source itself.
+1. Run that `import` for real.
 1. Run `import` again and confirm that it imports nothing.
 
-Add `--tags` with a tag of its own, for example `--tags newsource`, to the real import. The owner can then review that batch in the photo server afterwards.
+The database matches by SHA-256, so this seeding works only while the archive copy is byte-identical to the source. An option that rewrites the file on import breaks that identity for the stage that uses it. Those options are `--tags`, `--tagpath`, and `--datepath`. Keep them off the Originals copy, so that Originals stays identical to the source.
+
+Add `--tags` with a tag of its own, for example `--tags newsource`, to the import that reads Originals. The owner can then review that batch in the photo server afterwards.
 
 ## Keeping Removed Photos Out
 
@@ -113,7 +116,7 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
 - **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
-- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one, except that `import` with a database skips a copy whose bytes are identical to a file already imported.
+- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded. Two identical files in one parallel run may both be copied. The count can then differ from a dry run by the number of such twins.
 - **`process` renames a file whose extension disagrees with its content.** It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so a short or static GIF can vanish. Keep backups, and check short GIFs before you run with `--skipbackup`.
 - **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
 

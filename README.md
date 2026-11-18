@@ -290,6 +290,7 @@ Options:
     It also acts as the safety net for files that `import --trashdb` could not match because
     of the source-vs-dest SHA-1 drift described above. Their Process.db rows stay, so a Live
     Photo video still pairs with a trashed still.
+    This check runs only when `--db` is also given.
 - `--skipdb <path>`: optional for `import`. Path to a SQLite database with indexed files
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
