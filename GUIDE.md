@@ -88,7 +88,7 @@ In the same migration, the owner reviewed the whole remainder and rejected all o
 Use this to tell an import database that a whole source is known, and then un-mark the files that should still import.
 
 1. Run `index` over the whole source into the database of the import into the processing directory, not the one for Originals. Those rows mean known, not copied. For example `index --path /mnt/photos/newsource --db /mnt/photos/db/import.db`.
-1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one. Import skips a file whose SHA-256 is in any row, so also delete the rows of every byte-identical twin, such as a `(1)` copy.
+1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one. Import skips a file whose SHA-256 is in any row, so also delete the rows of every byte-identical twin, such as a `(1)` copy. With `--imagehash` it also skips a file whose `image_hash` is in any row. Run that import without `--imagehash`, or also delete the rows sharing that `image_hash`.
 1. Where an Originals archive stage exists, copy the new source into Originals first, with the import that has its own database.
 1. Run the import that reads Originals with `--dryrun`, and read its count there. Without an archive stage, run `import` on the source itself.
 1. Run that `import` for real.
