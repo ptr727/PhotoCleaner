@@ -290,6 +290,7 @@ Options:
     It also acts as the safety net for files that `import --trashdb` could not match because
     of the source-vs-dest SHA-1 drift described above. Their Process.db rows stay, so a Live
     Photo video still pairs with a trashed still.
+    This check runs only when `--db` is also given.
 - `--skipdb <path>`: optional for `import`. Path to a SQLite database with indexed files
   to be skipped (read-only). Files matching a record in this DB are skipped without being
   recorded. Use to skip files already present in another collection.
@@ -532,7 +533,7 @@ were already imported and trashed in Immich.
    hash count in the database.
 
 The trash database is append-only. If an asset is restored (un-trashed) in Immich, its hash
-remains in the database. Delete the database file and re-run `trash` to rebuild from scratch.
+remains in the database. Delete its row to un-block it. Deleting the database file and re-running `trash` also drops the hashes of purged assets.
 
 ## Verify Flow
 
@@ -786,8 +787,8 @@ Run `index` on the new source and on the photo server's stored originals, each i
 database, and match the two by `image_hash`. Then record the mirror with `index` in the
 database of the import into the processing directory, `import.db` above. Finally delete the rows of the files that should still be
 imported. This is guidance rather than a supported command sequence, so review the matches before
-deleting any rows. A fuller guide to building an Originals archive and to removing duplicates
-against a photo server is planned as separate documentation.
+deleting any rows. The [Operations Guide][guide] covers building an Originals archive and removing duplicates
+against a photo server.
 
 **Run PhotoCleaner to verify Immich can render the photos**:
 
@@ -976,6 +977,7 @@ Licensed under the [MIT License][license]\
 
 <!-- Repo -->
 
+[guide]: ./GUIDE.md
 [history]: ./HISTORY.md
 [license]: ./LICENSE
 
