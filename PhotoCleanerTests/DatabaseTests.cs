@@ -617,44 +617,6 @@ public sealed class DatabaseTests
     }
 
     [Fact]
-    public async Task FindPathByImageHashAsync_NullOrEmptyHash_NeverMatchesRowsWithoutOne()
-    {
-        string dbPath = TempDb();
-        try
-        {
-            await using Database db = new(dbPath);
-            await db.InitializeAsync(TestContext.Current.CancellationToken);
-            await db.InsertAsync(
-                new FileRecord("/source/clip.gif", "sha256-a", "sha1-a", 10L, 0L, false),
-                TestContext.Current.CancellationToken
-            );
-            await db.InsertAsync(
-                new FileRecord(
-                    "/source/other.gif",
-                    "sha256-b",
-                    "sha1-b",
-                    10L,
-                    0L,
-                    false,
-                    ImageHash: ""
-                ),
-                TestContext.Current.CancellationToken
-            );
-
-            (await db.FindPathByImageHashAsync(null, TestContext.Current.CancellationToken))
-                .Should()
-                .BeNull();
-            (await db.FindPathByImageHashAsync("", TestContext.Current.CancellationToken))
-                .Should()
-                .BeNull();
-        }
-        finally
-        {
-            File.Delete(dbPath);
-        }
-    }
-
-    [Fact]
     public async Task GetImageHashBySha1Async_ReturnsRecordedHashOrNull()
     {
         string dbPath = TempDb();
@@ -697,7 +659,7 @@ public sealed class DatabaseTests
     }
 
     [Fact]
-    public async Task ImageHashLookups_OldSchemaDatabaseReadOnly_ReturnNull()
+    public async Task GetImageHashBySha1Async_OldSchemaDatabaseReadOnly_ReturnsNull()
     {
         string dbPath = TempDb();
         try
@@ -725,14 +687,6 @@ public sealed class DatabaseTests
 
             db.HasImageHash.Should().BeFalse();
             (await db.GetImageHashBySha1Async("sha1-a", TestContext.Current.CancellationToken))
-                .Should()
-                .BeNull();
-            (
-                await db.FindPathByImageHashAsync(
-                    "imagehash-a",
-                    TestContext.Current.CancellationToken
-                )
-            )
                 .Should()
                 .BeNull();
         }

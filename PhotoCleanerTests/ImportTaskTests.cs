@@ -1993,4 +1993,52 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Delete(dbPath);
         }
     }
+
+    [Fact]
+    public async Task ExecuteAsync_ClaimingFileFailsToImport_LaterMatchStillImports()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            // Two metadata variants with different dates, so each lands in its own folder
+            (string original, string copy) = await CreateMetadataOnlyCopyAsync(srcDir);
+            await SetExifDateAsync(original, "2020:01:15 10:00:00");
+            await SetExifDateAsync(copy, "2021:01:15 10:00:00");
+            string? originalImageHash = await GetImageHashAsync(original);
+            originalImageHash.Should().NotBeNullOrEmpty();
+            (await GetImageHashAsync(copy)).Should().Be(originalImageHash);
+
+            // A directory at the first file's destination makes its copy fail
+            _ = Directory.CreateDirectory(Path.Combine(outDir, "2020-01", "IMG_1234.jpg"));
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            ImportTask task = new(
+                CreateOptions(outDir, imageHash: true),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, int skipped, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [original, copy],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            failed.Should().Be(1);
+            organized.Should().Be(1);
+            skipped.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "2021-01", "IMG_1234.jpg")).Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
 }

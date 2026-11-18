@@ -131,10 +131,38 @@ internal sealed class ImportTask(
         );
     }
 
+    // A file that does not import releases its claims, so a later match is still tried.
     private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
         CancellationToken cancellationToken = default
+    )
+    {
+        List<string> claimed = [];
+        ImportResult result = ImportResult.Failed;
+        try
+        {
+            result = await ImportFileAsync(file, sourceDir, claimed, cancellationToken)
+                .ConfigureAwait(false);
+            return result;
+        }
+        finally
+        {
+            if (result != ImportResult.Imported)
+            {
+                foreach (string key in claimed)
+                {
+                    _ = _claims.TryRemove(new KeyValuePair<string, string>(key, file));
+                }
+            }
+        }
+    }
+
+    private async Task<ImportResult> ImportFileAsync(
+        string file,
+        DirectoryInfo sourceDir,
+        List<string> claimed,
+        CancellationToken cancellationToken
     )
     {
         Log.Information("Importing '{FilePath}'", file);
@@ -242,10 +270,10 @@ internal sealed class ImportTask(
             // The first to claim a hash imports, and the rest skip as a sequential run would.
             if (database is not null)
             {
-                string? claimedBy = ClaimedBy("sha256:" + sha256, file)
+                string? claimedBy = ClaimedBy("sha256:" + sha256, file, claimed)
                     ?? (
                         options.ImageHash && !string.IsNullOrEmpty(imageHash)
-                            ? ClaimedBy("image:" + imageHash, file)
+                            ? ClaimedBy("image:" + imageHash, file, claimed)
                             : null
                     );
                 if (claimedBy is not null)
@@ -471,10 +499,16 @@ internal sealed class ImportTask(
         }
     }
 
-    private string? ClaimedBy(string key, string file)
+    private string? ClaimedBy(string key, string file, List<string> claimed)
     {
         string owner = _claims.GetOrAdd(key, file);
-        return owner == file ? null : owner;
+        if (owner != file)
+        {
+            return owner;
+        }
+
+        claimed.Add(key);
+        return null;
     }
 
     private async Task<ImportResult?> CheckImageHashAsync(

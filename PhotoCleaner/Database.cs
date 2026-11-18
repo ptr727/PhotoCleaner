@@ -245,26 +245,24 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         );
 
     /// <summary>
-    /// Finds a row whose image data hash equals the given one, or null when there is none or the hash is empty.
+    /// Finds a row whose image data hash equals the given one, or null when there is none.
     /// </summary>
     internal Task<string?> FindPathByImageHashAsync(
-        string? imageHash,
+        string imageHash,
         CancellationToken cancellationToken = default
     ) =>
-        string.IsNullOrEmpty(imageHash) || !HasImageHash
-            ? Task.FromResult<string?>(null)
-            : ExecuteAsync(
-                async cmd =>
-                {
-                    cmd.CommandText =
-                        "SELECT path FROM files WHERE image_hash = @imageHash ORDER BY path LIMIT 1";
-                    _ = cmd.Parameters.AddWithValue("@imageHash", imageHash);
-                    object? result = await cmd.ExecuteScalarAsync(cancellationToken)
-                        .ConfigureAwait(false);
-                    return result as string;
-                },
-                cancellationToken
-            );
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText =
+                    "SELECT path FROM files WHERE image_hash = @imageHash ORDER BY path LIMIT 1";
+                _ = cmd.Parameters.AddWithValue("@imageHash", imageHash);
+                object? result = await cmd.ExecuteScalarAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return result as string;
+            },
+            cancellationToken
+        );
 
     /// <summary>
     /// Returns the image data hash recorded for a file with the given SHA-1, or null when none is recorded.
