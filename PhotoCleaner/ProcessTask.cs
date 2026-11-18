@@ -238,7 +238,7 @@ internal sealed class ProcessTask(
             fileInfo.FullName,
             fileInfo.Extension.ToLowerInvariant()
         );
-        MoveFile(fileInfo.FullName, outputFile, options.SkipBackup);
+        outputFile = RenameToFreeName(fileInfo.FullName, outputFile);
 
         // Queue renamed file for further processing
         return ReProcess(outputFile);
@@ -294,8 +294,7 @@ internal sealed class ProcessTask(
         // Rename extension to match exiftool's canonical extension
         // Note; no backup is taken, undo cannot restore
         _modified = true;
-        string outputFile = baseName + expectedExtension;
-        MoveFile(fileInfo.FullName, outputFile, options.SkipBackup);
+        string outputFile = RenameToFreeName(fileInfo.FullName, baseName + expectedExtension);
 
         // Queue renamed file for further processing
         return ReProcess(outputFile);
@@ -563,6 +562,9 @@ internal sealed class ProcessTask(
                 "-y",
                 "-i",
                 fileInfo.FullName,
+                // The libx264 encoder at yuv420p needs even dimensions, so an odd edge gains one padded row.
+                "-vf",
+                "pad=ceil(iw/2)*2:ceil(ih/2)*2",
                 "-c:v",
                 "libx264",
                 "-crf",
@@ -658,7 +660,7 @@ internal sealed class ProcessTask(
                     )
                     .ConfigureAwait(false);
             }
-            MoveFile(tempFile, outputFile, options.SkipBackup);
+            RenameFile(tempFile, outputFile);
 
             // Copy compatible metadata from the original to the converted file
             await CopyMetadataAsync(sourceForMetadata, outputFile, cancellationToken)
@@ -821,29 +823,48 @@ internal sealed class ProcessTask(
         return backupFileName;
     }
 
-    private static void MoveFile(
-        string sourceFileName,
-        string targetFileName,
-        bool skipBackup = false
-    )
+    private static string RenameToFreeName(string sourceFileName, string targetFileName)
     {
-        // Backup or delete target if it exists
-        if (File.Exists(targetFileName))
+        // A file already holding the target name is never displaced, the renamed file takes the next free name.
+        if (!IsNameTaken(sourceFileName, targetFileName))
         {
-            if (skipBackup)
-            {
-                Log.Information(
-                    "Deleting conflicting file (no backup): '{FilePath}'",
-                    targetFileName
-                );
-                File.Delete(targetFileName);
-            }
-            else
-            {
-                _ = BackupFile(targetFileName, false);
-            }
+            RenameFile(sourceFileName, targetFileName);
+            return targetFileName;
         }
 
+        string freeFileName = MediaUtilities.GetUniqueFileName(targetFileName);
+        Log.Warning(
+            "Name '{TargetPath}' is taken by another file, renaming '{SourcePath}' to '{FreePath}' instead",
+            targetFileName,
+            sourceFileName,
+            freeFileName
+        );
+        RenameFile(sourceFileName, freeFileName);
+        return freeFileName;
+    }
+
+    private static bool IsNameTaken(string sourceFileName, string targetFileName)
+    {
+        if (!File.Exists(targetFileName))
+        {
+            return false;
+        }
+        if (!string.Equals(sourceFileName, targetFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // A case-insensitive filesystem reports the source itself under a case-only variant of its name.
+        string targetName = Path.GetFileName(targetFileName);
+        return Directory
+            .EnumerateFiles(Path.GetDirectoryName(targetFileName)!)
+            .Any(file =>
+                string.Equals(Path.GetFileName(file), targetName, StringComparison.Ordinal)
+            );
+    }
+
+    private static void RenameFile(string sourceFileName, string targetFileName)
+    {
         Log.Information(
             "Renaming '{SourcePath}' to '{DestinationPath}'",
             sourceFileName,
