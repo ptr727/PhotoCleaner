@@ -2032,10 +2032,18 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 TestContext.Current.CancellationToken
             );
 
-            failed.Should().Be(1);
+            // In parallel either file can claim first, so only the outcome both orders share is fixed
             organized.Should().Be(1);
-            skipped.Should().Be(0);
             File.Exists(Path.Combine(outDir, "2021-01", "IMG_1234.jpg")).Should().BeTrue();
+            if (threads == 1)
+            {
+                failed.Should().Be(1);
+                skipped.Should().Be(0);
+            }
+            else
+            {
+                (failed + skipped).Should().Be(1);
+            }
         }
         finally
         {

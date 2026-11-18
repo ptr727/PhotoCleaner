@@ -537,11 +537,6 @@ internal sealed class ImportTask(
                 return null;
             }
 
-            if (owner.File == file)
-            {
-                return null;
-            }
-
             if (await owner.Imported.Task.WaitAsync(cancellationToken).ConfigureAwait(false))
             {
                 return owner.File;

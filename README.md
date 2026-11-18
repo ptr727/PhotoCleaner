@@ -579,7 +579,7 @@ An older trash database gains the `image_hash` column in place when `trash` open
 
 The trash database is append-only. If an asset is restored (un-trashed) in Immich, its hash
 remains in the database. Delete its row to un-block it. Deleting the database file and re-running `trash` also drops the hashes of purged assets.
-With `--imagehash`, also delete any other row carrying the same `image_hash`.
+With `--imagehash`, another trashed asset with the same image data still matches the restored file. Leave `--imagehash` off while that asset stays trashed.
 
 ## Verify Flow
 

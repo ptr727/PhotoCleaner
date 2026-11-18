@@ -110,7 +110,7 @@ The match covers every copy with that image data, including one the owner kept. 
 
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
-The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex. Run `sha1sum` on the restored original downloaded from the server, which prints that form. A file name can repeat, so do not select the row by name. With `--imagehash`, also delete any other row carrying the same `image_hash`.
+The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex. Run `sha1sum` on the restored original downloaded from the server, which prints that form. A file name can repeat, so do not select the row by name. With `--imagehash`, another trashed asset with the same image data still matches the restored file. Leave `--imagehash` off while that asset stays trashed.
 
 ## Live Photos
 
@@ -122,7 +122,7 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
 - **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
-- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded. Two identical files in one parallel run may both be copied. The count can then differ from a dry run by the number of such twins.
+- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded, including an identical file earlier in the same run.
 - **`process` renames a file whose extension disagrees with its content.** When another file already holds the corrected name, the renamed file takes the next free name, such as `photo_1.jpg`, and the run logs a warning. It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so a short or static GIF can vanish. Keep backups, and check short GIFs before you run with `--skipbackup`.
 - **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
 
