@@ -58,6 +58,7 @@ internal sealed class ProcessTask(
     private static readonly FrozenSet<string> s_liveVideoImageExtensions = new[]
     {
         ".heic",
+        ".heif",
         ".jpg",
         ".jpeg", // Non-canonical version required, matching file may not yet have been normalized
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
@@ -120,12 +121,19 @@ internal sealed class ProcessTask(
             // Deletes files whose SHA-1 matches an asset already trashed in Immich.
             // Pruning here costs nothing, since every file is being touched anyway.
             // The deletion is persisted so re-runs are no-ops.
-            if (
-                trashDatabase is not null
-                && await TryDeleteIfTrashedAsync(sha1).ConfigureAwait(false)
-            )
+            if (trashDatabase is not null)
             {
-                return ProcessResult.Deleted;
+                string? imageHash = options.ImageHash
+                    ? (
+                        await database
+                            .GetByPathAsync(fileInfo.FullName, cancellationToken)
+                            .ConfigureAwait(false)
+                    )?.ImageHash
+                    : null;
+                if (await TryDeleteIfTrashedAsync(sha1, imageHash).ConfigureAwait(false))
+                {
+                    return ProcessResult.Deleted;
+                }
             }
 
             if (status == IndexStatus.Unchanged && wasProcessed && !options.Reprocess)
@@ -181,21 +189,33 @@ internal sealed class ProcessTask(
         return result;
     }
 
-    private async Task<bool> TryDeleteIfTrashedAsync(string sha1)
+    private async Task<bool> TryDeleteIfTrashedAsync(string sha1, string? imageHash)
     {
-        bool trashed = await trashDatabase!
-            .Sha1ExistsAsync(sha1, cancellationToken)
-            .ConfigureAwait(false);
-        if (!trashed)
+        if (await trashDatabase!.Sha1ExistsAsync(sha1, cancellationToken).ConfigureAwait(false))
+        {
+            Log.Information(
+                "Deleting file trashed in Immich '{FilePath}' with SHA-1 '{Sha1}'",
+                fileInfo.FullName,
+                sha1
+            );
+        }
+        else if (
+            await trashDatabase
+                .ImageHashExistsAsync(imageHash, cancellationToken)
+                .ConfigureAwait(false)
+        )
+        {
+            Log.Information(
+                "Deleting file trashed in Immich '{FilePath}' with image data hash '{ImageHash}'",
+                fileInfo.FullName,
+                imageHash
+            );
+        }
+        else
         {
             return false;
         }
 
-        Log.Information(
-            "Deleting file trashed in Immich '{FilePath}' with SHA-1 '{Sha1}'",
-            fileInfo.FullName,
-            sha1
-        );
         if (options.DryRun)
         {
             return true;
@@ -238,7 +258,7 @@ internal sealed class ProcessTask(
             fileInfo.FullName,
             fileInfo.Extension.ToLowerInvariant()
         );
-        MoveFile(fileInfo.FullName, outputFile, options.SkipBackup);
+        outputFile = RenameToFreeName(fileInfo.FullName, outputFile);
 
         // Queue renamed file for further processing
         return ReProcess(outputFile);
@@ -294,8 +314,7 @@ internal sealed class ProcessTask(
         // Rename extension to match exiftool's canonical extension
         // Note; no backup is taken, undo cannot restore
         _modified = true;
-        string outputFile = baseName + expectedExtension;
-        MoveFile(fileInfo.FullName, outputFile, options.SkipBackup);
+        string outputFile = RenameToFreeName(fileInfo.FullName, baseName + expectedExtension);
 
         // Queue renamed file for further processing
         return ReProcess(outputFile);
@@ -344,7 +363,7 @@ internal sealed class ProcessTask(
 
     private async Task<bool> DeleteLivePhotosAsync()
     {
-        // Live photos are MOV or MP4 about ~3s long with a matching HEIC or JPEG file
+        // Live photos are MOV or MP4 about ~3s long with a matching HEIC, HEIF, or JPEG file
         if (!s_liveVideoExtensions.Contains(fileInfo.Extension))
         {
             return true;
@@ -563,6 +582,9 @@ internal sealed class ProcessTask(
                 "-y",
                 "-i",
                 fileInfo.FullName,
+                // The libx264 encoder at yuv420p needs even dimensions, so the pad rounds each odd edge up by one.
+                "-vf",
+                "pad=ceil(iw/2)*2:ceil(ih/2)*2",
                 "-c:v",
                 "libx264",
                 "-crf",
@@ -639,11 +661,9 @@ internal sealed class ProcessTask(
                 .WithArguments(ffmpegArguments)
                 .ExecuteBufferedAsync(cancellationToken);
 
-            // Backup original file (or keep it on disk if skipbackup, to read metadata from)
+            // The original moves aside to a backup name in both modes, so the output can take its name.
             _modified = true;
-            string sourceForMetadata = options.SkipBackup
-                ? fileInfo.FullName
-                : BackupFile(fileInfo.FullName, false);
+            string sourceForMetadata = BackupFile(fileInfo.FullName, false);
 
             // Rename temp output to MP4; use a unique name if target already exists
             string outputFile = MediaUtilities.GetUniqueFileName(
@@ -658,7 +678,7 @@ internal sealed class ProcessTask(
                     )
                     .ConfigureAwait(false);
             }
-            MoveFile(tempFile, outputFile, options.SkipBackup);
+            RenameFile(tempFile, outputFile);
 
             // Copy compatible metadata from the original to the converted file
             await CopyMetadataAsync(sourceForMetadata, outputFile, cancellationToken)
@@ -810,40 +830,54 @@ internal sealed class ProcessTask(
         }
         else
         {
-            Log.Information(
-                "Renaming '{SourcePath}' to '{DestinationPath}'",
-                fileName,
-                backupFileName
-            );
-            File.Move(fileName, backupFileName, false);
+            RenameFile(fileName, backupFileName);
         }
 
         return backupFileName;
     }
 
-    private static void MoveFile(
-        string sourceFileName,
-        string targetFileName,
-        bool skipBackup = false
-    )
+    private static string RenameToFreeName(string sourceFileName, string targetFileName)
     {
-        // Backup or delete target if it exists
-        if (File.Exists(targetFileName))
+        // A file already holding the target name is never displaced, the renamed file takes the next free name.
+        if (!IsNameTaken(sourceFileName, targetFileName))
         {
-            if (skipBackup)
-            {
-                Log.Information(
-                    "Deleting conflicting file (no backup): '{FilePath}'",
-                    targetFileName
-                );
-                File.Delete(targetFileName);
-            }
-            else
-            {
-                _ = BackupFile(targetFileName, false);
-            }
+            RenameFile(sourceFileName, targetFileName);
+            return targetFileName;
         }
 
+        string freeFileName = MediaUtilities.GetUniqueFileName(targetFileName);
+        Log.Warning(
+            "Name '{TargetPath}' is taken by another file, renaming '{SourcePath}' to '{FreePath}' instead",
+            targetFileName,
+            sourceFileName,
+            freeFileName
+        );
+        RenameFile(sourceFileName, freeFileName);
+        return freeFileName;
+    }
+
+    private static bool IsNameTaken(string sourceFileName, string targetFileName)
+    {
+        if (!File.Exists(targetFileName))
+        {
+            return false;
+        }
+        if (!string.Equals(sourceFileName, targetFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // A case-insensitive filesystem reports the source itself under a case-only variant of its name.
+        string targetName = Path.GetFileName(targetFileName);
+        return Directory
+            .EnumerateFiles(Path.GetDirectoryName(targetFileName)!)
+            .Any(file =>
+                string.Equals(Path.GetFileName(file), targetName, StringComparison.Ordinal)
+            );
+    }
+
+    private static void RenameFile(string sourceFileName, string targetFileName)
+    {
         Log.Information(
             "Renaming '{SourcePath}' to '{DestinationPath}'",
             sourceFileName,

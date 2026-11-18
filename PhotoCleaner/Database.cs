@@ -38,6 +38,11 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
 
+    /// <summary>
+    /// Whether the files table has the image_hash column, which a read-only open of an older database lacks.
+    /// </summary>
+    internal bool HasImageHash { get; private set; }
+
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         Log.Debug("Initializing database at '{DbPath}' (readOnly={ReadOnly})", dbPath, readOnly);
@@ -48,9 +53,14 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         if (readOnly)
         {
             await ValidateSchemaAsync(cancellationToken).ConfigureAwait(false);
+            HasImageHash = (
+                await GetColumnNamesAsync(_connection, "files", cancellationToken)
+                    .ConfigureAwait(false)
+            ).Contains("image_hash");
         }
         else
         {
+            HasImageHash = true;
             using SqliteCommand createCmd = _connection.CreateCommand();
             createCmd.CommandText = """
                 CREATE TABLE IF NOT EXISTS files (
@@ -80,11 +90,16 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         }
     }
 
-    private async Task<HashSet<string>> GetColumnNamesAsync(CancellationToken cancellationToken)
+    internal static async Task<HashSet<string>> GetColumnNamesAsync(
+        SqliteConnection connection,
+        string table,
+        CancellationToken cancellationToken
+    )
     {
         HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
-        using SqliteCommand cmd = _connection!.CreateCommand();
-        cmd.CommandText = "SELECT name FROM pragma_table_info('files')";
+        using SqliteCommand cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT name FROM pragma_table_info(@table)";
+        _ = cmd.Parameters.AddWithValue("@table", table);
         using SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
             .ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -104,7 +119,11 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
 
     private async Task UpgradeSchemaAsync(CancellationToken cancellationToken)
     {
-        HashSet<string> columns = await GetColumnNamesAsync(cancellationToken)
+        HashSet<string> columns = await GetColumnNamesAsync(
+                _connection!,
+                "files",
+                cancellationToken
+            )
             .ConfigureAwait(false);
         int present = s_catalogColumns.Count(columns.Contains);
         if (present == 3)
@@ -224,6 +243,48 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
             },
             cancellationToken
         );
+
+    /// <summary>
+    /// Finds a row whose image data hash equals the given one, or null when there is none.
+    /// </summary>
+    internal Task<string?> FindPathByImageHashAsync(
+        string imageHash,
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText =
+                    "SELECT path FROM files WHERE image_hash = @imageHash ORDER BY path LIMIT 1";
+                _ = cmd.Parameters.AddWithValue("@imageHash", imageHash);
+                object? result = await cmd.ExecuteScalarAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return result as string;
+            },
+            cancellationToken
+        );
+
+    /// <summary>
+    /// Returns the image data hash recorded for a file with the given SHA-1, or null when none is recorded.
+    /// </summary>
+    internal Task<string?> GetImageHashBySha1Async(
+        string sha1,
+        CancellationToken cancellationToken = default
+    ) =>
+        !HasImageHash
+            ? Task.FromResult<string?>(null)
+            : ExecuteAsync(
+                async cmd =>
+                {
+                    cmd.CommandText =
+                        "SELECT image_hash FROM files WHERE sha1 = @sha1 AND image_hash IS NOT NULL ORDER BY path LIMIT 1";
+                    _ = cmd.Parameters.AddWithValue("@sha1", sha1);
+                    object? result = await cmd.ExecuteScalarAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return result as string;
+                },
+                cancellationToken
+            );
 
     internal Task InsertAsync(FileRecord record, CancellationToken cancellationToken = default) =>
         ExecuteAsync(

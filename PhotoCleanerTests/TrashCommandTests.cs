@@ -10,7 +10,7 @@ public sealed class TrashCommandTests
     private static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"trashcmd_{Path.GetRandomFileName()}.db");
 
-    private static CommandLine.Options CreateOptions(string dbPath) =>
+    private static CommandLine.Options CreateOptions(string dbPath, string? processDbPath = null) =>
         new()
         {
             Path = new DirectoryInfo(Path.GetTempPath()),
@@ -24,7 +24,7 @@ public sealed class TrashCommandTests
             Move = false,
             TagPath = false,
             Tags = null,
-            DbFile = null,
+            DbFile = processDbPath is null ? null : new FileInfo(processDbPath),
             Rehash = false,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
@@ -307,11 +307,107 @@ public sealed class TrashCommandTests
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
             long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
-            count.Should().Be(1); // INSERT OR IGNORE deduplicates
+            count.Should().Be(1); // The upsert on sha1 keeps one row per checksum
         }
         finally
         {
             File.Delete(dbPath);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_ProcessDb_RecordsImageHashOnlyWhenGiven(bool withProcessDb)
+    {
+        string dbPath = TempDb();
+        string processDbPath = TempDb();
+        try
+        {
+            byte[] sha1a = new byte[20];
+            sha1a[0] = 0x01;
+            byte[] sha1b = new byte[20];
+            sha1b[0] = 0x02;
+
+            // A row synced earlier for an asset the server has since purged
+            byte[] sha1c = new byte[20];
+            sha1c[0] = 0x03;
+            await using (TrashDatabase seed = new(dbPath))
+            {
+                await seed.InitializeAsync(TestContext.Current.CancellationToken);
+                await seed.InsertHashAsync(
+                    Convert.ToHexStringLower(sha1c),
+                    "IMG_5678.HEIC",
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
+            }
+
+            // The process database knows the first asset and the purged one, not the second
+            await using (Database processDb = new(processDbPath))
+            {
+                await processDb.InitializeAsync(TestContext.Current.CancellationToken);
+                await processDb.InsertAsync(
+                    new FileRecord(
+                        "/processed/IMG_5678.HEIC",
+                        "sha256-c",
+                        Convert.ToHexStringLower(sha1c),
+                        10L,
+                        0L,
+                        true,
+                        ImageHash: "imagehash-c",
+                        MetadataRead: true
+                    ),
+                    TestContext.Current.CancellationToken
+                );
+                await processDb.InsertAsync(
+                    new FileRecord(
+                        "/processed/IMG_1234.HEIC",
+                        "sha256-a",
+                        Convert.ToHexStringLower(sha1a),
+                        10L,
+                        0L,
+                        true,
+                        ImageHash: "imagehash-a",
+                        MetadataRead: true
+                    ),
+                    TestContext.Current.CancellationToken
+                );
+            }
+
+            using MockImmichHandler handler = new();
+            handler.EnqueueResponse(
+                MakeResponse([Convert.ToBase64String(sha1a), Convert.ToBase64String(sha1b)])
+            );
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath, withProcessDb ? processDbPath : null),
+                TestContext.Current.CancellationToken,
+                client
+            );
+            int exitCode = await command.ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            (await db.GetCountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
+            (await db.ImageHashExistsAsync("imagehash-a", TestContext.Current.CancellationToken))
+                .Should()
+                .Be(withProcessDb);
+            (await db.ImageHashExistsAsync("imagehash-c", TestContext.Current.CancellationToken))
+                .Should()
+                .Be(withProcessDb);
+            (await db.GetSha1sWithoutImageHashAsync(TestContext.Current.CancellationToken))
+                .Should()
+                .HaveCount(withProcessDb ? 1 : 3);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(processDbPath);
         }
     }
 

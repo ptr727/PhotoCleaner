@@ -125,6 +125,58 @@ public sealed class LivePhotoCatalogTests(TempDirectoryFixture fixture)
         );
     }
 
+    [Fact]
+    public async Task ExecuteAsync_StillCatalogedAsHeifThenRenamedToHeic_DeletesVideo()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string heifPath = Path.Combine(workDir, "IMG_1234.heif");
+            string heicPath = Path.Combine(workDir, "IMG_1234.heic");
+            string videoPath = Path.Combine(workDir, "IMG_1234_QWJj.mp4");
+            await CreateStillAsync(heifPath, "uuid-heif-renamed");
+            await CreateVideoAsync(videoPath, "uuid-heif-renamed");
+            CommandLine.Options options = CreateOptions(workDir, null);
+            await using Database db = new(Path.Combine(workDir, "photos.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            _ = await new IndexTask(options, db, new SkippedExtensionTracker()).IndexFileAsync(
+                heifPath,
+                TestContext.Current.CancellationToken
+            );
+            File.Move(heifPath, heicPath);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                options,
+                new FileInfo(videoPath),
+                db,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(videoPath + ".bak").Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoDatabaseAndHeifCompanion_DeletesVideo()
+    {
+        await RunPairAsync(
+            "IMG_1234.heif",
+            "IMG_1234.mp4",
+            "uuid-no-db-heif",
+            "uuid-no-db-heif",
+            expected: ProcessTask.ProcessResult.Deleted,
+            useDatabase: false
+        );
+    }
+
     // -- Catalog columns -------------------------------------------------------
 
     [Fact]

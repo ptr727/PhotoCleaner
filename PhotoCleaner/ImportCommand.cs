@@ -39,6 +39,14 @@ internal sealed class ImportCommand(
                                                 options.DbFile,
                                                 async database =>
                                                 {
+                                                    if (options.ImageHash)
+                                                    {
+                                                        trashDatabase?.WarnIfImageHashMissing();
+                                                        await MediaUtilities
+                                                            .EnsureImageHashSupportAsync()
+                                                            .ConfigureAwait(false);
+                                                    }
+
                                                     ImportTask task = new(
                                                         options,
                                                         database,
