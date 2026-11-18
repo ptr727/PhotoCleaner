@@ -43,7 +43,7 @@ Moving to a new source for a library that the photo server already holds risks a
 
 Compare the catalogs with SQLite, using the `files` table of each database. Review the matches before you act on them.
 
-An import database records that bytes were imported once. It does not record that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Skip it rather than re-importing it.
+An import database records that bytes were imported once. It does not record that an upload succeeded or that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Confirm that its upload succeeded, then skip it rather than re-importing it.
 
 ## Re-encoded Copies and the Limits of Each Key
 
@@ -71,7 +71,7 @@ HEIC needs a decoder that assembles its tiles, for example `heif-convert`. Choos
 
 ### The Rule for Ambiguity
 
-Skipping a file wrongly loses a photo without any sign. Importing a file wrongly only creates a duplicate, and the server's duplicate finder can catch that. Import anything ambiguous.
+Skipping a file wrongly loses a photo without any sign. Importing a file wrongly only creates a duplicate. The server's duplicate finder, where it has one, or owner review can remove it later. Import anything ambiguous.
 
 ### Show the Remainder to the Owner Before Uploading
 
