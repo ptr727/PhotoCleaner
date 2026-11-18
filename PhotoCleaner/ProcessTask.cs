@@ -562,7 +562,7 @@ internal sealed class ProcessTask(
                 "-y",
                 "-i",
                 fileInfo.FullName,
-                // The libx264 encoder at yuv420p needs even dimensions, so an odd edge gains one padded row or column.
+                // The libx264 encoder at yuv420p needs even dimensions, so the pad rounds each odd edge up by one.
                 "-vf",
                 "pad=ceil(iw/2)*2:ceil(ih/2)*2",
                 "-c:v",
