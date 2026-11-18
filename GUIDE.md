@@ -108,7 +108,7 @@ The trash database is append-only. A restored asset stays in it. Delete that one
 
 ## Live Photos
 
-`process` removes a Live Photo's motion video when three things hold. The video is a `.mov` or `.mp4` under the Live Photo length bound of 4 seconds. The process database knows a HEIC, JPG, or JPEG still with the same Apple `ContentIdentifier`. File names and date folders do not matter when `process` runs with `--db`. Without `--db`, it pairs only files in the same folder with the same base name, or the base name plus `_HEVC`. It confirms each pair by `ContentIdentifier`. See "Live Photo Detection" in [ARCHITECTURE][architecture-livephoto] for the full rules.
+`process` removes a Live Photo's motion video when three things hold. The video is a `.mov` or `.mp4` under the Live Photo length bound of 4 seconds. The process database knows a HEIC, HEIF, JPG, or JPEG still with the same Apple `ContentIdentifier`. File names and date folders do not matter when `process` runs with `--db`. Without `--db`, it pairs only files in the same folder with the same base name, or the base name plus `_HEVC`. It confirms each pair by `ContentIdentifier`. See "Live Photo Detection" in [ARCHITECTURE][architecture-livephoto] for the full rules.
 
 A cloud export may deliver the motion parts as short videos with no sidecar of their own. A `.mov` or `.mp4` video at or under the `--duration` threshold is deleted in any case.
 

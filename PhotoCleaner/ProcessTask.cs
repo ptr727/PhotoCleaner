@@ -58,6 +58,7 @@ internal sealed class ProcessTask(
     private static readonly FrozenSet<string> s_liveVideoImageExtensions = new[]
     {
         ".heic",
+        ".heif",
         ".jpg",
         ".jpeg", // Non-canonical version required, matching file may not yet have been normalized
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
@@ -343,7 +344,7 @@ internal sealed class ProcessTask(
 
     private async Task<bool> DeleteLivePhotosAsync()
     {
-        // Live photos are MOV or MP4 about ~3s long with a matching HEIC or JPEG file
+        // Live photos are MOV or MP4 about ~3s long with a matching HEIC, HEIF, or JPEG file
         if (!s_liveVideoExtensions.Contains(fileInfo.Extension))
         {
             return true;
