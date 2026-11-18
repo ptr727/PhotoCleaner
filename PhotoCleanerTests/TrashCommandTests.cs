@@ -307,7 +307,7 @@ public sealed class TrashCommandTests
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
             long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
-            count.Should().Be(1); // INSERT OR IGNORE deduplicates
+            count.Should().Be(1); // The upsert on sha1 keeps one row per checksum
         }
         finally
         {
