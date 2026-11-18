@@ -30,7 +30,7 @@ Never run `process`, or any other command that changes files, on the mirror or o
 
 An `import` from the mirror skips every file whose whole-file SHA-256 is already in its database. A rename at the source therefore adds no second copy. Rerun the command after each sync to add what is new.
 
-Leave `--trashdb` off the import into Originals, so the archive keeps every file the mirror delivered, including one the owner later trashed. Passing `--trashdb` on that first import is a valid variant. It matches only files whose untagged bytes the server holds, so it keeps little out of the archive in this chain. Pass `--trashdb` to the second import and to `process`, where a trash database exists. See "Keeping Removed Photos Out" for what each check can match. The [Workflow Example][readme-workflow] lists the commands for the whole chain with rclone as the source.
+Leave `--trashdb` off the import into Originals, so the archive keeps every file the mirror delivered, including one the owner later trashed. Passing `--trashdb` on that first import is a valid variant. It matches only files whose untagged bytes the server held, so it keeps little out of the archive in this chain. Pass `--trashdb` to the second import and to `process`, where a trash database exists. See "Keeping Removed Photos Out" for what each check can match. The [Workflow Example][readme-workflow] lists the commands for the whole chain with rclone as the source.
 
 ## Adopting a New Source for a Library the Server Already Holds
 
@@ -43,7 +43,7 @@ Moving to a new source for a library that the photo server already holds risks a
 
 Compare the catalogs with SQLite, using the `files` table of each database. Review the matches before you act on them.
 
-An import database records that bytes were imported once. It does not record that an upload succeeded or that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Confirm the upload first. Evidence is that the photo server holds the asset in its library or its trash, found by checksum or by the visual comparison below. The upload tool's own log showing the upload is evidence too. Import history alone is not evidence. Then skip the file rather than re-importing it.
+An import database records that bytes were imported once. It does not record that an upload succeeded or that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Confirm the upload first. Evidence is that the photo server holds the asset in its library or its trash, found by checksum or by the visual comparison below. The upload tool's own log showing the upload is evidence too, and so is a `trash_hashes` row for the uploaded file. Import history alone is not evidence. Then skip the file rather than re-importing it.
 
 ## Re-encoded Copies and the Limits of Each Key
 
@@ -104,7 +104,7 @@ The server stores and trashes the tagged copy that was uploaded, so its hash dif
 
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
-The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table by its `sha1`, and keep the rest, because purged assets leave no other record.
+The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table, and keep the rest, because purged assets leave no other record. The `sha1` column holds lowercase hex, not the server's Base64 checksum, so find the row by `original_file_name` or convert the checksum.
 
 ## Live Photos
 
