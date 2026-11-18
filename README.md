@@ -58,11 +58,12 @@ See [Release History][history] for complete release notes and older versions.
 
 PhotoCleaner analyzes and transforms media files through a validation pipeline that:
 
-- **Renames mismatched extensions**: Corrects file extensions that do not match the actual file
-  content (MIME type), normalizes to the preferred extension (e.g. `.jpeg` -> `.jpg`), and strips
-  compound extensions (e.g. `photo.heic.jpg` -> `photo.jpg`).
-- **Renames mixed-case extensions**: Converts uppercase or mixed-case extensions to lowercase
-  (e.g. `.JPG` -> `.jpg`).
+- **Renames mismatched extensions**: Corrects an extension that does not match the file content
+  (MIME type) and normalizes to the preferred extension (e.g. `.jpeg` -> `.jpg`). It also
+  strips compound extensions (e.g. `photo.heic.jpg` -> `photo.jpg`). When another file already holds
+  the corrected name, the renamed file takes the next free name (e.g. `photo_1.jpg`).
+- **Renames mixed-case extensions**: Converts mixed-case extensions to lowercase
+  (e.g. `.Jpg` -> `.jpg`). An all-uppercase extension such as `.JPG` is kept.
 - **Handles Live Photos**: Removes Apple Live Photo video components. Videos <= 1s are always
   removed. Videos <= 4s with a companion image are removed when both files share the same
   `ContentIdentifier` EXIF tag. With `--db` the image is found by that tag in the database,
@@ -224,7 +225,7 @@ Options:
 - `--path`: must point to an existing directory. Accepts exactly one directory per command
   invocation.
 - `--threads`: defaults to `min(CPU count, 4)`. Must be `> 0` and `<= CPU count`.
-- `--skipbackup`: opt-in (`process` only). Skips all `.bak` file creation. The `undo`
+- `--skipbackup`: opt-in (`process` only). Leaves no `.bak` file behind. The `undo`
   command cannot reverse a run made with this flag.
 - `--outpath`: required for `import`. Target directory (created on demand).
 - `--format`: optional (`import` only). A C# date format string used to name date
@@ -438,7 +439,7 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
       `_hevc`-suffix match in the same folder is used.
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
-      - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k)
+      - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
@@ -468,9 +469,9 @@ directories for backup files and applying a two-pass algorithm:
      `stem_1.mp4`). If no companion exists, falls back to deleting `stem.mp4` when present
      and untracked (legacy single-run heuristic).
 
-**Known limitation**: extension renames that target a filename that did not previously exist
-(e.g. `photo.JPEG` -> `photo.jpg` when `photo.jpg` was absent) create no backup and cannot be
-undone by this command.
+**Known limitation**: extension renames (e.g. `photo.JPEG` -> `photo.jpg`) create no backup and
+cannot be undone by this command. When another file already holds the target name, the renamed
+file takes the next free name (e.g. `photo_1.jpg`) and the other file is left untouched.
 
 ## Import Flow
 

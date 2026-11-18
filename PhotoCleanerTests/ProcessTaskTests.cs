@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CliWrap;
+using CliWrap.Buffered;
 using PhotoCleaner;
 using Serilog;
 using Serilog.Core;
@@ -216,6 +217,154 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
             File.Exists(Path.Combine(workDir, "photo.jpg")).Should().BeTrue();
             File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_MismatchedMimeExtensionNameTaken_RenamesToFreeName(
+        bool skipBackup
+    )
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        InMemorySink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            // JPEG bytes saved as .dng, beside a different file already named photo.jpg
+            string filePath = Path.Combine(workDir, "photo.dng");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            string takenPath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), takenPath);
+            byte[] takenBytes = await File.ReadAllBytesAsync(
+                takenPath,
+                TestContext.Current.CancellationToken
+            );
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeFalse();
+            string freePath = Path.Combine(workDir, "photo_1.jpg");
+            (await File.ReadAllBytesAsync(freePath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(
+                    await File.ReadAllBytesAsync(
+                        fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                        TestContext.Current.CancellationToken
+                    )
+                );
+            (await File.ReadAllBytesAsync(takenPath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(takenBytes);
+            Directory.GetFiles(workDir, "*.bak*").Should().BeEmpty();
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains("is taken", StringComparison.Ordinal)
+                    && e.RenderMessage().Contains("photo_1.jpg", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_MixedCaseExtensionNameTaken_RenamesToFreeName(bool skipBackup)
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Two case variants are two files only on a case-sensitive filesystem.
+            if (!TempDirectoryFixture.IsFileSystemCaseSensitive(workDir))
+            {
+                Assert.Skip(
+                    "Filesystem is case-insensitive; a case-variant name cannot hold a second file"
+                );
+            }
+
+            string filePath = Path.Combine(workDir, "photo.Jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            string takenPath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), takenPath);
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(Path.Combine(workDir, "photo_1.jpg")).Should().BeTrue();
+            (await File.ReadAllBytesAsync(takenPath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(
+                    await File.ReadAllBytesAsync(
+                        fixture.SourceFile(TempDirectoryFixture.SmallPngFile),
+                        TestContext.Current.CancellationToken
+                    )
+                );
+            Directory.GetFiles(workDir, "*.bak*").Should().BeEmpty();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_MixedCaseExtensionCaseInsensitive_KeepsName(bool skipBackup)
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Only a case-insensitive filesystem reports the source under its lowercase name.
+            if (TempDirectoryFixture.IsFileSystemCaseSensitive(workDir))
+            {
+                Assert.Skip(
+                    "Filesystem is case-sensitive; a case-only rename cannot meet the source itself"
+                );
+            }
+
+            string filePath = Path.Combine(workDir, "photo.Jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            Directory.GetFiles(workDir).Select(Path.GetFileName).Should().Equal("photo.jpg");
         }
         finally
         {
@@ -658,6 +807,65 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    // -- Video conversion - odd dimensions ------------------------------------
+
+    [Theory]
+    [InlineData(25, 70, 26, 70)]
+    [InlineData(64, 33, 64, 34)]
+    public async Task ExecuteAsync_GifFileOddDimensions_PadsToEvenDimensions(
+        int width,
+        int height,
+        int expectedWidth,
+        int expectedHeight
+    )
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "odd.gif");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    $"testsrc=s={width}x{height}:r=5",
+                    "-t",
+                    "1",
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            string outputPath = Path.ChangeExtension(filePath, ".mp4");
+            File.Exists(outputPath).Should().BeTrue();
+            BufferedCommandResult probe = await Cli.Wrap("ffprobe")
+                .WithArguments([
+                    "-loglevel",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height",
+                    "-of",
+                    "csv=p=0",
+                    outputPath,
+                ])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            probe.StandardOutput.Trim().Should().Be($"{expectedWidth},{expectedHeight}");
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- Video conversion - PCM audio -----------------------------------------
 
     [Fact]
@@ -729,6 +937,30 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
             File.Exists(filePath + ".bak").Should().BeTrue();
             File.Exists(filePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Mp4WithPcmAudio_SkipBackup_KeepsSameName()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMp4File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMp4File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(filePath, skipBackup: true);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeTrue();
+            Directory.GetFiles(workDir).Should().ContainSingle();
         }
         finally
         {

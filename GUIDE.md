@@ -117,13 +117,8 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
 - **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
 - **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded. Two identical files in one parallel run may both be copied. The count can then differ from a dry run by the number of such twins.
-- **`process` renames a file whose extension disagrees with its content.** It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so a short or static GIF can vanish. Keep backups, and check short GIFs before you run with `--skipbackup`.
+- **`process` renames a file whose extension disagrees with its content.** When another file already holds the corrected name, the renamed file takes the next free name, such as `photo_1.jpg`, and the run logs a warning. It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so a short or static GIF can vanish. Keep backups, and check short GIFs before you run with `--skipbackup`.
 - **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
-
-## Known Issues
-
-- [Issue 280][issue-280-link]: a rename collision with `--skipbackup` deletes the file that holds the target name. Check for same-stem files first, or keep the backups.
-- [Issue 281][issue-281-link]: a GIF with an odd width or height fails conversion, animated or not.
 
 <!-- Repo -->
 
@@ -131,11 +126,6 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 [architecture-livephoto]: ./ARCHITECTURE.md#live-photo-detection
 [readme]: ./README.md
 [readme-workflow]: ./README.md#workflow-example
-
-<!-- Distribution -->
-
-[issue-280-link]: https://github.com/ptr727/PhotoCleaner/issues/280
-[issue-281-link]: https://github.com/ptr727/PhotoCleaner/issues/281
 
 <!-- External -->
 
