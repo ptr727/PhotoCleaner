@@ -58,6 +58,7 @@ internal sealed class ProcessTask(
     private static readonly FrozenSet<string> s_liveVideoImageExtensions = new[]
     {
         ".heic",
+        ".heif",
         ".jpg",
         ".jpeg", // Non-canonical version required, matching file may not yet have been normalized
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);

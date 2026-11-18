@@ -770,7 +770,7 @@ docker run --rm \
 ```
 
 `process` removes a Live Photo video when all of these hold. The video is a `.mov` or `.mp4`. The
-process database knows a HEIC, JPG, or JPEG still with the same Apple `ContentIdentifier`. The video
+process database knows a HEIC, HEIF, JPG, or JPEG still with the same Apple `ContentIdentifier`. The video
 is under the Live Photo length bound. File names and date folders do not matter. It also removes a
 `.mov` or `.mp4` video at or under the `--duration` threshold. `import` keeps the original and the
 edited rendition. The `-edited` name tells them apart.
