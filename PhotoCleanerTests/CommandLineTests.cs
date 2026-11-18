@@ -839,7 +839,11 @@ public sealed class CommandLineTests
                 processDbPath,
             ]);
 
+            CommandLine.Options options = cli.CreateOptions(cli.Result);
+
             cli.Result.Errors.Should().BeEmpty();
+            options.DbFile.Should().NotBeNull();
+            options.DbFile.FullName.Should().Be(new FileInfo(processDbPath).FullName);
         }
         finally
         {

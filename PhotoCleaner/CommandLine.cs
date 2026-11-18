@@ -27,6 +27,7 @@ internal sealed class CommandLine
     private readonly Option<FileInfo?> _trashDbFileOption = CreateTrashDbFileOption();
     private readonly Option<FileInfo?> _skipDbFileOption = CreateSkipDbFileOption();
     private readonly Option<bool> _imageHashOption = CreateImageHashOption();
+    private readonly Option<FileInfo?> _processDbFileOption = CreateProcessDbFileOption();
 
     private static readonly FrozenSet<string> s_cliBypassList = FrozenSet.Create(
         StringComparer.OrdinalIgnoreCase,
@@ -222,19 +223,6 @@ internal sealed class CommandLine
             Description = "SQLite database to store Immich trash hashes",
             Required = true,
         };
-        Option<FileInfo?> processDbOption = new("--processdb")
-        {
-            Description =
-                "Process database used to record the image data hash of each trashed asset (read-only)",
-        };
-        processDbOption.Validators.Add(result =>
-        {
-            FileInfo? file = result.GetValue(processDbOption);
-            if (file is not null && !file.Exists)
-            {
-                result.AddError($"File does not exist: '{file.FullName}'");
-            }
-        });
 
         Command command = new("trash", "Sync trashed asset hashes from Immich")
         {
@@ -242,7 +230,7 @@ internal sealed class CommandLine
             apiKeyOption,
             apiKeyFileOption,
             requiredTrashDbOption,
-            processDbOption,
+            _processDbFileOption,
         };
         command.Validators.Add(result =>
         {
@@ -274,7 +262,6 @@ internal sealed class CommandLine
                 new TrashCommand(
                     CreateOptions(
                         parseResult,
-                        dbPathOverride: parseResult.GetValue(processDbOption),
                         immichUrl: parseResult.GetValue(requiredUrlOption),
                         immichApiKey: ResolveApiKey(
                             parseResult.GetValue(apiKeyOption),
@@ -339,7 +326,9 @@ internal sealed class CommandLine
             Move = parseResult.GetValue(_moveOption),
             TagPath = parseResult.GetValue(_tagPathOption),
             Tags = parseResult.GetValue(_tagsOption),
-            DbFile = dbPathOverride ?? parseResult.GetValue(_dbFileOption),
+            DbFile = dbPathOverride
+                ?? parseResult.GetValue(_dbFileOption)
+                ?? parseResult.GetValue(_processDbFileOption),
             Rehash = parseResult.GetValue(_rehashOption),
             ShortVideoDuration = parseResult.GetValue(_durationOption),
             Reprocess = parseResult.GetValue(_reprocessOption),
@@ -451,6 +440,24 @@ internal sealed class CommandLine
         Option<FileInfo?> option = new("--skipdb")
         {
             Description = "SQLite database with indexed files to be skipped (read-only)",
+        };
+        option.Validators.Add(result =>
+        {
+            FileInfo? file = result.GetValue(option);
+            if (file is not null && !file.Exists)
+            {
+                result.AddError($"File does not exist: '{file.FullName}'");
+            }
+        });
+        return option;
+    }
+
+    private static Option<FileInfo?> CreateProcessDbFileOption()
+    {
+        Option<FileInfo?> option = new("--processdb")
+        {
+            Description =
+                "Process database used to record the image data hash of each trashed asset (read-only)",
         };
         option.Validators.Add(result =>
         {

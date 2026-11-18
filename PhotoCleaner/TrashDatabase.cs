@@ -70,14 +70,12 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
         }
     }
 
-    private async Task<bool> HasImageHashColumnAsync(CancellationToken cancellationToken)
-    {
-        using SqliteCommand cmd = _connection!.CreateCommand();
-        cmd.CommandText =
-            "SELECT COUNT(*) FROM pragma_table_info('trash_hashes') WHERE name = 'image_hash'";
-        object? result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return result is long count && count > 0;
-    }
+    private async Task<bool> HasImageHashColumnAsync(CancellationToken cancellationToken) =>
+        (
+            await Database
+                .GetColumnNamesAsync(_connection!, "trash_hashes", cancellationToken)
+                .ConfigureAwait(false)
+        ).Contains("image_hash");
 
     private async Task ValidateSchemaAsync(CancellationToken cancellationToken)
     {
@@ -100,9 +98,6 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
         ON CONFLICT (sha1) DO UPDATE SET image_hash = COALESCE(trash_hashes.image_hash, excluded.image_hash)
         """;
 
-    private static object DbValue(string? value) =>
-        string.IsNullOrEmpty(value) ? DBNull.Value : value;
-
     internal Task InsertHashAsync(
         string sha1Hex,
         string? originalFileName = null,
@@ -118,7 +113,7 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
                     "@name",
                     originalFileName is not null ? originalFileName : DBNull.Value
                 );
-                _ = cmd.Parameters.AddWithValue("@imageHash", DbValue(imageHash));
+                _ = cmd.Parameters.AddWithValue("@imageHash", (object?)imageHash ?? DBNull.Value);
                 _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             },
             cancellationToken
@@ -154,7 +149,7 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
                         nameParam.Value = originalFileName is not null
                             ? originalFileName
                             : DBNull.Value;
-                        imageHashParam.Value = DbValue(imageHash);
+                        imageHashParam.Value = (object?)imageHash ?? DBNull.Value;
                         _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                     }
 
@@ -200,6 +195,36 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
                 },
                 cancellationToken
             );
+
+    /// <summary>
+    /// Lists the SHA-1 of every row that has no image data hash yet.
+    /// </summary>
+    internal Task<List<string>> GetSha1sWithoutImageHashAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "SELECT sha1 FROM trash_hashes WHERE image_hash IS NULL";
+                List<string> sha1s = [];
+                SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                try
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        sha1s.Add(reader.GetString(0));
+                    }
+                }
+                finally
+                {
+                    await reader.DisposeAsync().ConfigureAwait(false);
+                }
+
+                return sha1s;
+            },
+            cancellationToken
+        );
 
     internal Task<long> GetCountAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync(

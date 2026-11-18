@@ -106,6 +106,8 @@ The server stores and trashes the tagged copy that was uploaded, so its hash dif
 
 To match by image data as well, run `trash` with `--processdb` naming the process database. It then records the `image_hash` of each trashed processed file. Pass `--imagehash` to `import` and `process` to treat a file with a recorded `image_hash` as trashed. This catches a copy whose metadata differs, such as the untagged source of a tagged upload. A format ExifTool cannot hash has no `image_hash` and is still matched by SHA-1 alone.
 
+The match covers every copy with that image data, including one the owner kept. Where the server held two copies that differ only in metadata and the owner trashed one, `process --imagehash` deletes the kept copy's processed file. `import --imagehash` skips its source. Leave `--imagehash` off for a library whose duplicates were culled this way.
+
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
 The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex. Run `sha1sum` on the restored original downloaded from the server, which prints that form. A file name can repeat, so do not select the row by name. With `--imagehash`, also delete any other row carrying the same `image_hash`.

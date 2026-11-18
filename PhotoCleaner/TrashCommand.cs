@@ -59,7 +59,6 @@ internal sealed class TrashCommand(
 
         bool partialSync = false;
         long totalFetched = 0;
-        long totalImageHashes = 0;
         long countBefore = await trashDatabase
             .GetCountAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -110,23 +109,12 @@ internal sealed class TrashCommand(
                     continue;
                 }
 
-                string? imageHash = processDatabase is null
-                    ? null
-                    : await processDatabase
-                        .GetImageHashBySha1Async(sha1Hex, cancellationToken)
-                        .ConfigureAwait(false);
-                if (imageHash is not null)
-                {
-                    totalImageHashes++;
-                }
-
                 Log.Debug(
-                    "Trashed asset '{FileName}' with SHA-1 '{Sha1}' and image data hash '{ImageHash}'",
+                    "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
                     asset.OriginalFileName,
-                    sha1Hex,
-                    imageHash
+                    sha1Hex
                 );
-                batch.Add((sha1Hex, asset.OriginalFileName, imageHash));
+                batch.Add((sha1Hex, asset.OriginalFileName, null));
             }
 
             if (batch.Count > 0)
@@ -169,15 +157,44 @@ internal sealed class TrashCommand(
             totalInserted,
             countAfter
         );
+
         if (processDatabase is not null)
         {
-            Log.Information(
-                "Found image data hashes for {ImageHashCount} trashed assets in the process database",
-                totalImageHashes
-            );
+            await RecordImageHashesAsync(trashDatabase, processDatabase).ConfigureAwait(false);
         }
 
         return partialSync;
+    }
+
+    // Every row without an image hash is looked up, including assets already purged from the server.
+    private async Task RecordImageHashesAsync(TrashDatabase trashDatabase, Database processDatabase)
+    {
+        List<string> sha1s = await trashDatabase
+            .GetSha1sWithoutImageHashAsync(cancellationToken)
+            .ConfigureAwait(false);
+        List<(string Sha1Hex, string? OriginalFileName, string? ImageHash)> found = [];
+        foreach (string sha1 in sha1s)
+        {
+            string? imageHash = await processDatabase
+                .GetImageHashBySha1Async(sha1, cancellationToken)
+                .ConfigureAwait(false);
+            if (imageHash is not null)
+            {
+                Log.Debug(
+                    "Trashed asset with SHA-1 '{Sha1}' has image data hash '{ImageHash}'",
+                    sha1,
+                    imageHash
+                );
+                found.Add((sha1, null, imageHash));
+            }
+        }
+
+        await trashDatabase.InsertHashesAsync(found, cancellationToken).ConfigureAwait(false);
+        Log.Information(
+            "Recorded image data hashes for {FoundCount} of {MissingCount} trashed assets without one",
+            found.Count,
+            sha1s.Count
+        );
     }
 
     private HttpClient CreateDefaultHttpClient()

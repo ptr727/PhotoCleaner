@@ -54,7 +54,8 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         {
             await ValidateSchemaAsync(cancellationToken).ConfigureAwait(false);
             HasImageHash = (
-                await GetColumnNamesAsync(cancellationToken).ConfigureAwait(false)
+                await GetColumnNamesAsync(_connection, "files", cancellationToken)
+                    .ConfigureAwait(false)
             ).Contains("image_hash");
         }
         else
@@ -89,11 +90,16 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         }
     }
 
-    private async Task<HashSet<string>> GetColumnNamesAsync(CancellationToken cancellationToken)
+    internal static async Task<HashSet<string>> GetColumnNamesAsync(
+        SqliteConnection connection,
+        string table,
+        CancellationToken cancellationToken
+    )
     {
         HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
-        using SqliteCommand cmd = _connection!.CreateCommand();
-        cmd.CommandText = "SELECT name FROM pragma_table_info('files')";
+        using SqliteCommand cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT name FROM pragma_table_info(@table)";
+        _ = cmd.Parameters.AddWithValue("@table", table);
         using SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
             .ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -113,7 +119,11 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
 
     private async Task UpgradeSchemaAsync(CancellationToken cancellationToken)
     {
-        HashSet<string> columns = await GetColumnNamesAsync(cancellationToken)
+        HashSet<string> columns = await GetColumnNamesAsync(
+                _connection!,
+                "files",
+                cancellationToken
+            )
             .ConfigureAwait(false);
         int present = s_catalogColumns.Count(columns.Contains);
         if (present == 3)
@@ -269,7 +279,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                 async cmd =>
                 {
                     cmd.CommandText =
-                        "SELECT image_hash FROM files WHERE sha1 = @sha1 AND image_hash IS NOT NULL AND image_hash <> '' ORDER BY path LIMIT 1";
+                        "SELECT image_hash FROM files WHERE sha1 = @sha1 AND image_hash IS NOT NULL ORDER BY path LIMIT 1";
                     _ = cmd.Parameters.AddWithValue("@sha1", sha1);
                     object? result = await cmd.ExecuteScalarAsync(cancellationToken)
                         .ConfigureAwait(false);

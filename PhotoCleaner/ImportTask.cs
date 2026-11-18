@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CliWrap;
 using CliWrap.Buffered;
 
@@ -11,6 +12,8 @@ internal sealed class ImportTask(
     SkippedExtensionTracker skippedExtensions
 )
 {
+    private readonly ConcurrentDictionary<string, string> _claims = new(StringComparer.Ordinal);
+
     private static readonly FrozenSet<string> s_exiftoolWriteExtensions = new[]
     {
         ".3gp",
@@ -149,6 +152,7 @@ internal sealed class ImportTask(
         FileRecord? cached = null;
         ExifToolJson? meta = null;
         bool metaRead = false;
+        string? imageHash = null;
         if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
             // ResolveHashesAsync returns cached hashes when size and mtime still match disk.
@@ -221,15 +225,37 @@ internal sealed class ImportTask(
             {
                 meta = await GetFileMetaAsync(file, true, cancellationToken).ConfigureAwait(false);
                 metaRead = true;
+                imageHash = FileMetadata.FromExifTool(meta)?.ImageHash;
                 ImportResult? imageHashResult = await CheckImageHashAsync(
                         file,
-                        FileMetadata.FromExifTool(meta)?.ImageHash,
+                        imageHash,
                         cancellationToken
                     )
                     .ConfigureAwait(false);
                 if (imageHashResult is not null)
                 {
                     return imageHashResult.Value;
+                }
+            }
+
+            // Parallel files that match each other both pass the checks above before either row exists.
+            // The first to claim a hash imports, and the rest skip as a sequential run would.
+            if (database is not null)
+            {
+                string? claimedBy = ClaimedBy("sha256:" + sha256, file)
+                    ?? (
+                        options.ImageHash && !string.IsNullOrEmpty(imageHash)
+                            ? ClaimedBy("image:" + imageHash, file)
+                            : null
+                    );
+                if (claimedBy is not null)
+                {
+                    Log.Information(
+                        "Skipping '{FilePath}' matching '{KnownPath}' earlier in this run",
+                        file,
+                        claimedBy
+                    );
+                    return ImportResult.Skipped;
                 }
             }
         }
@@ -443,6 +469,12 @@ internal sealed class ImportTask(
             );
             return ImportResult.Failed;
         }
+    }
+
+    private string? ClaimedBy(string key, string file)
+    {
+        string owner = _claims.GetOrAdd(key, file);
+        return owner == file ? null : owner;
     }
 
     private async Task<ImportResult?> CheckImageHashAsync(

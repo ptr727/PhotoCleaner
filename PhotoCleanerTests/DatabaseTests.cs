@@ -628,6 +628,18 @@ public sealed class DatabaseTests
                 new FileRecord("/source/clip.gif", "sha256-a", "sha1-a", 10L, 0L, false),
                 TestContext.Current.CancellationToken
             );
+            await db.InsertAsync(
+                new FileRecord(
+                    "/source/other.gif",
+                    "sha256-b",
+                    "sha1-b",
+                    10L,
+                    0L,
+                    false,
+                    ImageHash: ""
+                ),
+                TestContext.Current.CancellationToken
+            );
 
             (await db.FindPathByImageHashAsync(null, TestContext.Current.CancellationToken))
                 .Should()

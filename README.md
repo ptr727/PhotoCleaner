@@ -315,11 +315,15 @@ Options:
   - The whole-file checks run first. A format ExifTool cannot hash has no image data hash, so it
     keeps whole-file matching only. An empty hash never matches.
   - A trash DB holds image data hashes only when `trash` ran with `--processdb`.
+  - A trashed copy's image data hash also matches a kept copy that differs only in metadata.
+    After a duplicate cull in Immich, `process --imagehash` deletes the kept copy's processed file,
+    and `import --imagehash` skips its source.
 - `--processdb <path>`: optional (`trash` only). Path to the Process.db of the files that were
   uploaded, opened read-only. For each trashed asset, `trash` looks up the row with the asset's
   SHA-1 and records that row's `image_hash` in the trash DB. An asset with no such row, or a row
-  with no image hash, is recorded by SHA-1 alone. A later run with this option fills the image
-  hash of a row recorded without it. Without this option `trash` records SHA-1 hashes only.
+  with no image hash, is recorded by SHA-1 alone. Each run with this option looks up every row
+  that has no image hash yet, including assets the server has since purged. Without this option
+  `trash` records SHA-1 hashes only.
 - `--url <url>`: **required** for `trash`. The Immich server URL (e.g. `http://immich:2283`).
 - `--apikey <key>` / `--apikey-file <path>`: the Immich API key for `trash`. Supply it via
   exactly one of these two mutually exclusive options (one is required). Create the key in Immich
@@ -836,7 +840,7 @@ against a photo server.
 
 Where the new bytes differ only in metadata, `import --imagehash` skips them without this step.
 The import database records the `image_hash` of each source it imports. A row written before that
-column existed holds none until `index` reads its file again. A re-encoded copy still looks new.
+column existed holds none, so it matches nothing by image data. A re-encoded copy still looks new.
 
 **Run PhotoCleaner to verify Immich can render the photos**:
 

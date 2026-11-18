@@ -329,10 +329,36 @@ public sealed class TrashCommandTests
             byte[] sha1b = new byte[20];
             sha1b[0] = 0x02;
 
-            // The process database knows the uploaded file behind the first asset only
+            // A row synced earlier for an asset the server has since purged
+            byte[] sha1c = new byte[20];
+            sha1c[0] = 0x03;
+            await using (TrashDatabase seed = new(dbPath))
+            {
+                await seed.InitializeAsync(TestContext.Current.CancellationToken);
+                await seed.InsertHashAsync(
+                    Convert.ToHexStringLower(sha1c),
+                    "IMG_5678.HEIC",
+                    cancellationToken: TestContext.Current.CancellationToken
+                );
+            }
+
+            // The process database knows the first asset and the purged one, not the second
             await using (Database processDb = new(processDbPath))
             {
                 await processDb.InitializeAsync(TestContext.Current.CancellationToken);
+                await processDb.InsertAsync(
+                    new FileRecord(
+                        "/processed/IMG_5678.HEIC",
+                        "sha256-c",
+                        Convert.ToHexStringLower(sha1c),
+                        10L,
+                        0L,
+                        true,
+                        ImageHash: "imagehash-c",
+                        MetadataRead: true
+                    ),
+                    TestContext.Current.CancellationToken
+                );
                 await processDb.InsertAsync(
                     new FileRecord(
                         "/processed/IMG_1234.HEIC",
@@ -367,10 +393,16 @@ public sealed class TrashCommandTests
             exitCode.Should().Be(ExitCode.Success);
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
-            (await db.GetCountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+            (await db.GetCountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
             (await db.ImageHashExistsAsync("imagehash-a", TestContext.Current.CancellationToken))
                 .Should()
                 .Be(withProcessDb);
+            (await db.ImageHashExistsAsync("imagehash-c", TestContext.Current.CancellationToken))
+                .Should()
+                .Be(withProcessDb);
+            (await db.GetSha1sWithoutImageHashAsync(TestContext.Current.CancellationToken))
+                .Should()
+                .HaveCount(withProcessDb ? 1 : 3);
         }
         finally
         {

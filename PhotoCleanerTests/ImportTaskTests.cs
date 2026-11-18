@@ -1943,4 +1943,54 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Delete(trashDbPath);
         }
     }
+
+    // -- Claims: files of one run that match each other import once ------------
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_DryRunWithDatabase_MatchingFilesInOneRun_ImportOnce(
+        bool imageHash
+    )
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            // A dry run inserts no rows, so only the in-run claim can catch the second file
+            (string original, string copy) = await CreateMetadataOnlyCopyAsync(srcDir);
+            string second = imageHash ? copy : Path.Combine(srcDir, "IMG_1234 (1).jpg");
+            if (!imageHash)
+            {
+                File.Copy(original, second);
+            }
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            ImportTask task = new(
+                CreateOptions(outDir, dryRun: true, imageHash: imageHash),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, int skipped, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [original, second],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            skipped.Should().Be(1);
+            failed.Should().Be(0);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
 }
