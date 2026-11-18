@@ -14,7 +14,7 @@ internal sealed class ImportTask(
 {
     private readonly ConcurrentDictionary<string, Claim> _claims = new(StringComparer.Ordinal);
 
-    private sealed record Claim(string File)
+    internal sealed record Claim(string File)
     {
         internal TaskCompletionSource<bool> Imported { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -154,15 +154,20 @@ internal sealed class ImportTask(
         }
         finally
         {
-            foreach ((string key, Claim claim) in claimed)
-            {
-                if (result != ImportResult.Imported)
-                {
-                    _ = _claims.TryRemove(new KeyValuePair<string, Claim>(key, claim));
-                }
+            ReleaseClaims(claimed, result == ImportResult.Imported);
+        }
+    }
 
-                _ = claim.Imported.TrySetResult(result == ImportResult.Imported);
+    internal void ReleaseClaims(List<(string Key, Claim Claim)> claimed, bool imported)
+    {
+        foreach ((string key, Claim claim) in claimed)
+        {
+            if (!imported)
+            {
+                _ = _claims.TryRemove(new KeyValuePair<string, Claim>(key, claim));
             }
+
+            _ = claim.Imported.TrySetResult(imported);
         }
     }
 
@@ -275,7 +280,8 @@ internal sealed class ImportTask(
             }
 
             // Parallel files that match each other both pass the checks above before either row exists.
-            // The first to claim a hash goes on, and the rest wait for its outcome as a sequential run would.
+            // The first to claim a hash goes on, and the rest wait for its outcome, so the counts match a sequential run.
+            // Which of the matching files claims first depends on timing when more than one thread runs.
             // SHA-256 is always claimed before the image hash, and no file waits while holding an image hash.
             if (database is not null)
             {
@@ -520,7 +526,7 @@ internal sealed class ImportTask(
         }
     }
 
-    private async Task<string?> ClaimedByAsync(
+    internal async Task<string?> ClaimedByAsync(
         string key,
         string file,
         List<(string Key, Claim Claim)> claimed,

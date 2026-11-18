@@ -42,6 +42,9 @@ internal sealed class ImportCommand(
                                                     if (options.ImageHash)
                                                     {
                                                         trashDatabase?.WarnIfImageHashMissing();
+                                                        await MediaUtilities
+                                                            .EnsureImageHashSupportAsync()
+                                                            .ConfigureAwait(false);
                                                     }
 
                                                     ImportTask task = new(

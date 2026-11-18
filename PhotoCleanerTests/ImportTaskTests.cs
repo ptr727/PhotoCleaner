@@ -2052,4 +2052,68 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Delete(dbPath);
         }
     }
+
+    [Fact]
+    public async Task ClaimedByAsync_WaiterOnRunningOwner_ClaimsWhenReleasedAndSkipsWhenImported()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+        ImportTask task = new(CreateOptions(Path.GetTempPath()), null, null, null, new());
+
+        List<(string Key, ImportTask.Claim Claim)> ownerClaims = [];
+        (await task.ClaimedByAsync("sha256:a", "/src/IMG_1234.HEIC", ownerClaims, ct))
+            .Should()
+            .BeNull();
+
+        // The owner is still running, so the second file waits rather than skipping
+        List<(string Key, ImportTask.Claim Claim)> secondClaims = [];
+        Task<string?> second = task.ClaimedByAsync(
+            "sha256:a",
+            "/src/IMG_1234 (1).HEIC",
+            secondClaims,
+            ct
+        );
+        second.IsCompleted.Should().BeFalse();
+
+        // The owner does not import, so the waiting file takes the claim
+        task.ReleaseClaims(ownerClaims, imported: false);
+        (await second).Should().BeNull();
+        secondClaims.Should().ContainSingle();
+
+        // A third file waits on the new owner, which imports, so the third skips
+        Task<string?> third = task.ClaimedByAsync("sha256:a", "/src/IMG_1234 (2).HEIC", [], ct);
+        third.IsCompleted.Should().BeFalse();
+        task.ReleaseClaims(secondClaims, imported: true);
+        (await third).Should().Be("/src/IMG_1234 (1).HEIC");
+    }
+
+    [Fact]
+    public async Task ClaimedByAsync_WaiterCancelled_ThrowsWithoutClaiming()
+    {
+        ImportTask task = new(CreateOptions(Path.GetTempPath()), null, null, null, new());
+        List<(string Key, ImportTask.Claim Claim)> ownerClaims = [];
+        (
+            await task.ClaimedByAsync(
+                "image:a",
+                "/src/IMG_1234.HEIC",
+                ownerClaims,
+                TestContext.Current.CancellationToken
+            )
+        )
+            .Should()
+            .BeNull();
+
+        using CancellationTokenSource cts = new();
+        List<(string Key, ImportTask.Claim Claim)> waiterClaims = [];
+        Task<string?> waiter = task.ClaimedByAsync(
+            "image:a",
+            "/src/IMG_1234 (1).HEIC",
+            waiterClaims,
+            cts.Token
+        );
+        await cts.CancelAsync();
+
+        Func<Task> act = () => waiter;
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        waiterClaims.Should().BeEmpty();
+    }
 }
