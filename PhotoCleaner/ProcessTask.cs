@@ -562,7 +562,7 @@ internal sealed class ProcessTask(
                 "-y",
                 "-i",
                 fileInfo.FullName,
-                // The libx264 encoder at yuv420p needs even dimensions, so an odd edge gains one padded row.
+                // The libx264 encoder at yuv420p needs even dimensions, so an odd edge gains one padded row or column.
                 "-vf",
                 "pad=ceil(iw/2)*2:ceil(ih/2)*2",
                 "-c:v",
@@ -641,11 +641,9 @@ internal sealed class ProcessTask(
                 .WithArguments(ffmpegArguments)
                 .ExecuteBufferedAsync(cancellationToken);
 
-            // Backup original file (or keep it on disk if skipbackup, to read metadata from)
+            // The original moves aside to a backup name in both modes, so the output can take its name.
             _modified = true;
-            string sourceForMetadata = options.SkipBackup
-                ? fileInfo.FullName
-                : BackupFile(fileInfo.FullName, false);
+            string sourceForMetadata = BackupFile(fileInfo.FullName, false);
 
             // Rename temp output to MP4; use a unique name if target already exists
             string outputFile = MediaUtilities.GetUniqueFileName(
@@ -812,12 +810,7 @@ internal sealed class ProcessTask(
         }
         else
         {
-            Log.Information(
-                "Renaming '{SourcePath}' to '{DestinationPath}'",
-                fileName,
-                backupFileName
-            );
-            File.Move(fileName, backupFileName, false);
+            RenameFile(fileName, backupFileName);
         }
 
         return backupFileName;

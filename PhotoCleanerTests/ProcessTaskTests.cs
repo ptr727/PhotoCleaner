@@ -336,6 +336,42 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_MixedCaseExtensionCaseInsensitive_KeepsName(bool skipBackup)
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            // Only a case-insensitive filesystem reports the source under its lowercase name.
+            if (TempDirectoryFixture.IsFileSystemCaseSensitive(workDir))
+            {
+                Assert.Skip(
+                    "Filesystem is case-sensitive; a case-only rename cannot meet the source itself"
+                );
+            }
+
+            string filePath = Path.Combine(workDir, "photo.Jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            Directory.GetFiles(workDir).Select(Path.GetFileName).Should().Equal("photo.jpg");
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- Live photos / short videos -------------------------------------------
 
     [Fact]
@@ -901,6 +937,30 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             result.Should().Be(ProcessTask.ProcessResult.Reprocess);
             File.Exists(filePath + ".bak").Should().BeTrue();
             File.Exists(filePath).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Mp4WithPcmAudio_SkipBackup_KeepsSameName()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMp4File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMp4File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await CreateContext(filePath, skipBackup: true);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeTrue();
+            Directory.GetFiles(workDir).Should().ContainSingle();
         }
         finally
         {
