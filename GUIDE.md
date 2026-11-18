@@ -43,6 +43,8 @@ Moving to a new source for a library that the photo server already holds risks a
 
 Compare the catalogs with SQLite, using the `files` table of each database. Review the matches before you act on them.
 
+`import --imagehash` applies the second key against the import database during the import itself. It skips a source whose `image_hash` a row already holds, and logs the row it matched. It is opt-in, because two files with equal image data and different metadata then count as one.
+
 An import database records that bytes were imported once. It does not record that an upload succeeded or that the server still holds them. A file that was imported once and is absent from the server now is normally one the owner removed. Confirm the upload first. Evidence is that the photo server holds the asset in its library or its trash, found by checksum or by the visual comparison below. The upload tool's own log showing the upload is evidence too, and so is a `trash_hashes` row for the uploaded file. Import history alone is not evidence. Then skip the file rather than re-importing it.
 
 ## Re-encoded Copies and the Limits of Each Key
@@ -86,7 +88,7 @@ In the same migration, the owner reviewed the whole remainder and rejected all o
 Use this to tell an import database that a whole source is known, and then un-mark the files that should still import.
 
 1. Run `index` over the whole source into the database of the import into the processing directory, not the one for Originals. Those rows mean known, not copied. For example `index --path /mnt/photos/newsource --db /mnt/photos/db/import.db`.
-1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one. Import skips a file whose SHA-256 is in any row, so also delete the rows of every byte-identical twin, such as a `(1)` copy.
+1. Delete the rows of the files that should import. The table is `files` and its key is `path`, so a SQLite statement such as `DELETE FROM files WHERE path = '/mnt/photos/newsource/IMG_0001.HEIC'` removes one. Import skips a file whose SHA-256 is in any row, so also delete the rows of every byte-identical twin, such as a `(1)` copy. With `--imagehash` it also skips a file whose `image_hash` is in any row. Run that import without `--imagehash`, or also delete the rows sharing that `image_hash`.
 1. Where an Originals archive stage exists, copy the new source into Originals first, with the import that has its own database.
 1. Run the import that reads Originals with `--dryrun`, and read its count there. Without an archive stage, run `import` on the source itself.
 1. Run that `import` for real.
@@ -102,9 +104,13 @@ The `trash` command syncs the hashes of the assets that are in the photo server'
 
 The server stores and trashes the tagged copy that was uploaded, so its hash differs from the untagged source that `import` reads. `process` reads the tagged files, so it is the check that matches what the server holds. Pass `--trashdb` to `process` as well as to `import`, and give `process` a `--db` too. It checks the trash database only when it has a database.
 
+To match by image data as well, run `trash` with `--processdb` naming the process database. It then records the `image_hash` of each trashed processed file. Pass `--imagehash` to `import` and `process` to treat a file with a recorded `image_hash` as trashed. This catches a copy whose metadata differs, such as the untagged source of a tagged upload. A format ExifTool cannot hash has no `image_hash` and is still matched by SHA-1 alone.
+
+The match covers every copy with that image data, including one the owner kept. Where the server held two copies that differ only in metadata and the owner trashed one, `process --imagehash` deletes the kept copy's processed file. `import --imagehash` skips its source. Leave `--imagehash` off for a library whose duplicates were culled this way.
+
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
-The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex. Run `sha1sum` on the restored original downloaded from the server, which prints that form. A file name can repeat, so do not select the row by name.
+The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex. Run `sha1sum` on the restored original downloaded from the server, which prints that form. A file name can repeat, so do not select the row by name. With `--imagehash`, another trashed asset with the same image data still matches the restored file. Leave `--imagehash` off while that asset stays trashed.
 
 ## Live Photos
 
@@ -116,7 +122,7 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
 - **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
-- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded. Two identical files in one parallel run may both be copied. The count can then differ from a dry run by the number of such twins.
+- **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded, including an identical file earlier in the same run.
 - **`process` renames a file whose extension disagrees with its content.** When another file already holds the corrected name, the renamed file takes the next free name, such as `photo_1.jpg`, and the run logs a warning. It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so a short or static GIF can vanish. Keep backups, and check short GIFs before you run with `--skipbackup`.
 - **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
 

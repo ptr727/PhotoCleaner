@@ -121,12 +121,19 @@ internal sealed class ProcessTask(
             // Deletes files whose SHA-1 matches an asset already trashed in Immich.
             // Pruning here costs nothing, since every file is being touched anyway.
             // The deletion is persisted so re-runs are no-ops.
-            if (
-                trashDatabase is not null
-                && await TryDeleteIfTrashedAsync(sha1).ConfigureAwait(false)
-            )
+            if (trashDatabase is not null)
             {
-                return ProcessResult.Deleted;
+                string? imageHash = options.ImageHash
+                    ? (
+                        await database
+                            .GetByPathAsync(fileInfo.FullName, cancellationToken)
+                            .ConfigureAwait(false)
+                    )?.ImageHash
+                    : null;
+                if (await TryDeleteIfTrashedAsync(sha1, imageHash).ConfigureAwait(false))
+                {
+                    return ProcessResult.Deleted;
+                }
             }
 
             if (status == IndexStatus.Unchanged && wasProcessed && !options.Reprocess)
@@ -182,21 +189,33 @@ internal sealed class ProcessTask(
         return result;
     }
 
-    private async Task<bool> TryDeleteIfTrashedAsync(string sha1)
+    private async Task<bool> TryDeleteIfTrashedAsync(string sha1, string? imageHash)
     {
-        bool trashed = await trashDatabase!
-            .Sha1ExistsAsync(sha1, cancellationToken)
-            .ConfigureAwait(false);
-        if (!trashed)
+        if (await trashDatabase!.Sha1ExistsAsync(sha1, cancellationToken).ConfigureAwait(false))
+        {
+            Log.Information(
+                "Deleting file trashed in Immich '{FilePath}' with SHA-1 '{Sha1}'",
+                fileInfo.FullName,
+                sha1
+            );
+        }
+        else if (
+            await trashDatabase
+                .ImageHashExistsAsync(imageHash, cancellationToken)
+                .ConfigureAwait(false)
+        )
+        {
+            Log.Information(
+                "Deleting file trashed in Immich '{FilePath}' with image data hash '{ImageHash}'",
+                fileInfo.FullName,
+                imageHash
+            );
+        }
+        else
         {
             return false;
         }
 
-        Log.Information(
-            "Deleting file trashed in Immich '{FilePath}' with SHA-1 '{Sha1}'",
-            fileInfo.FullName,
-            sha1
-        );
         if (options.DryRun)
         {
             return true;

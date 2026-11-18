@@ -65,6 +65,8 @@ The repository is the record, and GitHub holds it. Nothing here keeps state outs
 
 The application writes state the user owns rather than the repository: the SQLite databases named by `--db` and `--trashdb`, and the `.bak` files that `process` creates. `undo` restores those `.bak` files, and it is the recovery path for a processing run that went wrong. Running `process --skipbackup` makes that recovery impossible, which is the trade the flag names.
 
+A command that writes a database upgrades an older schema in place by adding columns. `trash` adds `image_hash` to the trash database this way. A database opened read-only, such as `--trashdb` for `import` and `process` or `trash --processdb`, is never changed.
+
 A deleted branch is recoverable from any full clone that still has the commit:
 
 ```sh

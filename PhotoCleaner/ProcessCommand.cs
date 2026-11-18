@@ -29,6 +29,11 @@ internal sealed class ProcessCommand(
                                     options.DbFile,
                                     async database =>
                                     {
+                                        if (options.ImageHash)
+                                        {
+                                            trashDatabase?.WarnIfImageHashMissing();
+                                        }
+
                                         // Rename duplicate mixed case files
                                         bool foundConflicts = true;
                                         while (foundConflicts)

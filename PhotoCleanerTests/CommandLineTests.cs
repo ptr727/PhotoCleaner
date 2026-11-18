@@ -727,4 +727,154 @@ public sealed class CommandLineTests
 
         cli.Result.Errors.Should().NotBeEmpty();
     }
+
+    // -- --imagehash and trash --processdb -------------------------------------
+
+    [Fact]
+    public void ImageHashOption_DefaultFalse()
+    {
+        CommandLine cli = new(["import", "--path", ExistingDir, "--outpath", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        cli.Result.Errors.Should().BeEmpty();
+        options.ImageHash.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ImageHashOption_ImportWithDb_ParsedTrue()
+    {
+        CommandLine cli = new([
+            "import",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--db",
+            Path.Combine(Path.GetTempPath(), "Import.db"),
+            "--imagehash",
+        ]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        cli.Result.Errors.Should().BeEmpty();
+        options.ImageHash.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ImageHashOption_ImportWithoutDbOrTrashDb_ValidationError()
+    {
+        CommandLine cli = new([
+            "import",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--imagehash",
+        ]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void ImageHashOption_ProcessWithDbAndTrashDb_ParsedTrue()
+    {
+        string trashDbFile = Path.Combine(Path.GetTempPath(), $"trash_{Guid.NewGuid()}.db");
+        File.WriteAllBytes(trashDbFile, []);
+        try
+        {
+            CommandLine cli = new([
+                "process",
+                "--path",
+                ExistingDir,
+                "--db",
+                Path.Combine(Path.GetTempPath(), "Process.db"),
+                "--trashdb",
+                trashDbFile,
+                "--imagehash",
+            ]);
+
+            CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+            cli.Result.Errors.Should().BeEmpty();
+            options.ImageHash.Should().BeTrue();
+        }
+        finally
+        {
+            File.Delete(trashDbFile);
+        }
+    }
+
+    [Fact]
+    public void ImageHashOption_ProcessWithoutTrashDb_ValidationError()
+    {
+        CommandLine cli = new([
+            "process",
+            "--path",
+            ExistingDir,
+            "--db",
+            Path.Combine(Path.GetTempPath(), "Process.db"),
+            "--imagehash",
+        ]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void TrashCommand_ProcessDb_Parses()
+    {
+        string dbPath = Path.GetTempFileName();
+        string processDbPath = Path.GetTempFileName();
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "http://immich:2283",
+                "--apikey",
+                "test-key",
+                "--trashdb",
+                dbPath,
+                "--processdb",
+                processDbPath,
+            ]);
+
+            CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+            cli.Result.Errors.Should().BeEmpty();
+            options.DbFile.Should().NotBeNull();
+            options.DbFile.FullName.Should().Be(new FileInfo(processDbPath).FullName);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+            File.Delete(processDbPath);
+        }
+    }
+
+    [Fact]
+    public void TrashCommand_ProcessDbNonExistent_ValidationError()
+    {
+        string dbPath = Path.GetTempFileName();
+        try
+        {
+            CommandLine cli = new([
+                "trash",
+                "--url",
+                "http://immich:2283",
+                "--apikey",
+                "test-key",
+                "--trashdb",
+                dbPath,
+                "--processdb",
+                "/nonexistent/path/process.db",
+            ]);
+
+            cli.Result.Errors.Should().NotBeEmpty();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
 }

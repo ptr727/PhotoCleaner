@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using PhotoCleaner;
 
 namespace PhotoCleanerTests;
@@ -223,11 +224,11 @@ public sealed class TrashDatabaseTests
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            List<(string Sha1Hex, string? OriginalFileName)> batch =
+            List<(string Sha1Hex, string? OriginalFileName, string? ImageHash)> batch =
             [
-                ("aaa111", "photo1.jpg"),
-                ("bbb222", "photo2.jpg"),
-                ("ccc333", null),
+                ("aaa111", "photo1.jpg", null),
+                ("bbb222", "photo2.jpg", null),
+                ("ccc333", null, null),
             ];
             await db.InsertHashesAsync(
                 batch,
@@ -284,11 +285,11 @@ public sealed class TrashDatabaseTests
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
 
-            List<(string Sha1Hex, string? OriginalFileName)> batch =
+            List<(string Sha1Hex, string? OriginalFileName, string? ImageHash)> batch =
             [
-                ("aaa111", "photo1.jpg"),
-                ("aaa111", "photo1_dup.jpg"),
-                ("bbb222", "photo2.jpg"),
+                ("aaa111", "photo1.jpg", null),
+                ("aaa111", "photo1_dup.jpg", null),
+                ("bbb222", "photo2.jpg", null),
             ];
             await db.InsertHashesAsync(
                 batch,
@@ -325,5 +326,181 @@ public sealed class TrashDatabaseTests
         {
             File.Delete(dbPath);
         }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_OldSchemaDatabase_AddsImageHashColumnKeepingRows()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            // Arrange - a trash database in the shape written before the image_hash column existed
+            await CreateOldSchemaAsync(dbPath);
+
+            // Act
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            // Assert - the row survives, and a later sync backfills its image hash
+            db.HasImageHash.Should().BeTrue();
+            (await db.Sha1ExistsAsync("aaa111", TestContext.Current.CancellationToken))
+                .Should()
+                .BeTrue();
+            (await db.ImageHashExistsAsync("imagehash-a", TestContext.Current.CancellationToken))
+                .Should()
+                .BeFalse();
+            await db.InsertHashesAsync(
+                [("aaa111", "IMG_1234.HEIC", "imagehash-a")],
+                TestContext.Current.CancellationToken
+            );
+            (await db.GetCountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+            (await db.ImageHashExistsAsync("imagehash-a", TestContext.Current.CancellationToken))
+                .Should()
+                .BeTrue();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_OldSchemaDatabaseReadOnly_MatchesBySha1Only()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await CreateOldSchemaAsync(dbPath);
+
+            await using TrashDatabase db = new(dbPath, readOnly: true);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            db.HasImageHash.Should().BeFalse();
+            (await db.Sha1ExistsAsync("aaa111", TestContext.Current.CancellationToken))
+                .Should()
+                .BeTrue();
+            (await db.ImageHashExistsAsync("imagehash-a", TestContext.Current.CancellationToken))
+                .Should()
+                .BeFalse();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ImageHashExistsAsync_NullOrEmptyHash_NeverMatches()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertHashesAsync(
+                [("aaa111", "IMG_1234.HEIC", null), ("bbb222", "IMG_5678.HEIC", "")],
+                TestContext.Current.CancellationToken
+            );
+
+            (await db.ImageHashExistsAsync(null, TestContext.Current.CancellationToken))
+                .Should()
+                .BeFalse();
+            (await db.ImageHashExistsAsync("", TestContext.Current.CancellationToken))
+                .Should()
+                .BeFalse();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InsertHashAsync_WithImageHash_ImageHashExistsReturnsTrue()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertHashAsync(
+                "aaa111",
+                "IMG_1234.HEIC",
+                "imagehash-a",
+                TestContext.Current.CancellationToken
+            );
+
+            (await db.ImageHashExistsAsync("imagehash-a", TestContext.Current.CancellationToken))
+                .Should()
+                .BeTrue();
+            (await db.ImageHashExistsAsync("imagehash-b", TestContext.Current.CancellationToken))
+                .Should()
+                .BeFalse();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InsertHashesAsync_ExistingRow_KeepsNameAndImageHash()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertHashesAsync(
+                [("aaa111", "IMG_1234.HEIC", "imagehash-a"), ("bbb222", "IMG_5678.HEIC", null)],
+                TestContext.Current.CancellationToken
+            );
+
+            // A later sync passes no name, a different hash for the first row, and a hash for the second
+            await db.InsertHashesAsync(
+                [("aaa111", null, "imagehash-x"), ("bbb222", null, "imagehash-b")],
+                TestContext.Current.CancellationToken
+            );
+
+            await using SqliteConnection connection = new($"Data Source={dbPath};Pooling=False");
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT sha1 || '|' || IFNULL(original_file_name, '') || '|' || IFNULL(image_hash, '') FROM trash_hashes ORDER BY sha1";
+            List<string> rows = [];
+            await using (
+                SqliteDataReader reader = await command.ExecuteReaderAsync(
+                    TestContext.Current.CancellationToken
+                )
+            )
+            {
+                while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+                {
+                    rows.Add(reader.GetString(0));
+                }
+            }
+
+            rows.Should()
+                .Equal("aaa111|IMG_1234.HEIC|imagehash-a", "bbb222|IMG_5678.HEIC|imagehash-b");
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    private static async Task CreateOldSchemaAsync(string dbPath)
+    {
+        await using SqliteConnection connection = new($"Data Source={dbPath};Pooling=False");
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE trash_hashes (
+                sha1                TEXT NOT NULL PRIMARY KEY,
+                original_file_name  TEXT
+            );
+            INSERT INTO trash_hashes VALUES ('aaa111', 'IMG_1234.HEIC')
+            """;
+        _ = await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 }

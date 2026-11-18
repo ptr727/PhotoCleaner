@@ -570,4 +570,129 @@ public sealed class DatabaseTests
             File.Delete(file);
         }
     }
+
+    [Fact]
+    public async Task FindPathByImageHashAsync_MatchingRow_ReturnsItsPath()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertAsync(
+                new FileRecord(
+                    "/source/IMG_1234.HEIC",
+                    "sha256-a",
+                    "sha1-a",
+                    10L,
+                    0L,
+                    false,
+                    ImageHash: "imagehash-a",
+                    MetadataRead: true
+                ),
+                TestContext.Current.CancellationToken
+            );
+
+            (
+                await db.FindPathByImageHashAsync(
+                    "imagehash-a",
+                    TestContext.Current.CancellationToken
+                )
+            )
+                .Should()
+                .Be("/source/IMG_1234.HEIC");
+            (
+                await db.FindPathByImageHashAsync(
+                    "imagehash-b",
+                    TestContext.Current.CancellationToken
+                )
+            )
+                .Should()
+                .BeNull();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task GetImageHashBySha1Async_ReturnsRecordedHashOrNull()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await db.InsertAsync(
+                new FileRecord(
+                    "/processed/IMG_1234.HEIC",
+                    "sha256-a",
+                    "sha1-a",
+                    10L,
+                    0L,
+                    true,
+                    ImageHash: "imagehash-a",
+                    MetadataRead: true
+                ),
+                TestContext.Current.CancellationToken
+            );
+            await db.InsertAsync(
+                new FileRecord("/processed/clip.gif", "sha256-b", "sha1-b", 10L, 0L, true),
+                TestContext.Current.CancellationToken
+            );
+
+            (await db.GetImageHashBySha1Async("sha1-a", TestContext.Current.CancellationToken))
+                .Should()
+                .Be("imagehash-a");
+            (await db.GetImageHashBySha1Async("sha1-b", TestContext.Current.CancellationToken))
+                .Should()
+                .BeNull();
+            (await db.GetImageHashBySha1Async("sha1-c", TestContext.Current.CancellationToken))
+                .Should()
+                .BeNull();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task GetImageHashBySha1Async_OldSchemaDatabaseReadOnly_ReturnsNull()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using (SqliteConnection connection = new($"Data Source={dbPath};Pooling=False"))
+            {
+                await connection.OpenAsync(TestContext.Current.CancellationToken);
+                using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE files (
+                        path         TEXT NOT NULL PRIMARY KEY,
+                        sha256       TEXT NOT NULL,
+                        sha1         TEXT NOT NULL,
+                        file_size    INTEGER NOT NULL,
+                        mtime_ticks  INTEGER NOT NULL,
+                        is_processed INTEGER NOT NULL DEFAULT 0
+                    );
+                    INSERT INTO files VALUES ('/processed/IMG_1234.HEIC', 'sha256-a', 'sha1-a', 10, 20, 1)
+                    """;
+                _ = await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using Database db = new(dbPath, readOnly: true);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            db.HasImageHash.Should().BeFalse();
+            (await db.GetImageHashBySha1Async("sha1-a", TestContext.Current.CancellationToken))
+                .Should()
+                .BeNull();
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
 }

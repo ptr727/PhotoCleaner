@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CliWrap;
 using CliWrap.Buffered;
 
@@ -11,6 +12,14 @@ internal sealed class ImportTask(
     SkippedExtensionTracker skippedExtensions
 )
 {
+    private readonly ConcurrentDictionary<string, Claim> _claims = new(StringComparer.Ordinal);
+
+    internal sealed record Claim(string File)
+    {
+        internal TaskCompletionSource<bool> Imported { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
     private static readonly FrozenSet<string> s_exiftoolWriteExtensions = new[]
     {
         ".3gp",
@@ -128,10 +137,45 @@ internal sealed class ImportTask(
         );
     }
 
+    // A file that does not import releases its claims, and a file waiting on one of them tries again.
     private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
         CancellationToken cancellationToken = default
+    )
+    {
+        List<(string Key, Claim Claim)> claimed = [];
+        ImportResult result = ImportResult.Failed;
+        try
+        {
+            result = await ImportFileAsync(file, sourceDir, claimed, cancellationToken)
+                .ConfigureAwait(false);
+            return result;
+        }
+        finally
+        {
+            ReleaseClaims(claimed, result == ImportResult.Imported);
+        }
+    }
+
+    internal void ReleaseClaims(List<(string Key, Claim Claim)> claimed, bool imported)
+    {
+        foreach ((string key, Claim claim) in claimed)
+        {
+            if (!imported)
+            {
+                _ = _claims.TryRemove(new KeyValuePair<string, Claim>(key, claim));
+            }
+
+            _ = claim.Imported.TrySetResult(imported);
+        }
+    }
+
+    private async Task<ImportResult> ImportFileAsync(
+        string file,
+        DirectoryInfo sourceDir,
+        List<(string Key, Claim Claim)> claimed,
+        CancellationToken cancellationToken
     )
     {
         Log.Information("Importing '{FilePath}'", file);
@@ -147,6 +191,9 @@ internal sealed class ImportTask(
         string? sha256 = null;
         string? sha1 = null;
         FileRecord? cached = null;
+        ExifToolJson? meta = null;
+        bool metaRead = false;
+        string? imageHash = null;
         if (database is not null || skipDatabase is not null || trashDatabase is not null)
         {
             // ResolveHashesAsync returns cached hashes when size and mtime still match disk.
@@ -213,10 +260,66 @@ internal sealed class ImportTask(
                     return ImportResult.Skipped;
                 }
             }
+
+            // Opt-in, since equal image data with different metadata is treated as one file.
+            if (options.ImageHash && (trashDatabase is not null || database is not null))
+            {
+                meta = await GetFileMetaAsync(file, true, cancellationToken).ConfigureAwait(false);
+                metaRead = true;
+                imageHash = FileMetadata.FromExifTool(meta)?.ImageHash;
+                ImportResult? imageHashResult = await CheckImageHashAsync(
+                        file,
+                        imageHash,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+                if (imageHashResult is not null)
+                {
+                    return imageHashResult.Value;
+                }
+            }
+
+            // Parallel files that match each other both pass the checks above before either row exists.
+            // The first to claim a hash goes on, and the rest wait for its outcome, so the counts match a sequential run.
+            // Which of the matching files claims first depends on timing when more than one thread runs.
+            // SHA-256 is always claimed before the image hash, and no file waits while holding an image hash.
+            if (database is not null)
+            {
+                string? claimedBy = await ClaimedByAsync(
+                        "sha256:" + sha256,
+                        file,
+                        claimed,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false)
+                    ?? (
+                        options.ImageHash && !string.IsNullOrEmpty(imageHash)
+                            ? await ClaimedByAsync(
+                                    "image:" + imageHash,
+                                    file,
+                                    claimed,
+                                    cancellationToken
+                                )
+                                .ConfigureAwait(false)
+                            : null
+                    );
+                if (claimedBy is not null)
+                {
+                    Log.Information(
+                        "Skipping '{FilePath}' matching '{KnownPath}' earlier in this run",
+                        file,
+                        claimedBy
+                    );
+                    return ImportResult.Skipped;
+                }
+            }
         }
 
-        ExifToolJson? meta = await GetFileMetaAsync(file, database is not null, cancellationToken)
-            .ConfigureAwait(false);
+        if (!metaRead)
+        {
+            meta = await GetFileMetaAsync(file, database is not null, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         // Warnings are ignored on purpose, since most healthy files carry them.
         (int validateErrors, _) = ExifToolJson.ParseValidate(meta?.Validate);
@@ -423,6 +526,76 @@ internal sealed class ImportTask(
         }
     }
 
+    internal async Task<string?> ClaimedByAsync(
+        string key,
+        string file,
+        List<(string Key, Claim Claim)> claimed,
+        CancellationToken cancellationToken
+    )
+    {
+        while (true)
+        {
+            Claim mine = new(file);
+            Claim owner = _claims.GetOrAdd(key, mine);
+            if (ReferenceEquals(owner, mine))
+            {
+                claimed.Add((key, mine));
+                return null;
+            }
+
+            if (await owner.Imported.Task.WaitAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return owner.File;
+            }
+        }
+    }
+
+    private async Task<ImportResult?> CheckImageHashAsync(
+        string file,
+        string? imageHash,
+        CancellationToken cancellationToken
+    )
+    {
+        if (string.IsNullOrEmpty(imageHash))
+        {
+            Log.Debug("No image data hash for '{FilePath}'", file);
+            return null;
+        }
+
+        if (
+            trashDatabase is not null
+            && await trashDatabase
+                .ImageHashExistsAsync(imageHash, cancellationToken)
+                .ConfigureAwait(false)
+        )
+        {
+            Log.Information(
+                "Skipping file trashed in Immich '{FilePath}' with image data hash '{ImageHash}'",
+                file,
+                imageHash
+            );
+            return ImportResult.TrashedInImmich;
+        }
+
+        string? knownPath = database is null
+            ? null
+            : await database
+                .FindPathByImageHashAsync(imageHash, cancellationToken)
+                .ConfigureAwait(false);
+        if (knownPath is not null)
+        {
+            Log.Information(
+                "Skipping already imported '{FilePath}' with image data hash '{ImageHash}' matching '{KnownPath}'",
+                file,
+                imageHash,
+                knownPath
+            );
+            return ImportResult.Skipped;
+        }
+
+        return null;
+    }
+
     private string BuildDestinationPath(
         string filePath,
         ExifToolJson? meta,
@@ -440,7 +613,7 @@ internal sealed class ImportTask(
         return destPath;
     }
 
-    // The image hash is a catalog column, so only a run holding a database asks for it.
+    // Only a run holding a database or matching by image hash asks for the image hash.
     private static async Task<ExifToolJson?> GetFileMetaAsync(
         string filePath,
         bool imageHash,

@@ -9,6 +9,11 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
 
+    /// <summary>
+    /// Whether the trash_hashes table has the image_hash column, which a read-only open of an older database lacks.
+    /// </summary>
+    internal bool HasImageHash { get; private set; }
+
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         Log.Debug(
@@ -23,6 +28,7 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
         if (readOnly)
         {
             await ValidateSchemaAsync(cancellationToken).ConfigureAwait(false);
+            HasImageHash = await HasImageHashColumnAsync(cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -30,12 +36,46 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
             cmd.CommandText = """
                 CREATE TABLE IF NOT EXISTS trash_hashes (
                     sha1                TEXT NOT NULL PRIMARY KEY,
-                    original_file_name  TEXT
+                    original_file_name  TEXT,
+                    image_hash          TEXT
                 )
                 """;
             _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+            if (!await HasImageHashColumnAsync(cancellationToken).ConfigureAwait(false))
+            {
+                // A database created before the image_hash column existed gains it in place.
+                Log.Information("Upgrading trash database schema, adding the image_hash column");
+                using SqliteCommand alterCmd = _connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE trash_hashes ADD COLUMN image_hash TEXT";
+                _ = await alterCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            using SqliteCommand indexCmd = _connection.CreateCommand();
+            indexCmd.CommandText =
+                "CREATE INDEX IF NOT EXISTS idx_trash_hashes_image_hash ON trash_hashes (image_hash)";
+            _ = await indexCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            HasImageHash = true;
         }
     }
+
+    internal void WarnIfImageHashMissing()
+    {
+        if (!HasImageHash)
+        {
+            Log.Warning(
+                "Trash database '{DbPath}' has no image_hash column, so it matches by SHA-1 only until 'trash' upgrades it",
+                dbPath
+            );
+        }
+    }
+
+    private async Task<bool> HasImageHashColumnAsync(CancellationToken cancellationToken) =>
+        (
+            await Database
+                .GetColumnNamesAsync(_connection!, "trash_hashes", cancellationToken)
+                .ConfigureAwait(false)
+        ).Contains("image_hash");
 
     private async Task ValidateSchemaAsync(CancellationToken cancellationToken)
     {
@@ -52,28 +92,35 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
         }
     }
 
+    // An existing row keeps its name and gains an image hash it lacked, so a later sync can backfill it.
+    private const string InsertSql = """
+        INSERT INTO trash_hashes (sha1, original_file_name, image_hash) VALUES (@sha1, @name, @imageHash)
+        ON CONFLICT (sha1) DO UPDATE SET image_hash = COALESCE(trash_hashes.image_hash, excluded.image_hash)
+        """;
+
     internal Task InsertHashAsync(
         string sha1Hex,
         string? originalFileName = null,
+        string? imageHash = null,
         CancellationToken cancellationToken = default
     ) =>
         ExecuteAsync(
             async cmd =>
             {
-                cmd.CommandText =
-                    "INSERT OR IGNORE INTO trash_hashes (sha1, original_file_name) VALUES (@sha1, @name)";
+                cmd.CommandText = InsertSql;
                 _ = cmd.Parameters.AddWithValue("@sha1", sha1Hex);
                 _ = cmd.Parameters.AddWithValue(
                     "@name",
                     originalFileName is not null ? originalFileName : DBNull.Value
                 );
+                _ = cmd.Parameters.AddWithValue("@imageHash", (object?)imageHash ?? DBNull.Value);
                 _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             },
             cancellationToken
         );
 
     internal Task InsertHashesAsync(
-        IReadOnlyList<(string Sha1Hex, string? OriginalFileName)> hashes,
+        IReadOnlyList<(string Sha1Hex, string? OriginalFileName, string? ImageHash)> hashes,
         CancellationToken cancellationToken = default
     ) =>
         hashes.Count == 0
@@ -86,17 +133,23 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
                             .BeginTransactionAsync(cancellationToken)
                             .ConfigureAwait(false);
                     cmd.Transaction = transaction;
-                    cmd.CommandText =
-                        "INSERT OR IGNORE INTO trash_hashes (sha1, original_file_name) VALUES (@sha1, @name)";
+                    cmd.CommandText = InsertSql;
                     SqliteParameter sha1Param = cmd.Parameters.Add("@sha1", SqliteType.Text);
                     SqliteParameter nameParam = cmd.Parameters.Add("@name", SqliteType.Text);
+                    SqliteParameter imageHashParam = cmd.Parameters.Add(
+                        "@imageHash",
+                        SqliteType.Text
+                    );
 
-                    foreach ((string sha1Hex, string? originalFileName) in hashes)
+                    foreach (
+                        (string sha1Hex, string? originalFileName, string? imageHash) in hashes
+                    )
                     {
                         sha1Param.Value = sha1Hex;
                         nameParam.Value = originalFileName is not null
                             ? originalFileName
                             : DBNull.Value;
+                        imageHashParam.Value = (object?)imageHash ?? DBNull.Value;
                         _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                     }
 
@@ -117,6 +170,58 @@ internal sealed class TrashDatabase(string dbPath, bool readOnly = false)
                 object? result = await cmd.ExecuteScalarAsync(cancellationToken)
                     .ConfigureAwait(false);
                 return result is long count && count > 0;
+            },
+            cancellationToken
+        );
+
+    /// <summary>
+    /// Whether a trashed asset carries the given image data hash, which is never true for a null or empty hash.
+    /// </summary>
+    internal Task<bool> ImageHashExistsAsync(
+        string? imageHash,
+        CancellationToken cancellationToken = default
+    ) =>
+        string.IsNullOrEmpty(imageHash) || !HasImageHash
+            ? Task.FromResult(false)
+            : ExecuteAsync(
+                async cmd =>
+                {
+                    cmd.CommandText =
+                        "SELECT COUNT(*) FROM trash_hashes WHERE image_hash = @imageHash";
+                    _ = cmd.Parameters.AddWithValue("@imageHash", imageHash);
+                    object? result = await cmd.ExecuteScalarAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return result is long count && count > 0;
+                },
+                cancellationToken
+            );
+
+    /// <summary>
+    /// Lists the SHA-1 of every row that has no image data hash yet.
+    /// </summary>
+    internal Task<List<string>> GetSha1sWithoutImageHashAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            async cmd =>
+            {
+                cmd.CommandText = "SELECT sha1 FROM trash_hashes WHERE image_hash IS NULL";
+                List<string> sha1s = [];
+                SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                try
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        sha1s.Add(reader.GetString(0));
+                    }
+                }
+                finally
+                {
+                    await reader.DisposeAsync().ConfigureAwait(false);
+                }
+
+                return sha1s;
             },
             cancellationToken
         );
