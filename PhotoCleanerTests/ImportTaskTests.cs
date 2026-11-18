@@ -30,12 +30,13 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         bool rehash = false,
         bool tagPath = false,
         bool datePath = false,
-        bool imageHash = false
+        bool imageHash = false,
+        int threads = 1
     ) =>
         new()
         {
             Path = new DirectoryInfo(Path.GetTempPath()),
-            Threads = 1,
+            Threads = threads,
             DryRun = dryRun,
             DatePath = datePath,
             SkipBackup = false,
@@ -1994,8 +1995,10 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    [Fact]
-    public async Task ExecuteAsync_ClaimingFileFailsToImport_LaterMatchStillImports()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ExecuteAsync_ClaimingFileFailsToImport_LaterMatchStillImports(int threads)
     {
         string srcDir = TempDir();
         string outDir = TempDir();
@@ -2017,7 +2020,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             await db.InitializeAsync(TestContext.Current.CancellationToken);
 
             ImportTask task = new(
-                CreateOptions(outDir, imageHash: true),
+                CreateOptions(outDir, imageHash: true, threads: threads),
                 database: db,
                 skipDatabase: null,
                 trashDatabase: null,

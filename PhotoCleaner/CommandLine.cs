@@ -206,18 +206,10 @@ internal sealed class CommandLine
         {
             Description = "Immich API key (mutually exclusive with --apikey-file)",
         };
-        Option<FileInfo?> apiKeyFileOption = new("--apikey-file")
-        {
-            Description = "File containing the Immich API key (mutually exclusive with --apikey)",
-        };
-        apiKeyFileOption.Validators.Add(result =>
-        {
-            FileInfo? file = result.GetValue(apiKeyFileOption);
-            if (file is not null && !file.Exists)
-            {
-                result.AddError($"File does not exist: '{file.FullName}'");
-            }
-        });
+        Option<FileInfo?> apiKeyFileOption = CreateExistingFileOption(
+            "--apikey-file",
+            "File containing the Immich API key (mutually exclusive with --apikey)"
+        );
         Option<FileInfo?> requiredTrashDbOption = new("--trashdb")
         {
             Description = "SQLite database to store Immich trash hashes",
@@ -418,47 +410,27 @@ internal sealed class CommandLine
     private static Option<bool> CreateRehashOption() =>
         new("--rehash") { Description = "Force rehashing of all files, ignoring size/mtime cache" };
 
-    private static Option<FileInfo?> CreateTrashDbFileOption()
-    {
-        Option<FileInfo?> option = new("--trashdb")
-        {
-            Description = "SQLite database with Immich trash hashes (read-only)",
-        };
-        option.Validators.Add(result =>
-        {
-            FileInfo? file = result.GetValue(option);
-            if (file is not null && !file.Exists)
-            {
-                result.AddError($"File does not exist: '{file.FullName}'");
-            }
-        });
-        return option;
-    }
+    private static Option<FileInfo?> CreateTrashDbFileOption() =>
+        CreateExistingFileOption(
+            "--trashdb",
+            "SQLite database with Immich trash hashes (read-only)"
+        );
 
-    private static Option<FileInfo?> CreateSkipDbFileOption()
-    {
-        Option<FileInfo?> option = new("--skipdb")
-        {
-            Description = "SQLite database with indexed files to be skipped (read-only)",
-        };
-        option.Validators.Add(result =>
-        {
-            FileInfo? file = result.GetValue(option);
-            if (file is not null && !file.Exists)
-            {
-                result.AddError($"File does not exist: '{file.FullName}'");
-            }
-        });
-        return option;
-    }
+    private static Option<FileInfo?> CreateSkipDbFileOption() =>
+        CreateExistingFileOption(
+            "--skipdb",
+            "SQLite database with indexed files to be skipped (read-only)"
+        );
 
-    private static Option<FileInfo?> CreateProcessDbFileOption()
+    private static Option<FileInfo?> CreateProcessDbFileOption() =>
+        CreateExistingFileOption(
+            "--processdb",
+            "Process database used to record the image data hash of each trashed asset (read-only)"
+        );
+
+    private static Option<FileInfo?> CreateExistingFileOption(string name, string description)
     {
-        Option<FileInfo?> option = new("--processdb")
-        {
-            Description =
-                "Process database used to record the image data hash of each trashed asset (read-only)",
-        };
+        Option<FileInfo?> option = new(name) { Description = description };
         option.Validators.Add(result =>
         {
             FileInfo? file = result.GetValue(option);

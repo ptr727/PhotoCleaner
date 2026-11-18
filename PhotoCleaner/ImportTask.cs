@@ -12,7 +12,13 @@ internal sealed class ImportTask(
     SkippedExtensionTracker skippedExtensions
 )
 {
-    private readonly ConcurrentDictionary<string, string> _claims = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Claim> _claims = new(StringComparer.Ordinal);
+
+    private sealed record Claim(string File)
+    {
+        internal TaskCompletionSource<bool> Imported { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
     private static readonly FrozenSet<string> s_exiftoolWriteExtensions = new[]
     {
@@ -131,14 +137,14 @@ internal sealed class ImportTask(
         );
     }
 
-    // A file that does not import releases its claims, so a later match is still tried.
+    // A file that does not import releases its claims, and a file waiting on one of them tries again.
     private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
         CancellationToken cancellationToken = default
     )
     {
-        List<string> claimed = [];
+        List<(string Key, Claim Claim)> claimed = [];
         ImportResult result = ImportResult.Failed;
         try
         {
@@ -148,12 +154,14 @@ internal sealed class ImportTask(
         }
         finally
         {
-            if (result != ImportResult.Imported)
+            foreach ((string key, Claim claim) in claimed)
             {
-                foreach (string key in claimed)
+                if (result != ImportResult.Imported)
                 {
-                    _ = _claims.TryRemove(new KeyValuePair<string, string>(key, file));
+                    _ = _claims.TryRemove(new KeyValuePair<string, Claim>(key, claim));
                 }
+
+                _ = claim.Imported.TrySetResult(result == ImportResult.Imported);
             }
         }
     }
@@ -161,7 +169,7 @@ internal sealed class ImportTask(
     private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
-        List<string> claimed,
+        List<(string Key, Claim Claim)> claimed,
         CancellationToken cancellationToken
     )
     {
@@ -267,13 +275,26 @@ internal sealed class ImportTask(
             }
 
             // Parallel files that match each other both pass the checks above before either row exists.
-            // The first to claim a hash imports, and the rest skip as a sequential run would.
+            // The first to claim a hash goes on, and the rest wait for its outcome as a sequential run would.
+            // SHA-256 is always claimed before the image hash, and no file waits while holding an image hash.
             if (database is not null)
             {
-                string? claimedBy = ClaimedBy("sha256:" + sha256, file, claimed)
+                string? claimedBy = await ClaimedByAsync(
+                        "sha256:" + sha256,
+                        file,
+                        claimed,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false)
                     ?? (
                         options.ImageHash && !string.IsNullOrEmpty(imageHash)
-                            ? ClaimedBy("image:" + imageHash, file, claimed)
+                            ? await ClaimedByAsync(
+                                    "image:" + imageHash,
+                                    file,
+                                    claimed,
+                                    cancellationToken
+                                )
+                                .ConfigureAwait(false)
                             : null
                     );
                 if (claimedBy is not null)
@@ -499,16 +520,33 @@ internal sealed class ImportTask(
         }
     }
 
-    private string? ClaimedBy(string key, string file, List<string> claimed)
+    private async Task<string?> ClaimedByAsync(
+        string key,
+        string file,
+        List<(string Key, Claim Claim)> claimed,
+        CancellationToken cancellationToken
+    )
     {
-        string owner = _claims.GetOrAdd(key, file);
-        if (owner != file)
+        while (true)
         {
-            return owner;
-        }
+            Claim mine = new(file);
+            Claim owner = _claims.GetOrAdd(key, mine);
+            if (ReferenceEquals(owner, mine))
+            {
+                claimed.Add((key, mine));
+                return null;
+            }
 
-        claimed.Add(key);
-        return null;
+            if (owner.File == file)
+            {
+                return null;
+            }
+
+            if (await owner.Imported.Task.WaitAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return owner.File;
+            }
+        }
     }
 
     private async Task<ImportResult?> CheckImageHashAsync(
