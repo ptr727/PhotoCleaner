@@ -104,7 +104,7 @@ The server stores and trashes the tagged copy that was uploaded, so its hash dif
 
 Run `trash` after you cull and before the server's trash is emptied or purged by retention. A purged asset's hash can no longer be read, so the removal is forgotten if the sync runs too late.
 
-The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table, and keep the rest, because purged assets leave no other record. The `sha1` column holds lowercase hex, not the server's Base64 checksum, so find the row by `original_file_name` or convert the checksum.
+The trash database is append-only. A restored asset stays in it. Delete that one row from the `trash_hashes` table. Rebuilding the whole database drops the hashes of purged assets, which `trash` cannot fetch again. The `sha1` column holds lowercase hex, so convert the server's Base64 checksum first. A file name can repeat, so do not select the row by name.
 
 ## Live Photos
 
