@@ -49,12 +49,12 @@ An import database records that bytes were imported once. It does not record tha
 
 ## Re-encoded Copies and the Limits of Each Key
 
-The measurements below come from one real migration of a cloud export. They are rates, and they describe that export. Treat them as a warning about each key, not as a guarantee for another source.
+The observations below come from a real migration of a cloud export. Treat them as a warning about each key, not as a guarantee for another source.
 
 ### What the Keys Did
 
 - **A file extension is not a format.** Some exports re-encode images and keep the original extension. A file named `.heic` or `.dng` can hold a JPEG. `image_hash` then matches nothing, even for photos the server holds.
-- **Capture time alone is weak.** Many assets share a capture second, such as bursts and scans. A match on capture second and camera model pointed at a clearly different picture in about two thirds of cases. It still did so in about one in six cases when the pixel dimensions also matched. A match on capture second and file name was clearly wrong in under 2 percent of cases.
+- **Capture time alone is weak.** Many assets share a capture second, such as bursts and scans. A match on capture second and camera model often pointed at a clearly different picture. It still did so, less often, when the pixel dimensions also matched. A match on capture second and file name was rarely wrong.
 - **A sidecar time is not a capture time.** When a file has no embedded date, the sidecar's taken-time is often an upload or file time. Do not use it as a matching key.
 - **An embedded ImageUniqueID was not usable as a key.**
 
@@ -67,7 +67,7 @@ This comparison is a method you script yourself. It is not a PhotoCleaner comman
 1. Compare the new file's grid with each server grid, in all 8 rotations and mirrors.
 1. Accept a match when the mean absolute difference is under 2 on a 0-255 scale and the correlation is at least 0.98.
 
-In a self-test, every sampled original found its own asset first. Where an embedded capture time existed, a strong visual match agreed with it to the second in about 96 percent of cases.
+In a self-test, every sampled original found its own asset first. Where an embedded capture time existed, a strong visual match almost always agreed with it to the second.
 
 HEIC needs a decoder that assembles its tiles, for example `heif-convert`. Choose the decoder by the file's content type rather than by its extension, because of the mislabeled files above.
 
@@ -81,7 +81,7 @@ Before you upload the remainder, show it to the library's owner. Contact sheets 
 
 What a library lacks after byte, image-hash, and visual matching is often what the owner removed earlier. That includes shots deleted on the phone before any import ran, which no import history can show.
 
-In the same migration, the owner reviewed the whole remainder and rejected all of it, so nothing was imported. The matching work still made the remainder small enough to review.
+The matching work is what makes the remainder small enough to review.
 
 ## Recording a Source as Already Imported
 

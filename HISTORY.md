@@ -7,7 +7,7 @@ Utility to prepare photos and videos for import into photo managers.
 **Version: 1.1**:
 
 - Added `verify` command to detect possibly corrupt media:
-  - I discovered thousands of files in my Immich library that failed to create thumbnails, all these images were [corrupt](https://github.com/ptr727/PhotoCleaner/issues/25) but passed the entire pipeline undetected.
+  - Media can pass the entire pipeline undetected and still be [corrupt](https://github.com/ptr727/PhotoCleaner/issues/25), which shows up later as images Immich fails to create thumbnails for.
   - Runs the Immich decoder inside the Immich docker image to confirm that the file is usable, which makes that decoder the only judge of a file's health.
   - Carries no container parser of its own, deliberately, because such a parser condemns whatever it fails to understand, and an unfamiliar but valid format looks the same as a damaged one from the inside. Docker is therefore required.
 - The exiftool metadata read now always passes `-validate`:

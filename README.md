@@ -878,7 +878,7 @@ docker run -it --rm --name immichcli \
     -v /photos/processed:/upload:ro \
     -e IMMICH_INSTANCE_URL=https://your.immich.server/api \
     -e IMMICH_API_KEY=yourapikey \
-    -e TZ=America/Los_Angeles \
+    -e TZ=Etc/UTC \
     ghcr.io/immich-app/immich-cli:latest \
     upload \
         --recursive \
