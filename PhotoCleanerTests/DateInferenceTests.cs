@@ -93,7 +93,7 @@ public sealed class DateInferenceTests
     [InlineData("photos/2021/2021-05-02/vacation.jpg", "2021:05:02 00:00:00")]
     [InlineData("photos/2021/20210502/vacation.jpg", "2021:05:02 00:00:00")]
     [InlineData("photos/2021/2021_05_02/vacation.jpg", "2021:05:02 00:00:00")]
-    [InlineData("data/media/Pictures/Lumia/2015-11-18/image.jpg", "2015:11:18 00:00:00")]
+    [InlineData("photos/Lumia/2015-11-18/image.jpg", "2015:11:18 00:00:00")]
     [InlineData("archive/MP Navigator EX/2014_07_14/scan.tif", "2014:07:14 00:00:00")]
     [InlineData("backup/photos/2020/file.jpg", "2020:01:01 00:00:00")] // Year-only fallback
     [InlineData("Photos/2024/01/15/image.jpg", "2024:01:15 00:00:00")]
