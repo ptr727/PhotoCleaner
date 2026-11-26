@@ -864,6 +864,32 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ConvertedOutputCannotBePlaced_KeepsOriginal(bool skipBackup)
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
+            _ = Directory.CreateDirectory(Path.ChangeExtension(filePath, ".mp4"));
+
+            // Act
+            Func<Task> act = () => CreateContext(filePath, skipBackup: skipBackup);
+
+            // Assert
+            await act.Should().ThrowAsync<IOException>();
+            Directory.GetFiles(workDir).Should().Equal([filePath]);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     private static string ExifToolWriteStub(string dir, string failOn)
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "The exiftool stub is a shell script");

@@ -663,33 +663,37 @@ internal sealed class ProcessTask(
             _modified = true;
             string sourceForMetadata = BackupFile(fileInfo.FullName, false);
 
-            // Rename temp output to MP4; use a unique name if target already exists
-            string outputFile = MediaUtilities.GetUniqueFileName(
-                Path.ChangeExtension(fileInfo.FullName, MediaUtilities.VideoOutputExtension)
-            );
-            if (!options.SkipBackup)
-            {
-                await File.WriteAllTextAsync(
-                        sourceForMetadata + ".out",
-                        outputFile,
-                        cancellationToken
-                    )
-                    .ConfigureAwait(false);
-            }
-            RenameFile(tempFile, outputFile);
-
+            // Every step from here on returns the original to its own name if it fails.
             // The original is deleted only after every metadata write to the output has landed.
+            string? placedOutput = null;
             string? failure;
             try
             {
-                failure = await WriteConvertedMetadataAsync(sourceForMetadata, outputFile)
+                // Rename temp output to MP4; use a unique name if target already exists
+                string target = MediaUtilities.GetUniqueFileName(
+                    Path.ChangeExtension(fileInfo.FullName, MediaUtilities.VideoOutputExtension)
+                );
+                if (!options.SkipBackup)
+                {
+                    await File.WriteAllTextAsync(
+                            sourceForMetadata + ".out",
+                            target,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+                RenameFile(tempFile, target);
+                placedOutput = target;
+
+                failure = await WriteConvertedMetadataAsync(sourceForMetadata, placedOutput)
                     .ConfigureAwait(false);
             }
             catch
             {
-                RollBackConversion(sourceForMetadata, outputFile);
+                RollBackConversion(sourceForMetadata, placedOutput);
                 throw;
             }
+            string outputFile = placedOutput;
             if (failure is not null)
             {
                 Log.Error(
@@ -800,9 +804,9 @@ internal sealed class ProcessTask(
     }
 
     // Puts the original back under its own name, so the next run converts it from the start.
-    private void RollBackConversion(string backupFile, string outputFile)
+    private void RollBackConversion(string backupFile, string? outputFile)
     {
-        if (MediaUtilities.TryDeleteFile(outputFile) is { } failure)
+        if (outputFile is not null && MediaUtilities.TryDeleteFile(outputFile) is { } failure)
         {
             Log.Error(
                 failure,
