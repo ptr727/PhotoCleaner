@@ -410,7 +410,7 @@ PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --dele
 # Import with path-based XMP:Subject tagging (sub-directory names become tags)
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --tagpath
 
-# Import inferring missing EXIF dates from the source path
+# Import inferring missing creation dates from the source path
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --datepath
 
 # Import with explicit XMP:Subject tags applied to every file
