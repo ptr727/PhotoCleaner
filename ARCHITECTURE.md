@@ -137,7 +137,7 @@ flowchart TD
   ok(["ExitCode.Success 0, logged complete"])
   failed(["ExitCode.Failed 2, logged complete with failures"])
   other(["Other code returned as is, logged as not complete"])
-  mainCatch(["Exit 1 from the catch in Program.Main, exception logged"])
+  mainCatch(["Exit 1 from the catch in Program.Main, not logged since Log.Logger is not set yet"])
   ctrlc["Ctrl+C or SIGTERM at any point: no handler, the token never cancels, S5"]:::suspect
   killed(["Process ends at once, no cleanup, log not flushed"])
 
