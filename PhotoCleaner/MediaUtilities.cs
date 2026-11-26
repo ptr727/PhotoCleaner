@@ -245,20 +245,29 @@ internal static class MediaUtilities
             .Split('\n')
             .Any(line => line.TrimStart().StartsWith("Error", StringComparison.Ordinal));
 
-    private static string[] CreateDateArguments(string createdDate, string outputFile) =>
-        s_quicktimeExtensions.Contains(Path.GetExtension(outputFile))
-            ?
+    private static string[] CreateDateArguments(string createdDate, string outputFile)
+    {
+        string extension = Path.GetExtension(outputFile);
+        if (s_quicktimeExtensions.Contains(extension))
+        {
+            return
             [
                 "-overwrite_original",
                 $"-QuickTime:CreateDate={createdDate}",
                 $"-QuickTime:ModifyDate={createdDate}",
                 outputFile,
-            ]
-            :
-            [
-                "-overwrite_original",
-                $"-EXIF:CreateDate={createdDate}",
-                $"-EXIF:DateTimeOriginal={createdDate}",
-                outputFile,
             ];
+        }
+
+        string group = string.Equals(extension, ".gif", StringComparison.OrdinalIgnoreCase)
+            ? "XMP"
+            : "EXIF";
+        return
+        [
+            "-overwrite_original",
+            $"-{group}:CreateDate={createdDate}",
+            $"-{group}:DateTimeOriginal={createdDate}",
+            outputFile,
+        ];
+    }
 }
