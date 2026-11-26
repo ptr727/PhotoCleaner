@@ -108,6 +108,13 @@ public sealed class UndoTaskTests
             .Should()
             .Be(Path.Combine("here", "img_1.mp4"));
 
+    [Fact]
+    public void ResolveMarkerOutput_UnixPathWithBackslashInName_KeepsTheBackslash() =>
+        UndoTask
+            .ResolveMarkerOutput(Path.Combine("here", "a.mov.bak"), "/old/a\\b.mp4")
+            .Should()
+            .Be(Path.Combine("here", "a\\b.mp4"));
+
     // -- Execute -------------------------------------------------------------
 
     private static (int restored, int deleted, int failed) Run(string dir, bool dryRun = false) =>
@@ -359,7 +366,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_AmbiguousOutputBackups_RestoresEveryBackupAndDeletesNothingElse()
+    public void Execute_AmbiguousOutputBackups_LeavesTheGroupAndFails()
     {
         string dir = TempDir();
         try
@@ -370,8 +377,10 @@ public sealed class UndoTaskTests
             File.WriteAllText(gpBak + ".out", Path.Combine(dir, "clip.mp4"));
             WriteContent(Path.Combine(dir, "clip.mp4.bak1"));
 
-            Run(dir).Should().Be((3, 1, 0));
-            Names(dir).Should().Equal("clip.3gp", "clip.mp4", "clip_1.mp4");
+            string[] before = Names(dir);
+
+            Run(dir).Should().Be((0, 0, 1));
+            Names(dir).Should().Equal(before);
         }
         finally
         {
@@ -541,7 +550,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_ShortClipBackupBesideLaterConversionOutput_RestoresTheShortClip()
+    public void Execute_ShortClipBackupBesideLaterConversionOutput_LeavesTheGroupAndFails()
     {
         string dir = TempDir();
         try
@@ -552,9 +561,10 @@ public sealed class UndoTaskTests
             File.WriteAllText(aviBak + ".out", Path.Combine(dir, "clip.mp4"));
             File.WriteAllBytes(Path.Combine(dir, "clip.mp4"), [3]);
 
-            Run(dir).Should().Be((2, 1, 0));
-            Names(dir).Should().Equal("clip.avi", "clip.mp4", "clip_1.mp4");
-            File.ReadAllBytes(Path.Combine(dir, "clip_1.mp4")).Should().Equal(1);
+            string[] before = Names(dir);
+
+            Run(dir).Should().Be((0, 0, 1));
+            Names(dir).Should().Equal(before);
         }
         finally
         {

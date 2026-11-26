@@ -963,7 +963,7 @@ flowchart TD
   P1 -->|"trashed in Immich"| P22(["Deleted with no backup, undo cannot reverse it"])
 ```
 
-A converted output is reprocessed in the same run. A short output is then backed up again as name.mp4.bak. Deletion backups never get a marker.
+A converted output is reprocessed in the same run. A short clip or live photo video output is then backed up again under the next free backup name. Deletion backups never get a marker.
 
 #### Undo Grouping
 
@@ -1001,9 +1001,9 @@ Each output a marker names is reversed before any original is restored, so an or
 ```mermaid
 flowchart TD
   C1{"how many markers name this output, how many other backups hold it, and does the output exist?"}
-  C1 -->|"more than one of either, or one backup while the output exists"| C2(["Warned, the output and its backups are left, every backup is restored as an original"])
+  C1 -->|"more than one of either, or one backup while the output exists"| C2(["Counted Failed, warned, the output, its marker and every backup in the group are left"])
   C1 -->|"one marker, one other backup, output gone"| C3["UndoTask.TryDelete(): delete that backup, the output saved again as a short clip"]
-  C3 -->|"fails"| C4(["Counted Failed, the marker's backup is left for a rerun"])
+  C3 -->|"fails"| C4(["Counted Failed, every backup in the group and the marker are left for a rerun"])
   C3 -->|"ok"| C5(["Counted Deleted"])
   C1 -->|"one marker, no other backup"| C6{"output exists?"}
   C6 -->|"no"| C7(["Logged, nothing to delete"])
@@ -1018,8 +1018,8 @@ Every backup not deleted above is an original. Undo never deletes or overwrites 
 
 ```mermaid
 flowchart TD
-  R1{"its converted output failed to delete?"}
-  R1 -->|"yes"| R2(["Warned, backup and marker left for a rerun"])
+  R1{"its group was left above?"}
+  R1 -->|"yes"| R2(["Warned, backup and marker left as they are"])
   R1 -->|"no"| R3["MediaUtilities.GetUniqueFileName(): the base name, or the first name_N no file and no other original's base holds"]
   R3 -->|"name_N"| R4["UndoTask.Execute(): warn, naming the taken file and the free name"]
   R3 --> R5
@@ -1253,7 +1253,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **`FileEnumerator.Enumerate()`** enumerates all files including `.bak*` files before calling `Execute()`
 - **Records only** in `UndoTask.Execute()`:
   - *Read*: every `.bak` or `.bakN` whose base is supported media, in base then number order, and the `.out` marker named after each one. A marker's output is its file name resolved beside the backup, so a moved or copied tree still matches. An empty, vanished, or unreadable backup or marker fails only itself.
-  - *Reverse outputs*: a marker's output is deleted when no other backup holds that name. Exactly one other backup can hold it while the name is free. That backup is then the output saved again as a short clip, and it is deleted instead. Two markers or two such backups for one output are ambiguous, and so is one such backup while the output still exists. Then nothing is deleted and every backup is restored.
+  - *Reverse outputs*: a marker's output is deleted when no other backup holds that name. Exactly one other backup can hold it while the name is free. That backup is then the output saved again as a short clip, and it is deleted instead. Two markers or two such backups for one output are ambiguous, and so is one such backup while the output still exists. Then the group is left as it is and counted Failed, so the record survives for a hand fix.
   - *Restore originals*: every other backup moves back to its base name, or to the next free `name_N` when a file holds it, with a warning. A free name never takes another original's base name. Its marker is deleted after the move. Undo never deletes a backup it cannot tie to a marker, and never overwrites a current file.
 - **Internal static helpers** (testable via `InternalsVisibleTo`):
   - `IsBackupFile(path)`: matches `.bak\d*$`

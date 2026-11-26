@@ -506,13 +506,13 @@ It scans the given directories for backup files of supported media types and rev
 1. **Remove converted outputs** - a conversion writes an `X.bak.out` marker naming its output.
    Undo deletes that output, found by file name beside the backup, so a moved tree still works.
    When the output was later backed up as a short clip, its name is free and that backup is
-   deleted instead. When undo cannot tell which file is the output, it deletes nothing and
-   restores every backup.
+   deleted instead. When undo cannot tell which file is the output, it changes nothing in that
+   group and counts it as failed.
 2. **Restore originals** - every other backup is an original and moves back to its own name.
-   Another file can hold that name, such as a second original kept as `X.bak1`. The backup then
-   takes the next free name (e.g. `clip_1.mov`) and undo logs a warning. Undo never deletes an
-   original's backup and never overwrites a file it has no record of. An empty or unreadable
-   backup is left in place and counted as failed, and the run carries on with the rest.
+   Another file can hold that name, such as the original from `X.bak` when `X.bak1` restores.
+   The backup then takes the next free name (e.g. `clip_1.mov`) and undo logs a warning. Undo
+   never deletes an original's backup and never overwrites a file it has no record of. An empty
+   or unreadable backup is left in place and counted as failed, and the run carries on.
 
 A backup of another file type, such as `notes.txt.bak` from another tool, is left alone. A
 conversion from a release that predates the `.out` marker has no record, so its `.mp4` output

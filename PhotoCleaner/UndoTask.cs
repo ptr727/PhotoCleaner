@@ -45,14 +45,14 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         && MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(GetBackupBase(path)));
 
     // The marker holds the absolute path at conversion time, and the output sits beside its backup.
-    // A marker written on Windows holds backslashes, which Path.GetFileName keeps on Linux and macOS.
+    // A Windows path holds backslashes, while on Linux and macOS a backslash is a file name character.
     internal static string ResolveMarkerOutput(string backup, string markerText)
     {
         string text = markerText.Trim();
-        return Path.Combine(
-            Path.GetDirectoryName(backup) ?? string.Empty,
-            text[(text.LastIndexOfAny(['/', '\\']) + 1)..]
-        );
+        int separator = text.StartsWith('/')
+            ? text.LastIndexOf('/')
+            : text.LastIndexOfAny(['/', '\\']);
+        return Path.Combine(Path.GetDirectoryName(backup) ?? string.Empty, text[(separator + 1)..]);
     }
 
     private sealed record Backup(string Path, string Base, string? Marker, string? Output);
@@ -161,9 +161,12 @@ internal sealed partial class UndoTask(CommandLine.Options options)
             )
             {
                 Log.Warning(
-                    "Cannot tell which file is the output '{FilePath}' recorded, leaving it and restoring every backup",
+                    "Cannot tell which file is the output '{FilePath}' recorded, leaving it, its marker, and its backups",
                     output
                 );
+                failed++;
+                blocked.UnionWith(holders);
+                blocked.UnionWith(outputBackups);
                 continue;
             }
 
@@ -182,6 +185,7 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                 {
                     failed++;
                     blocked.UnionWith(holders);
+                    blocked.UnionWith(outputBackups);
                 }
 
                 continue;
@@ -218,10 +222,7 @@ internal sealed partial class UndoTask(CommandLine.Options options)
             cancellationToken.ThrowIfCancellationRequested();
             if (blocked.Contains(backup))
             {
-                Log.Warning(
-                    "Leaving '{BackupPath}' until its converted output is removed",
-                    backup.Path
-                );
+                Log.Warning("Leaving '{BackupPath}' as it is", backup.Path);
                 continue;
             }
 
