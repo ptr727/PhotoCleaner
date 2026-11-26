@@ -1307,24 +1307,11 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    private static string ExifToolStub(string dir, string output, int exitCode)
-    {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "The exiftool stub is a shell script");
-        string stub = Path.Combine(dir, "exiftool-stub.sh");
-        File.WriteAllText(
-            stub,
-            $"#!/bin/sh\nfor last in \"$@\"; do :; done\ntouch \"$last\"\necho '{output}' >&2\nexit {exitCode}\n"
+    private static string ExifToolStub(string dir, string output, int exitCode) =>
+        TempDirectoryFixture.WriteExifToolStub(
+            dir,
+            $"for last in \"$@\"; do :; done\ntouch \"$last\"\necho '{output}' >&2\nexit {exitCode}\n"
         );
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                stub,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            );
-        }
-
-        return stub;
-    }
 
     private async Task<(string jpg, string dest)> CreateTaggedSourceAsync(string srcDir)
     {
@@ -1561,6 +1548,52 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 cancellationToken: TestContext.Current.CancellationToken
             );
             meta!.IsDateSet().Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DatePath_ThreeGp_SetsQuickTimeDate()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            string datedDir = Path.Combine(srcDir, "2021", "05", "02");
+            Directory.CreateDirectory(datedDir);
+            string clip = Path.Combine(datedDir, "clip.3gp");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ThreeGpFile), clip);
+            ExifToolJson? source = await MediaUtilities.GetExifToolJsonAsync(
+                clip,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            source!.IsDateSet().Should().BeFalse();
+
+            ImportTask task = new(
+                CreateOptions(outDir, datePath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [clip],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            failed.Should().Be(0);
+            string dest = Path.Combine(outDir, "2021-05", "clip.3gp");
+            ExifToolJson? meta = await MediaUtilities.GetExifToolJsonAsync(
+                dest,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            meta!.QuickTimeCreateDate.Should().Be("2021:05:02 00:00:00");
         }
         finally
         {

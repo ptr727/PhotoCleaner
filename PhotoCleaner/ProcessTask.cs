@@ -26,6 +26,8 @@ internal sealed class ProcessTask(
         Invalid,
     }
 
+    internal string ExifToolCommand { get; init; } = "exiftool";
+
     private ExifToolJson? _exifToolJson;
     private string? _preProcessSha256;
     private bool _modified;
@@ -85,7 +87,7 @@ internal sealed class ProcessTask(
         return processTask.ExecuteAsync();
     }
 
-    private async Task<ProcessResult> ExecuteAsync()
+    internal async Task<ProcessResult> ExecuteAsync()
     {
         // Skip files that no longer exist
         if (!fileInfo.Exists)
@@ -661,24 +663,50 @@ internal sealed class ProcessTask(
             _modified = true;
             string sourceForMetadata = BackupFile(fileInfo.FullName, false);
 
-            // Rename temp output to MP4; use a unique name if target already exists
-            string outputFile = MediaUtilities.GetUniqueFileName(
-                Path.ChangeExtension(fileInfo.FullName, MediaUtilities.VideoOutputExtension)
-            );
-            if (!options.SkipBackup)
+            // A failure before the metadata writes land returns the original to its own name.
+            // An output that cannot be removed keeps both files, and the error names them.
+            // The original is deleted only after every metadata write to the output has landed.
+            string? placedOutput = null;
+            string? failure;
+            try
             {
-                await File.WriteAllTextAsync(
-                        sourceForMetadata + ".out",
-                        outputFile,
-                        cancellationToken
-                    )
+                // Rename temp output to MP4; use a unique name if target already exists
+                string target = MediaUtilities.GetUniqueFileName(
+                    Path.ChangeExtension(fileInfo.FullName, MediaUtilities.VideoOutputExtension)
+                );
+                if (!options.SkipBackup)
+                {
+                    await File.WriteAllTextAsync(
+                            sourceForMetadata + ".out",
+                            target,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+                RenameFile(tempFile, target);
+                placedOutput = target;
+
+                failure = await WriteConvertedMetadataAsync(sourceForMetadata, placedOutput)
                     .ConfigureAwait(false);
             }
-            RenameFile(tempFile, outputFile);
+            catch
+            {
+                RollBackConversion(sourceForMetadata, placedOutput);
+                throw;
+            }
+            string outputFile = placedOutput;
+            if (failure is not null)
+            {
+                Log.Error(
+                    "exiftool: Failed to write metadata to '{DestinationPath}' converted from '{SourcePath}' ({Failure})",
+                    outputFile,
+                    sourceForMetadata,
+                    failure
+                );
+                RollBackConversion(sourceForMetadata, outputFile);
+                return false;
+            }
 
-            // Copy compatible metadata from the original to the converted file
-            await CopyMetadataAsync(sourceForMetadata, outputFile, cancellationToken)
-                .ConfigureAwait(false);
             if (options.SkipBackup)
             {
                 Log.Information(
@@ -686,15 +714,6 @@ internal sealed class ProcessTask(
                     sourceForMetadata
                 );
                 File.Delete(sourceForMetadata);
-            }
-
-            // Set timestamps on remuxed file from original timestamps
-            string? createdDate = _exifToolJson!.GetDateString();
-            if (!string.IsNullOrEmpty(createdDate))
-            {
-                await MediaUtilities
-                    .SetCreateDateAsync(createdDate, outputFile, cancellationToken)
-                    .ConfigureAwait(false);
             }
 
             // Restore original file's modified timestamp on the converted output
@@ -759,28 +778,49 @@ internal sealed class ProcessTask(
         return true;
     }
 
-    private static async Task CopyMetadataAsync(
-        string sourceFile,
-        string outputFile,
-        CancellationToken cancellationToken = default
-    )
+    // Returns why a write failed, or null once the metadata copy and the created date have landed.
+    private async Task<string?> WriteConvertedMetadataAsync(string sourceFile, string outputFile)
     {
         Log.Debug(
             "exiftool: Copying metadata from '{SourcePath}' to '{DestinationPath}'",
             sourceFile,
             outputFile
         );
-        _ = await Cli.Wrap("exiftool")
-            .WithArguments([
-                "-TagsFromFile",
-                sourceFile,
-                "-all:all",
-                "-overwrite_original",
+        string? failure = await MediaUtilities
+            .WriteExifToolAsync(
+                ExifToolCommand,
+                ["-TagsFromFile", sourceFile, "-all:all", "-overwrite_original", outputFile],
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        string? createdDate = _exifToolJson!.GetDateString();
+        if (failure is null && !string.IsNullOrEmpty(createdDate))
+        {
+            failure = await MediaUtilities
+                .TrySetCreateDateAsync(createdDate, outputFile, ExifToolCommand, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        return failure;
+    }
+
+    // Puts the original back under its own name, so the next run converts it from the start.
+    private void RollBackConversion(string backupFile, string? outputFile)
+    {
+        if (outputFile is not null && MediaUtilities.TryDeleteFile(outputFile) is { } failure)
+        {
+            Log.Error(
+                failure,
+                "Failed to remove '{FilePath}', the original stays at '{BackupPath}'",
                 outputFile,
-            ])
-            // Ignore errors
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
+                backupFile
+            );
+            return;
+        }
+        RenameFile(backupFile, fileInfo.FullName);
+        if (MediaUtilities.TryDeleteFile(backupFile + ".out") is { } markerFailure)
+        {
+            Log.Warning(markerFailure, "Failed to remove '{FilePath}'", backupFile + ".out");
+        }
     }
 
     private bool ReProcess(string fileName)

@@ -234,8 +234,9 @@ Options:
 - `--path`: must point to an existing directory. Accepts exactly one directory per command
   invocation.
 - `--threads`: defaults to `min(CPU count, 4)`. Must be `> 0` and `<= CPU count`.
-- `--skipbackup`: opt-in (`process` only). Leaves no `.bak` file behind. The `undo`
-  command cannot reverse a run made with this flag.
+- `--skipbackup`: opt-in (`process` only). Leaves no `.bak` file behind once a change completes.
+  A failed rollback can still leave one, with no `.out` marker. The `undo` command cannot reverse
+  a run made with this flag.
 - `--outpath`: required for `import`. Target directory (created on demand).
 - `--format`: optional (`import` only). A C# date format string used to name date
   subdirectories (default `"yyyy/MM/dd"`). Must be date-only, so time components are rejected.
@@ -491,9 +492,11 @@ rather than pulling it into the collection.
 ## Undo Flow
 
 Every file modification or deletion made by `process` creates a `.bak` backup alongside the
-original: the first backup is `X.bak`, and if that already exists (from a prior run) the next is
-`X.bak1`, then `X.bak2`, etc. The `undo` command reverses all processing by scanning the given
-directories for backup files and applying a two-pass algorithm:
+original, with three exceptions. A file deleted because it matches the Immich trash database has no backup.
+Neither does a rename, such as the extension renames described below, and `--skipbackup` keeps none once a change completes.
+The first backup is `X.bak`. When that already exists from a prior run, the next is
+`X.bak1`, then `X.bak2`, and so on. The `undo` command reverses each change that left a backup.
+It scans the given directories for backup files and applies a two-pass algorithm:
 
 1. **Identify derived files** - an output file is "derived" (not original) when either:
    - a numbered backup (`.bak1`, `.bak2`, ...) exists for it (processed more than once), or

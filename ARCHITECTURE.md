@@ -9,7 +9,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
 - **PhotoCleaner/**: Main console application
   - `Program.cs`: Entry point with logger setup (Main only)
   - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `import`, `index`, `trash`, and `verify` subcommands)
-  - `MediaUtilities.cs`: Shared static utilities, `SupportedExtensions` (FrozenSet), `GetUniqueFileName`, `GetExifToolJsonAsync`, `SetCreateDateAsync`, video/duration constants
+  - `MediaUtilities.cs`: Shared static utilities, `SupportedExtensions` (FrozenSet), `GetUniqueFileName`, `GetExifToolJsonAsync`, `TrySetCreateDateAsync`, `WriteExifToolAsync`, video/duration constants
   - `CommandRunner.cs`: Thin wrapper for command start/complete/error logging, taking `Func<Task<int>>` and returning the command's exit code
   - `ExitCode.cs`: The shared exit-code contract, being `Success` (0), `Error` (1, command could not run), and `Failed` (2, ran to completion with per-file failures)
   - `DatabaseScope.cs`: Generic async DB lifecycle helper (create, init, dispose)
@@ -52,6 +52,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `VerifyTaskTests.cs`: Verify protocol parsing and script-contract tests
   - `LivePhotoCatalogTests.cs`: Live Photo pairing through the catalog and the catalog columns, needs exiftool and ffmpeg
   - `CatalogSchemaTests.cs`: In-place schema upgrade and metadata mapping tests, need no external tools
+  - `ArchitectureDiagramTests.cs`: Checks that each `Type.Method()` a Command Logic diagram names exists, and that the suspect marks match the Suspect Branches list
 
 ## Core Processing Pipeline
 
@@ -96,6 +97,1060 @@ image data costs extra I/O.
 - Import dedup and the trash match use the image hash only with the opt-in `--imagehash`. Default runs match by whole-file hash.
 - An empty image hash is stored as null and never matches, so a format ExifTool cannot hash keeps whole-file matching.
 - A read-only open cannot upgrade a database in the old shape. Only the hash lookups work there.
+
+## Command Logic
+
+The diagrams below trace each command from the command line to the end state of every file. They describe what the code does today, including branches that look wrong, so a reader can compare code and docs branch by branch.
+
+Conventions used in every diagram:
+
+- A label that starts with `Type.Name()` names the method that runs that node. `ArchitectureDiagramTests` checks that each named method exists, so a rename breaks the test until the diagram follows.
+- Any other label is prose, and an option name in it refers to a command-line flag.
+- A rounded node is an end state: an exit code, or the result a file is counted as. A rounded node that names another diagram continues there.
+- A step drawn without a fail edge still throws to the handler the prose under its diagram names.
+- A node styled with a dashed red border is a suspect branch. Its `S` number points into [Suspect Branches](#suspect-branches).
+- Change a diagram in the same change that moves a branch it draws.
+
+### Run Flow
+
+Program.Main parses the arguments before anything else. A parse error, `--help`, or `--version` skips logger setup and returns the System.CommandLine exit code.
+
+```mermaid
+flowchart TD
+  main["Program.Main(): parse the arguments with System.CommandLine"]
+  bypass{"CommandLine.BypassStartup(): parse error, --help or --version?"}
+  scl["System.CommandLine prints help, version, or the parse errors"]
+  sclEnd(["Exit 0 for help or version, exit 1 for a parse error"])
+  logger["LoggerFactory.Create(): build the logger from --loglevel and --logfile"]
+  dispatch{"Which subcommand?"}
+  process["ProcessCommand.ExecuteAsync(): process"]
+  undo["UndoCommand.ExecuteAsync(): undo"]
+  import["ImportCommand.ExecuteAsync(): import"]
+  index["IndexCommand.ExecuteAsync(): index"]
+  trash["TrashCommand.ExecuteAsync(): trash"]
+  verify["VerifyCommand.ExecuteAsync(): verify"]
+  runner["CommandRunner.RunAsync(): log start and run the command work"]
+  how{"How did the work end?"}
+  cancelled(["ExitCode.Error 1, logged as cancelled"])
+  thrown(["ExitCode.Error 1, exception logged"])
+  code{"Returned code?"}
+  ok(["ExitCode.Success 0, logged complete"])
+  failed(["ExitCode.Failed 2, logged complete with failures"])
+  other(["Other code returned as is, logged as not complete"])
+  mainCatch(["Exit 1 from the catch in Program.Main, not logged since Log.Logger is not set yet"])
+  ctrlc["Ctrl+C or SIGTERM at any point: no handler, the token never cancels, S5"]:::suspect
+  killed(["Process ends at once, no cleanup, log not flushed"])
+
+  main --> bypass
+  bypass -->|"yes"| scl --> sclEnd
+  bypass -->|"no"| logger
+  logger -->|"exception"| mainCatch
+  logger --> dispatch
+  dispatch -->|"process"| process
+  dispatch -->|"undo"| undo
+  dispatch -->|"import"| import
+  dispatch -->|"index"| index
+  dispatch -->|"trash"| trash
+  dispatch -->|"verify"| verify
+  process --> runner
+  undo --> runner
+  import --> runner
+  index --> runner
+  trash --> runner
+  verify --> runner
+  runner --> how
+  how -->|"OperationCanceledException"| cancelled
+  how -->|"any other exception"| thrown
+  how -->|"returned a code"| code
+  code -->|"0"| ok
+  code -->|"2"| failed
+  code -->|"anything else"| other
+  ctrlc --> killed
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main sets ProcessTerminationTimeout to null, so System.CommandLine registers no Ctrl+C handler. No other code registers one either.
+
+### Process
+
+#### Process Run
+
+The trash database opens read-only and the process database opens read-write. Both stay open for the whole run. Any exception that escapes this diagram reaches CommandRunner.RunAsync and exits 1.
+
+```mermaid
+flowchart TD
+  run["ProcessCommand.ExecuteAsync(): wrapped by CommandRunner.RunAsync"]
+  tscope["TrashDatabaseScope.RunAsync(): open --trashdb read-only when given"]
+  dscope["DatabaseScope.RunAsync(): open --db read-write, also under --dryrun, S8"]:::suspect
+  hashver["MediaUtilities.EnsureImageHashSupportAsync(): with --db, need exiftool 12.63 or newer"]
+  warn["TrashDatabase.WarnIfImageHashMissing(): under --imagehash only"]
+  enum["FileEnumerator.Enumerate(): list every file under --path"]
+  fixcase{"ProcessCommand.FixCaseConflicts(): two full paths equal ignoring case?"}
+  dry{"--dryrun?"}
+  dryloop["ProcessCommand.RenamedMixedCaseFiles(): log only, nothing moves, S6"]:::suspect
+  hang(["Enumerates and finds the same conflict forever, no exit code"])
+  move["ProcessCommand.RenamedMixedCaseFiles(): rename every variant to name_N"]
+  hasdb{"--db given?"}
+  catalog["ProcessCommand.CatalogAsync(): IndexTask.ExecuteAsync on every media file"]
+  more{"File list empty?"}
+  round["ProcessCommand.ExecuteProcessAsync(): one round, see Process Dispatch"]
+  totals["Log the totals and SkippedExtensionTracker.LogWarnings"]
+  delempty{"--deleteempty?"}
+  clean["DirectoryCleaner.DeleteEmptyDirectories(): deepest first, count only under --dryrun"]
+  exit{"Failed or Invalid count above zero?"}
+  e2(["ExitCode.Failed 2"])
+  e0(["ExitCode.Success 0"])
+  err(["Exception to CommandRunner.RunAsync, ExitCode.Error 1"])
+
+  run --> tscope --> dscope
+  dscope -->|"--db given"| hashver
+  dscope -->|"no --db"| warn
+  hashver -->|"too old or unreadable"| err
+  hashver --> warn
+  warn --> enum
+  enum -->|"exception"| err
+  enum --> fixcase
+  fixcase -->|"yes"| dry
+  dry -->|"yes"| dryloop --> hang
+  dry -->|"no"| move
+  move -->|"File.Move fails"| err
+  move -->|"enumerate again"| enum
+  fixcase -->|"no"| hasdb
+  hasdb -->|"yes"| catalog --> more
+  hasdb -->|"no"| more
+  more -->|"no"| round --> more
+  more -->|"yes"| totals --> delempty
+  delempty -->|"yes"| clean --> exit
+  delempty -->|"no"| exit
+  exit -->|"yes"| e2
+  exit -->|"no"| e0
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+The catalog phase logs a per-file index failure and does not count it. The same file normally fails again in the per-file pipeline, where it is counted. Invalid files fail the run as well as Failed files.
+
+#### Process Dispatch
+
+Each round keeps one media file per directory and stem, so files sharing a stem never run in parallel. Non-media files are never held back.
+
+```mermaid
+flowchart TD
+  start["ProcessCommand.ExecuteProcessAsync(): start a round"]
+  split["ProcessCommand.FixExtensionConflicts(): keep one media file per directory and stem"]
+  defer["Hold the other same-stem media files for the next round"]
+  par["Parallel.ForEachAsync over the kept files, --threads at a time"]
+  task["ProcessTask.ExecuteAsync(): run the per-file pipeline"]
+  result{"ProcessResult?"}
+  cFailed(["Counted Failed"])
+  cInvalid(["Counted Invalid"])
+  cDeleted(["Counted Deleted"])
+  cModified(["Counted Modified"])
+  cSkipped(["Counted Skipped"])
+  cNone(["Not counted"])
+  gone["Log at Information that the file no longer exists"]
+  goneEnd(["Not counted, the run is not failed"])
+  cancel(["Rethrown, the run ends ExitCode.Error 1"])
+  logFail["Log the exception with the path"]
+  merge["Add the held files to the queue that ReProcess filled"]
+  empty{"Queue empty?"}
+  done(["List cleared, the loop in Process Run ends"])
+  next(["Queue becomes the list for the next round"])
+
+  start --> split --> defer --> par
+  par -->|"each kept file"| task --> result
+  result -->|"Failure"| cFailed
+  result -->|"Invalid"| cInvalid
+  result -->|"Deleted"| cDeleted
+  result -->|"Modified or Reprocess"| cModified
+  result -->|"Skipped"| cSkipped
+  result -->|"Success or UnknownExtension"| cNone
+  task -->|"FileNotFoundException or DirectoryNotFoundException"| gone --> goneEnd
+  task -->|"OperationCanceledException"| cancel
+  task -->|"any other exception"| logFail --> cFailed
+  par -->|"all kept files done"| merge --> empty
+  empty -->|"yes"| done
+  empty -->|"no"| next
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+Modified counts each step that queued a new name, not each file. A file renamed and then converted counts twice. No path returns Modified without also queuing, so Modified results come from Reprocess.
+
+#### Process Per-File Pipeline
+
+The steps run in the order drawn, and the first step returning false stops the chain. Every step throws to the per-file catch in ProcessCommand.ExecuteProcessAsync.
+
+```mermaid
+flowchart TD
+  start["ProcessTask.ExecuteAsync(): one file"]
+  exists{"File exists?"}
+  goneOk(["Success, not counted"])
+  ext{"Supported media extension?"}
+  track["SkippedExtensionTracker.Track(): record the extension"]
+  unknown(["UnknownExtension, not counted"])
+  hasdb{"--db given?"}
+  index["IndexTask.IndexFileAsync(): hash, insert or update the row, also under --dryrun, S8"]:::suspect
+  hastrash{"--trashdb given?"}
+  trashed{"ProcessTask.TryDeleteIfTrashedAsync(): trashed and handled?"}
+  del(["Deleted, counted Deleted"])
+  skip{"Row unchanged and processed, and no --reprocess?"}
+  skipped(["Skipped, counted Skipped"])
+  exif["MediaUtilities.GetExifToolJsonAsync(): read the metadata and validation"]
+  valid{"ProcessTask.CheckExifToolValidation(): no validation errors?"}
+  invalid(["Invalid, counted Invalid"])
+  s1{"ProcessTask.RenameMismatchedMimeExtensions(): passes?"}
+  s2{"ProcessTask.RenameMixedCaseExtensions(): passes?"}
+  s3{"ProcessTask.DeleteLivePhotosAsync(): passes?"}
+  s4{"ProcessTask.ConvertVideoAsync(): passes?"}
+  s5["ProcessTask.WarnDngVersion(): warn on a DNG newer than 1.4, always passes"]
+  flag{"Which flag did the stopping step set?"}
+  reproc(["Reprocess, counted Modified"])
+  delStep(["Deleted, counted Deleted"])
+  failStep(["Failure, counted Failed, also every change skipped by --dryrun, S7"]):::suspect
+  setdb{"--db given?"}
+  mark["Database.SetProcessedAsync(): mark the row processed, also under --dryrun, S8"]:::suspect
+  mod{"Modified flag set?"}
+  modEnd(["Modified, counted Modified"])
+  okEnd(["Success, not counted"])
+
+  start --> exists
+  exists -->|"no"| goneOk
+  exists -->|"yes"| ext
+  ext -->|"no"| track --> unknown
+  ext -->|"yes"| hasdb
+  hasdb -->|"no"| exif
+  hasdb -->|"yes"| index --> hastrash
+  hastrash -->|"yes"| trashed
+  hastrash -->|"no"| skip
+  trashed -->|"true"| del
+  trashed -->|"false"| skip
+  skip -->|"yes"| skipped
+  skip -->|"no"| exif
+  exif --> valid
+  valid -->|"no"| invalid
+  valid -->|"yes"| s1
+  s1 -->|"true"| s2
+  s2 -->|"true"| s3
+  s3 -->|"true"| s4
+  s4 -->|"true"| s5
+  s1 -->|"false"| flag
+  s2 -->|"false"| flag
+  s3 -->|"false"| flag
+  s4 -->|"false"| flag
+  flag -->|"Reprocess flag"| reproc
+  flag -->|"Deleted flag only"| delStep
+  flag -->|"neither flag"| failStep
+  s5 --> setdb
+  setdb -->|"yes"| mark --> mod
+  setdb -->|"no"| mod
+  mod -->|"yes"| modEnd
+  mod -->|"no"| okEnd
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+The trash check runs only with `--db`, before the already-processed skip. A file is marked processed only on Success or Modified, so a deleted or renamed file keeps its old row unmarked.
+
+#### Process Trash Check
+
+The image hash comes from the cataloged row, and only under `--imagehash`. Without it the image hash lookup always answers no.
+
+```mermaid
+flowchart TD
+  start["ProcessTask.TryDeleteIfTrashedAsync(): check the SHA-1 and image hash"]
+  sha{"TrashDatabase.Sha1ExistsAsync(): SHA-1 in the trash DB?"}
+  img{"TrashDatabase.ImageHashExistsAsync(): image hash in the trash DB?"}
+  keep(["Returns false, pipeline continues"])
+  dry{"--dryrun?"}
+  dryDel(["Returns true, Deleted, counted Deleted, nothing removed"])
+  del["MediaUtilities.TryDeleteFile(): delete with no backup, even without --skipbackup"]
+  delOk(["Returns true, row kept, Deleted, counted Deleted"])
+  delFail["Log an error and return false, S9"]:::suspect
+  cont(["Pipeline continues, the file can end Success or Skipped"])
+
+  start --> sha
+  sha -->|"yes"| dry
+  sha -->|"no"| img
+  img -->|"yes"| dry
+  img -->|"no"| keep
+  dry -->|"yes"| dryDel
+  dry -->|"no"| del
+  del -->|"deleted"| delOk
+  del -->|"IOException or UnauthorizedAccessException"| delFail --> cont
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+#### Process Renames
+
+RenameMismatchedMimeExtensions runs first, then RenameMixedCaseExtensions. Neither takes a backup, so undo cannot restore the old name. A failed File.Move throws to the per-file catch.
+
+```mermaid
+flowchart TD
+  m0["ProcessTask.RenameMismatchedMimeExtensions(): compare the name to the content"]
+  m1{"exiftool returned a FileTypeExtension?"}
+  m2{"Expected extension is a supported one?"}
+  m3["ProcessTask.GetFileMediaExtension(): split the base name and trailing media extensions"]
+  m4{"Trailing media extensions equal the expected one?"}
+  m5{"--dryrun?"}
+  m6["ProcessTask.RenameToFreeName(): base name plus the expected extension"]
+  c0["ProcessTask.RenameMixedCaseExtensions(): check the extension case"]
+  c1{"ProcessTask.IsMixedCaseExtension(): upper and lower case mixed?"}
+  c2{"--dryrun?"}
+  c3["ProcessTask.RenameToFreeName(): same name with a lower-case extension"]
+  pass(["Step passes, next step runs"])
+  dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
+  taken{"ProcessTask.IsNameTaken(): target held by another file?"}
+  r1["ProcessTask.RenameFile(): move to the target name"]
+  r2["MediaUtilities.GetUniqueFileName(): pick name_N, then move there"]
+  queue["ProcessTask.ReProcess(): queue the new name and set the Reprocess flag"]
+  reproc(["Reprocess, counted Modified"])
+
+  m0 --> m1
+  m1 -->|"no"| pass
+  m1 -->|"yes"| m2
+  m2 -->|"no"| pass
+  m2 -->|"yes"| m3 --> m4
+  m4 -->|"yes"| pass
+  m4 -->|"no"| m5
+  m5 -->|"yes"| dryEnd
+  m5 -->|"no"| m6 --> taken
+  c0 --> c1
+  c1 -->|"no"| pass
+  c1 -->|"yes"| c2
+  c2 -->|"yes"| dryEnd
+  c2 -->|"no"| c3 --> taken
+  taken -->|"no"| r1 --> queue
+  taken -->|"yes"| r2 --> queue
+  queue --> reproc
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+The old path keeps its database row and the new name gets a fresh row in the next round.
+
+#### Process Live Photos
+
+Every file reaches this step, and a file that is not .mov or .mp4 passes it unchanged. A GetDurationAsync output that is not a number throws to the per-file catch.
+
+```mermaid
+flowchart TD
+  l0["ProcessTask.DeleteLivePhotosAsync(): live photo and short clip check"]
+  l1{"Extension .mov or .mp4?"}
+  pass(["Step passes, next step runs"])
+  l2["ProcessTask.GetDurationAsync(): ffprobe format duration"]
+  l3{"Duration at or below --duration, default 1s?"}
+  sdry{"--dryrun?"}
+  dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
+  sskip{"--skipbackup?"}
+  sdel["File.Delete the clip, also an MP4 made from a GIF the round before, S1"]:::suspect
+  sbak["ProcessTask.BackupFile(): rename the clip to name.bak"]
+  delEnd(["Deleted, counted Deleted"])
+  hasdb{"--db given?"}
+  k1{"Video has a ContentIdentifier?"}
+  k2["Database.GetByPathAsync(): read the video's own row"]
+  k3["Database.FindImagePathByContentIdentifierAsync(): a still row, not the video's bytes"]
+  k4{"Still row found, even for a file now gone?"}
+  long{"Duration 4s or longer?"}
+  warnLong["Log a warning that a long clip has a matching still"]
+  f1["ProcessTask.FindCompanionImagePath(): same stem still in the same folder"]
+  f2{"Companion found?"}
+  f3{"Duration 4s or longer?"}
+  f4["MediaUtilities.GetExifToolJsonAsync(): read the companion ContentIdentifier"]
+  f5{"Both ContentIdentifiers present and equal?"}
+  dl["ProcessTask.DeleteLiveVideo(): remove the live video"]
+  ddry{"--dryrun?"}
+  dskip{"--skipbackup?"}
+  ddel["File.Delete the video"]
+  dbak["ProcessTask.BackupFile(): rename the video to name.bak"]
+
+  l0 --> l1
+  l1 -->|"no"| pass
+  l1 -->|"yes"| l2 --> l3
+  l3 -->|"yes"| sdry
+  sdry -->|"yes"| dryEnd
+  sdry -->|"no"| sskip
+  sskip -->|"yes"| sdel --> delEnd
+  sskip -->|"no"| sbak --> delEnd
+  l3 -->|"no"| hasdb
+  hasdb -->|"yes"| k1
+  k1 -->|"no"| pass
+  k1 -->|"yes"| k2 --> k3 --> k4
+  k4 -->|"no"| pass
+  k4 -->|"yes"| long
+  long -->|"yes"| warnLong --> pass
+  long -->|"no"| dl
+  hasdb -->|"no"| f1 --> f2
+  f2 -->|"no"| pass
+  f2 -->|"yes"| f3
+  f3 -->|"yes"| warnLong
+  f3 -->|"no"| f4 --> f5
+  f5 -->|"no"| pass
+  f5 -->|"yes"| dl
+  dl --> ddry
+  ddry -->|"yes"| dryEnd
+  ddry -->|"no"| dskip
+  dskip -->|"yes"| ddel --> delEnd
+  dskip -->|"no"| dbak --> delEnd
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+The short clip rule needs no still and runs before any pairing. A deleted video keeps its database row.
+
+#### Process Video Conversion
+
+The temporary output is the source path with its extension changed to .temp. A finally block deletes that file whenever it still exists at the end.
+
+```mermaid
+flowchart TD
+  v0["ProcessTask.ConvertVideoAsync(): pick the ffmpeg job by extension"]
+  v1{"Extension .m2t or .mkv?"}
+  v2{"Extension .asf, .wmv, .avi, .3gp or .gif?"}
+  v3{"Extension .mov or .mp4?"}
+  v4{"ProcessTask.IsPcmAudioAsync(): first audio stream is PCM?"}
+  pass(["Step passes, next step runs"])
+  remux["Remux the video and audio into MP4"]
+  reenc["Re-encode to H.264 and AAC in MP4, a still GIF included"]
+  aac["Re-encode the PCM audio to AAC and copy the video"]
+  dry{"--dryrun?"}
+  dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
+  tmp["Delete any existing stem.temp beside the file"]
+  ff["ffmpeg writes stem.temp"]
+  ffEnd(["Exception to the per-file catch, stem.temp removed, counted Failed"])
+  bak["ProcessTask.BackupFile(): rename the original to name.bak"]
+  outName["MediaUtilities.GetUniqueFileName(): stem.mp4 or stem_N.mp4"]
+  sb{"--skipbackup?"}
+  marker["Write name.bak.out holding the output name"]
+  mv["ProcessTask.RenameFile(): move stem.temp to the output name"]
+  left["ProcessTask.RollBackConversion(): move name.bak back, remove the marker, then rethrow"]
+  leftEnd(["Exception to the per-file catch, counted Failed"])
+  commit(["Output in place, continue in Process Video Commit"])
+
+  v0 --> v1
+  v1 -->|"yes"| remux --> dry
+  v1 -->|"no"| v2
+  v2 -->|"yes"| reenc --> dry
+  v2 -->|"no"| v3
+  v3 -->|"no"| pass
+  v3 -->|"yes"| v4
+  v4 -->|"no"| pass
+  v4 -->|"yes"| aac --> dry
+  dry -->|"yes"| dryEnd
+  dry -->|"no"| tmp --> ff
+  ff -->|"non-zero exit or exception"| ffEnd
+  ff -->|"exit 0"| bak --> outName --> sb
+  sb -->|"no"| marker --> mv
+  sb -->|"yes"| mv
+  marker -->|"exception"| left
+  mv -->|"exception"| left
+  left --> leftEnd
+  mv --> commit
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+The original is renamed aside in both modes before the output takes a name. Under `--skipbackup` no marker records the pairing. From that rename until the metadata writes land, a failure puts the original back under its own name. An output that cannot be removed leaves both files in place.
+
+#### Process Video Commit
+
+The original is deleted under `--skipbackup` only after both metadata writes land. A failed write rolls the swap back and fails the file.
+
+```mermaid
+flowchart TD
+  w0["ProcessTask.WriteConvertedMetadataAsync(): put the metadata on the output"]
+  w1["MediaUtilities.WriteExifToolAsync(): copy all tags from name.bak"]
+  w2{"Copy failed?"}
+  w3{"Source has a created date?"}
+  w4["MediaUtilities.TrySetCreateDateAsync(): write the created date tags"]
+  w5{"Date write failed?"}
+  wx["ProcessTask.RollBackConversion(): undo the swap, then rethrow"]
+  wxEnd(["Exception to the per-file catch, counted Failed"])
+  f0["Log an error naming the output and the original"]
+  rb["ProcessTask.RollBackConversion(): undo the swap"]
+  rb1{"MediaUtilities.TryDeleteFile(): output removed?"}
+  rbKeep["Log an error, the output and name.bak both stay"]
+  rb2["ProcessTask.RenameFile(): move name.bak back to the original name"]
+  rb3["MediaUtilities.TryDeleteFile(): remove name.bak.out, warn on failure"]
+  failEnd(["Failure, counted Failed"])
+  sb{"--skipbackup?"}
+  delOrig["File.Delete name.bak, the original, also a still GIF, S1"]:::suspect
+  stamp["File.SetLastWriteTimeUtc on the output from the original time"]
+  rq["ProcessTask.ReProcess(): queue the output for the next round"]
+  rqEnd(["Reprocess, counted Modified"])
+
+  w0 --> w1 --> w2
+  w1 -->|"exception"| wx
+  w2 -->|"yes"| f0
+  w2 -->|"no"| w3
+  w3 -->|"no"| sb
+  w3 -->|"yes"| w4 --> w5
+  w4 -->|"exception"| wx
+  w5 -->|"yes"| f0
+  w5 -->|"no"| sb
+  wx --> wxEnd
+  f0 --> rb --> rb1
+  rb1 -->|"no"| rbKeep --> failEnd
+  rb1 -->|"yes"| rb2 --> rb3 --> failEnd
+  rb2 -->|"exception"| wxEnd
+  sb -->|"yes"| delOrig --> stamp
+  sb -->|"no"| stamp
+  delOrig -->|"exception"| wxEnd
+  stamp -->|"exception"| wxEnd
+  stamp --> rq --> rqEnd
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+The queued output runs the whole pipeline again in the next round. That includes the short clip rule in Process Live Photos.
+
+### Import
+
+#### Import Run
+
+The command lists every file under `--path` before it opens any database. It then opens `--trashdb`, `--skipdb`, and `--db` in that order, nested, and runs the files in parallel.
+
+```mermaid
+flowchart TD
+  start["ImportCommand.ExecuteAsync(): start the import"] --> runner["CommandRunner.RunAsync(): wrap the whole run"]
+  runner --> enum["FileEnumerator.Enumerate(): list every file under --path"]
+  enum -->|"exception, e.g. unreadable subdirectory"| exitError(["Exit 1 Error"])
+  enum --> trashQ{"--trashdb given?"}
+  trashQ -->|"yes"| trashOpen["TrashDatabase.InitializeAsync(): open read-only, validate the schema"]
+  trashQ -->|"no"| skipQ{"--skipdb given?"}
+  trashOpen --> skipQ
+  skipQ -->|"yes"| skipOpen["Database.InitializeAsync(): open the skip database read-only"]
+  skipQ -->|"no"| dbQ{"--db given?"}
+  skipOpen --> dbQ
+  dbQ -->|"yes"| dbOpen["Database.InitializeAsync(): create or upgrade the catalog, also on --dryrun, S8"]:::suspect
+  dbOpen --> dbVer["MediaUtilities.EnsureImageHashSupportAsync(): require exiftool 12.63 or newer"]
+  dbQ -->|"no"| ihQ{"--imagehash?"}
+  dbVer --> ihQ
+  ihQ -->|"yes"| warn["TrashDatabase.WarnIfImageHashMissing(): warn when trash db has no image_hash"]
+  warn --> ihVer["MediaUtilities.EnsureImageHashSupportAsync(): require exiftool 12.63 or newer"]
+  ihQ -->|"no"| exec["ImportTask.ExecuteAsync(): run files in parallel, up to --threads"]
+  ihVer --> exec
+  exec -->|"each file"| perFile["ImportTask.ImportFileAsync(): import one file, see the stages below"]
+  perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported, else free them"]
+  release --> counted(["Counted under the returned result"])
+  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims, then log the file"]
+  perFileCatch --> countedFailed(["Counted Failed"])
+  perFile -->|"cancel"| exitError
+  exec -->|"all files done"| deQ{"--deleteempty?"}
+  deQ -->|"no"| summary["ImportCommand.ExecuteAsync(): log every counter"]
+  deQ -->|"yes"| outQ{"--outpath exists and is readable?"}
+  outQ -->|"no"| outMissing["Throws after all files ran, counters never logged, S11"]:::suspect
+  outMissing --> exitError
+  outQ -->|"yes"| clean["DirectoryCleaner.DeleteEmptyDirectories(): prune --outpath only, never --path"]
+  clean --> summary
+  summary --> exitQ{"Failed or Invalid above 0?"}
+  exitQ -->|"yes"| exitFailed(["Exit 2 Failed"])
+  exitQ -->|"no"| exitSuccess(["Exit 0 Success"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+Any exception before `ImportTask.ExecuteAsync()` starts, such as a bad schema or an old exiftool, reaches `CommandRunner.RunAsync()` and exits 1. Ignored, Skipped, SkippedBySkipDb, and TrashedInImmich all leave the exit code at 0.
+
+#### Import Per-File Checks
+
+Each file runs the checks below in this order. The first check that matches decides the result. Exceptions from every step here go to the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed.
+
+```mermaid
+flowchart TD
+  start["ImportTask.ImportFileAsync(): start one file"] --> extQ{"Extension in the supported media list?"}
+  extQ -->|"no"| track["SkippedExtensionTracker.Track(): note the extension"]
+  track --> ignored(["Counted Ignored"])
+  extQ -->|"yes"| anyDbQ{"Any of --db, --skipdb, --trashdb given?"}
+  anyDbQ -->|"no"| metaQ{"Metadata already read for --imagehash?"}
+  anyDbQ -->|"yes"| cache["Database.GetByPathAsync(): read the --db row for the source path"]
+  cache --> hash["Database.ResolveHashesAsync(): reuse cached hashes if size and mtime match without --rehash"]
+  hash --> trashQ{"TrashDatabase.Sha1ExistsAsync(): --trashdb holds the SHA-1?"}
+  trashQ -->|"yes"| trashed(["Counted TrashedInImmich"])
+  trashQ -->|"no, or no --trashdb"| skipQ{"Database.Sha256ExistsAsync(): --skipdb holds the SHA-256?"}
+  skipQ -->|"yes"| skipDb(["Counted SkippedBySkipDb"])
+  skipQ -->|"no, or no --skipdb"| dbQ{"Database.Sha256ExistsAsync(): --db holds the SHA-256?"}
+  dbQ -->|"yes"| skipped(["Counted Skipped"])
+  dbQ -->|"no, or no --db"| ihQ{"--imagehash with --db or --trashdb?"}
+  ihQ -->|"no"| claimDbQ{"--db given?"}
+  ihQ -->|"yes"| ihMeta["ImportTask.GetFileMetaAsync(): catalog read with the image data hash"]
+  ihMeta --> ihEmpty{"Image data hash present?"}
+  ihEmpty -->|"no"| claimDbQ
+  ihEmpty -->|"yes"| ihTrash{"TrashDatabase.ImageHashExistsAsync(): trash db holds the image hash?"}
+  ihTrash -->|"yes"| trashed
+  ihTrash -->|"no"| ihDb{"Database.FindPathByImageHashAsync(): a --db row has the image hash?"}
+  ihDb -->|"yes"| skipped
+  ihDb -->|"no"| claimDbQ
+  claimDbQ -->|"no"| metaQ
+  claimDbQ -->|"yes"| claim{"ImportTask.ClaimedByAsync(): SHA-256 or image hash held in this run?"}
+  claim -->|"held, owner imported"| skipped
+  claim -->|"held, owner did not import"| claim
+  claim -->|"this file takes the claim"| metaQ
+  metaQ -->|"yes"| validate
+  metaQ -->|"no"| meta["ImportTask.GetFileMetaAsync(): read metadata, an IOException gives none"]
+  meta --> validate{"ExifToolJson.ParseValidate(): validate verdict counts errors?"}
+  validate -->|"yes"| invalid(["Counted Invalid"])
+  validate -->|"no, warnings ignored"| next(["Continues in Import Destination"])
+```
+
+A claim waiter blocks until the owner finishes, then loops if the owner did not import. A file is Skipped by a claim only after it passed every database check.
+
+#### Import Destination
+
+The folder date comes from the inferred path date, else the parsed metadata date, else `DateTime.MinValue`. A dry run ends here, before any file or database write.
+
+```mermaid
+flowchart TD
+  start["ExifToolJson.GetDateString(): first date tag set, Matroska date never read, S10"]:::suspect
+  start --> dpQ{"--datepath?"}
+  dpQ -->|"no"| getDate
+  dpQ -->|"yes"| setQ{"ExifToolJson.IsDateSet(): metadata has a date string?"}
+  setQ -->|"yes"| getDate{"ExifToolJson.GetDate(): date string parses as yyyy:MM:dd HH:mm:ss?"}
+  setQ -->|"no"| infer{"DateFromPath.InferCreatedDate(): date in the file name or directories?"}
+  infer -->|"yes"| inferred["Use the inferred date for the folder and the later date write"]
+  infer -->|"no"| inferWarn["Log a warning, no inferred date"]
+  inferWarn --> getDate
+  getDate -->|"yes"| build
+  getDate -->|"no date string"| minDate["Folder date is DateTime.MinValue, so 0001/01/01"]
+  getDate -->|"any other form, such as a time zone or a zero date"| tzDate["Dated file goes to 0001/01/01, --datepath skipped, S10"]:::suspect
+  minDate --> build
+  tzDate --> build
+  inferred --> build["ImportTask.BuildDestinationPath(): --outpath, date by --format, file name"]
+  build --> unique["MediaUtilities.GetUniqueFileName(): add _1, _2 when the name exists now"]
+  unique --> writeQ{"Detected file type in the exiftool write list?"}
+  writeQ -->|"no"| dropped["--tags, --tagpath, and the inferred date dropped, no log line, S14"]:::suspect
+  writeQ -->|"yes"| tags["ImportTask.ComputePathTags(): directory names under --path, with --tagpath"]
+  tags --> addTags["Add the --tags values"]
+  dropped --> dryQ{"--dryrun?"}
+  addTags --> dryQ
+  dryQ -->|"yes"| dryImported(["Counted Imported, nothing written"])
+  dryQ -->|"no"| next(["Continues in Import Copy and Writes"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+`ExifToolJson.IsDateSet()` is true for any non-empty date string, even one that does not parse. That suppresses `--datepath` for such a file.
+
+#### Import Copy and Writes
+
+The created-date write runs before the tag write, and the mtime restore runs after both. The database row describes the source path and its hashes, not the destination.
+
+```mermaid
+flowchart TD
+  start["ImportTask.ImportFileAsync(): read source size and mtime, create the date folder"]
+  start --> mvQ{"--move?"}
+  mvQ -->|"yes"| move["Move the source to the destination"]
+  mvQ -->|"no"| copy["Copy the source to the destination"]
+  move -->|"IOException, name now taken"| race["A parallel file took the unique name first, S13"]:::suspect
+  copy -->|"IOException, name now taken"| race
+  move -->|"other IOException or access denied"| ioCatch
+  copy -->|"other IOException or access denied"| ioCatch
+  race --> ioCatch["Log failed to copy or move"]
+  ioCatch --> failed(["Counted Failed"])
+  move --> dateQ{"Inferred date and writable type?"}
+  copy --> dateQ
+  dateQ -->|"yes"| dateW["MediaUtilities.TrySetCreateDateAsync(): write the created date"]
+  dateW --> dateOk{"ImportTask.ReportWrite(): created-date write succeeded?"}
+  dateQ -->|"no"| tagQ{"Any tags to apply?"}
+  dateOk -->|"yes"| tagQ
+  dateOk -->|"no"| rollback["ImportTask.RollBackDestination(): undo the destination"]
+  tagQ -->|"yes"| tagW["ImportTask.ApplyTagsAsync(): write XMP Subject tags"]
+  tagW --> tagOk{"ImportTask.ReportWrite(): tag write succeeded?"}
+  tagOk -->|"no"| rollback
+  rollback --> rbQ{"--move?"}
+  rbQ -->|"yes"| keepMoved["Moved file kept in --outpath, writes missing, no row"]
+  keepMoved --> failed
+  rbQ -->|"no"| delQ{"ImportTask.DeleteCopy(): copy removed?"}
+  delQ -->|"yes"| failed
+  delQ -->|"no"| copyLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
+  copyLeft --> failed
+  tagQ -->|"no"| mtime["Restore the source mtime on the destination"]
+  tagOk -->|"yes"| mtime
+  mtime -->|"IOException or access denied"| mtimeFail["Destination kept, no row, logged as a failed copy or move, S12"]:::suspect
+  mtimeFail --> failed
+  mtime --> rowQ{"--db given?"}
+  rowQ -->|"no"| imported(["Counted Imported"])
+  rowQ -->|"yes"| cachedQ{"Cached row for the source path?"}
+  cachedQ -->|"no"| insert["Database.InsertAsync(): insert or ignore the source row"]
+  cachedQ -->|"yes"| update["Database.UpdateHashesAsync(): new hashes, metadata, reset is_processed"]
+  insert --> imported
+  update --> imported
+  insert -->|"SqliteException"| rowFail["Escapes to the per-file catch, destination kept, no row, S12"]:::suspect
+  update -->|"SqliteException"| rowFail
+  insert -->|"cancel"| cancelQ
+  update -->|"cancel"| cancelQ
+  rowFail --> failed
+  dateW -->|"cancel"| cancelQ{"--move?"}
+  tagW -->|"cancel"| cancelQ
+  cancelQ -->|"no"| cancelDel["ImportTask.DeleteCopy(): remove the copy"]
+  cancelDel --> exitError(["Rethrown, run exits 1 Error"])
+  cancelQ -->|"yes"| cancelMoved["Moved file stays, mtime not restored, no row"]
+  cancelMoved --> exitError
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. An `IOException` or `UnauthorizedAccessException` counts the file Failed. Any other exception, a `SqliteException` included, reaches the per-file catch in `ImportTask.ExecuteAsync()` with the destination left in place.
+
+### Index
+
+#### Index Run
+
+The index command requires `--db` and opens it read-write. It has no `--dryrun`, and it never removes a row.
+
+```mermaid
+flowchart TD
+  start["IndexCommand.ExecuteAsync(): start the index"] --> runner["CommandRunner.RunAsync(): wrap the whole run"]
+  runner --> enum["FileEnumerator.Enumerate(): list every file under --path"]
+  enum -->|"exception"| exitError(["Exit 1 Error"])
+  enum --> open["DatabaseScope.RunAsync(): create the --db folder, open read-write"]
+  open --> init["Database.InitializeAsync(): create the table, upgrade the schema"]
+  init --> ver["MediaUtilities.EnsureImageHashSupportAsync(): require exiftool 12.63 or newer"]
+  init -->|"exception"| exitError
+  ver -->|"too old or not found"| exitError
+  ver --> exec["IndexTask.ExecuteAsync(): run files in parallel, up to --threads"]
+  exec -->|"each file"| extQ{"Extension in the supported media list?"}
+  extQ -->|"no"| track["SkippedExtensionTracker.Track(): note the extension"]
+  track --> ignored(["Counted Ignored"])
+  extQ -->|"yes"| file["IndexTask.IndexFileAsync(): index one file, see Index Per-File"]
+  file -->|"Inserted"| inserted(["Counted Inserted"])
+  file -->|"Updated"| updated(["Counted Updated"])
+  file -->|"Unchanged"| unchanged(["Counted Unchanged"])
+  file -->|"exception other than cancel"| failed(["Counted Failed"])
+  file -->|"cancel"| exitError
+  exec -->|"all files done"| stale["Rows for files gone from --path stay in --db"]
+  stale --> summary["IndexCommand.ExecuteAsync(): log every counter"]
+  summary --> exitQ{"Failed above 0?"}
+  exitQ -->|"yes"| exitFailed(["Exit 2 Failed"])
+  exitQ -->|"no"| exitSuccess(["Exit 0 Success"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+#### Index Per-File
+
+Metadata is read only for a new row, new content, or a row whose metadata was never read. Exceptions from every step here go to the per-file catch in `IndexTask.ExecuteAsync()`, which counts the file Failed. A cancel is rethrown instead, and the run exits 1.
+
+```mermaid
+flowchart TD
+  start["IndexTask.IndexFileAsync(): index one file"] --> cache["Database.GetByPathAsync(): read the row for this path"]
+  cache --> hash["Database.ResolveHashesAsync(): reuse hashes if size and mtime match without --rehash, else hash"]
+  hash -->|"exception, e.g. file gone"| failed(["Counted Failed"])
+  hash --> needQ{"No row, new SHA-256, or row metadata unread?"}
+  needQ -->|"yes"| read["IndexTask.ReadMetadataAsync(): catalog read, an exiftool error leaves it unread"]
+  needQ -->|"no"| rowQ{"Row exists?"}
+  read --> rowQ
+  rowQ -->|"no"| insert["Database.InsertAsync(): size and mtime read after hashing"]
+  insert --> inserted(["Counted Inserted"])
+  rowQ -->|"yes"| shaQ{"SHA-256 differs from the row?"}
+  shaQ -->|"yes"| update["Database.UpdateHashesAsync(): new hashes and metadata, reset is_processed"]
+  update --> updated(["Counted Updated"])
+  shaQ -->|"no"| metaQ{"Metadata read in this run?"}
+  metaQ -->|"yes"| backfill["Database.SetMetadataAsync(): backfill the metadata columns"]
+  metaQ -->|"no"| sizeQ{"Size or mtime differs from the row?"}
+  backfill --> sizeQ
+  sizeQ -->|"no"| unchanged(["Counted Unchanged"])
+  sizeQ -->|"yes"| stat["Database.UpdateMetadataAsync(): store SHA-1, size, and mtime"]
+  stat --> procQ{"Row is_processed?"}
+  procQ -->|"yes"| unchanged
+  procQ -->|"no"| updated
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+`--processed` sets `is_processed` only on an inserted row. Counted Updated also covers an unprocessed row whose content is the same but whose size or mtime moved.
+
+### Trash
+
+#### Trash Setup and Exit
+
+The trash command opens the trash database read-write and the process database read-only. The sync itself is drawn in the next diagram.
+
+```mermaid
+flowchart TD
+  T1["CommandRunner.RunAsync(): run the trash work"] --> T2["TrashDatabaseScope.RunAsync(): open the trash database"]
+  T2 --> T3{"--trashdb given?"}
+  T3 -->|"no"| T4["TrashCommand.ExecuteAsync(): throw, trash database path is required"]
+  T4 -->|"exception"| TE
+  T3 -->|"yes"| T3a["Create the --trashdb folder"]
+  T3a --> T5["TrashDatabase.InitializeAsync(): create table, add image_hash column and index"]
+  T5 -->|"exception"| TE
+  T5 --> T6{"--processdb given?"}
+  T6 -->|"yes"| T7["Database.InitializeAsync(): open --processdb read-only, check the files table"]
+  T7 -->|"exception"| TE
+  T7 --> T8["TrashCommand.SyncAsync(): fetch and store hashes, see next diagram"]
+  T6 -->|"no"| T8
+  T8 -->|"exception"| TE
+  T8 -->|"cancel or HTTP timeout"| T9["CommandRunner.RunAsync(): log Trash cancelled at Information, S15"]:::suspect
+  T9 --> T10(["Exit 1, Error"])
+  T8 --> T11{"partial flag set?"}
+  T11 -->|"yes"| T12(["Exit 2, Failed"])
+  T11 -->|"no"| T13(["Exit 0, Success"])
+  TE["CommandRunner.RunAsync(): log the exception"] --> T14(["Exit 1, Error"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+Both databases are disposed in a finally block whichever way the work ends. A required --trashdb makes the missing-path branch unreachable from the command line.
+
+#### Trash Fetch and Store
+
+Each page is committed in its own transaction before the next page is fetched. A page that throws therefore leaves every earlier page stored and skips the image hash backfill.
+
+```mermaid
+flowchart TD
+  S1["TrashCommand.SyncAsync(): warn if --processdb lacks image_hash, count rows"] --> S2["TrashCommand.CreateDefaultHttpClient(): needs --url and an API key"]
+  S2 -->|"missing, throws"| SE
+  S2 --> S3["TrashCommand.FetchTrashedAssetsAsync(): POST api/search/metadata, 1000 per page"]
+  S3 -->|"HTTP error or bad JSON"| SE
+  S3 --> S4{"page has items?"}
+  S4 -->|"no"| S5["TrashCommand.SyncAsync(): stop paging without reading NextPage, S15"]:::suspect
+  S4 -->|"yes"| S6{"for each asset: isTrashed?"}
+  S6 -->|"no"| S7["Log warning, skip the asset"]
+  S6 -->|"yes"| S8["TrashCommand.ConvertChecksum(): base64 checksum to hex SHA-1"]
+  S8 -->|"empty, bad base64, or not 20 bytes"| S7
+  S8 -->|"valid"| S9["Add SHA-1 and file name to the page batch"]
+  S7 -->|"after the last asset"| S10{"batch has rows?"}
+  S9 -->|"after the last asset"| S10
+  S10 -->|"yes"| S11["TrashDatabase.InsertHashesAsync(): upsert the page, rows never removed"]
+  S10 -->|"no"| S12
+  S11 --> S12{"NextPage value?"}
+  S12 -->|"integer above this page"| S3
+  S12 -->|"null"| S14
+  S12 -->|"any other value"| S13["Log error, set the partial flag, stop paging"]
+  S13 --> S14
+  S5 --> S14["TrashDatabase.GetCountAsync(): log fetched and newly inserted counts"]
+  S14 --> S15{"--processdb given?"}
+  S15 -->|"yes"| S16["TrashDatabase.GetSha1sWithoutImageHashAsync(): rows lacking an image hash"]
+  S16 --> S17["Database.GetImageHashBySha1Async(): look up each SHA-1, null without the column"]
+  S17 --> S18["TrashDatabase.InsertHashesAsync(): set image_hash where it is still null"]
+  S18 --> S19
+  S15 -->|"no"| S19{"partial flag set?"}
+  S19 -->|"yes"| S20(["Exit 2, Failed"])
+  S19 -->|"no"| S21(["Exit 0, Success"])
+  SE["CommandRunner.RunAsync(): log the exception"] --> S22(["Exit 1, Error, earlier pages stay stored"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+Exceptions from every step, including the count and backfill steps, go to CommandRunner.RunAsync() and exit 1. The upsert keeps an existing file name and only fills an image hash that is still null.
+
+### Undo
+
+#### Undo Inputs
+
+Undo has no database. It reverses only what process left on disk as backup files and .out markers. This diagram shows those states as ProcessTask writes them.
+
+```mermaid
+flowchart TD
+  P1{"ProcessTask.ExecuteAsync(): which change?"}
+  P1 -->|"short clip"| P2["ProcessTask.DeleteLivePhotosAsync(): video at or under --duration seconds"]
+  P1 -->|"live photo video"| P3["ProcessTask.DeleteLiveVideo(): video paired with a still"]
+  P2 --> P4{"--skipbackup?"}
+  P3 --> P4
+  P4 -->|"yes"| P5(["Deleted, nothing for undo"])
+  P4 -->|"no"| P6["ProcessTask.BackupFile(): rename to .bak, or .bakN when taken"]
+  P6 --> P7(["On disk: backup only, no .out marker"])
+  P1 -->|"convert video"| P8["ProcessTask.ConvertVideoAsync(): ffmpeg writes name.temp"]
+  P8 -->|"ffmpeg fails"| P9(["Original untouched, temp removed, file fails"])
+  P8 --> P10["ProcessTask.BackupFile(): rename the original to .bak or .bakN"]
+  P10 --> P11{"--skipbackup?"}
+  P11 -->|"no"| P12["ProcessTask.ConvertVideoAsync(): write backup.out holding the absolute output path"]
+  P11 -->|"yes"| P13
+  P12 --> P13["ProcessTask.ConvertVideoAsync(): rename temp to name.mp4 or name_N.mp4"]
+  P13 --> P14["ProcessTask.WriteConvertedMetadataAsync(): copy tags, set created date"]
+  P14 -->|"fails or throws"| P15["ProcessTask.RollBackConversion(): delete output, rename backup back, drop marker"]
+  P15 -->|"output delete fails"| P16(["On disk: backup and output, plus the marker without --skipbackup, file fails"])
+  P15 --> P17(["Original back under its name, file fails"])
+  P14 -->|"ok"| P18{"--skipbackup?"}
+  P18 -->|"yes"| P19(["Original deleted, output only, nothing for undo"])
+  P18 -->|"no"| P20(["On disk: backup, backup.out, output queued for reprocess"])
+  P1 -->|"rename extension or case"| P21(["Renamed with no backup, undo cannot reverse it"])
+  P1 -->|"trashed in Immich"| P22(["Deleted with no backup, undo cannot reverse it"])
+```
+
+A converted output is reprocessed in the same run. A short output is then backed up again as name.mp4.bak. Deletion backups never get a marker.
+
+#### Undo Grouping
+
+Undo groups backups by the path they would restore to. A group is derived when another group shares its folder and stem and its base file exists.
+
+```mermaid
+flowchart TD
+  U1["CommandRunner.RunAsync(): run the undo work"] --> U2["FileEnumerator.Enumerate(): list every file under --path"]
+  U2 -->|"exception"| UE
+  U2 --> U3["UndoTask.IsBackupFile(): keep names ending .bak or .bakN, any file type, S2"]:::suspect
+  U3 --> U4["UndoTask.GetBackupBase(): group by base path, case-insensitive, S3"]:::suspect
+  U4 --> U5{"any groups?"}
+  U5 -->|"no"| U6(["Exit 0, Success, nothing to undo"])
+  U5 -->|"yes"| U7{"another group has the same folder and stem, and this base file exists?"}
+  U7 -->|"yes"| U8["UndoTask.Execute(): mark the group derived"]
+  U7 -->|"no"| U9["UndoTask.Execute(): mark the group for restore"]
+  U8 --> U10["UndoTask.Execute(): act on each group, see the next two diagrams"]
+  U9 --> U10
+  U10 -->|"cancelled between groups"| U11(["Exit 1, Error"])
+  U10 -->|"exception"| UE
+  U10 --> U12{"failed count above zero?"}
+  U12 -->|"yes"| U13(["Exit 2, Failed"])
+  U12 -->|"no"| U14(["Exit 0, Success"])
+  UE["CommandRunner.RunAsync(): log the exception, counters never logged"] --> U15(["Exit 1, Error, earlier groups already changed"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+There is no per-group catch. Any exception from a group ends the whole run. Under --dryrun, UndoTask.TryDelete() and UndoTask.TryRestore() return success without touching the disk.
+
+#### Undo Derived Group
+
+A derived group is treated as a conversion output. Nothing in it is restored.
+
+```mermaid
+flowchart TD
+  D1{"base file exists?"}
+  D1 -->|"yes"| D2["UndoTask.TryDelete(): delete the base file as a converted output"]
+  D2 -->|"fails"| D3(["Counted Failed, the group's backups kept"])
+  D2 -->|"ok"| D4["Count Deleted"]
+  D1 -->|"no"| D5
+  D4 --> D5["UndoTask.TryDelete(): delete every backup in the group, S2"]:::suspect
+  D5 -->|"a delete fails"| D6(["Counted Failed for that backup"])
+  D5 -->|"ok"| D7(["Counted Deleted, nothing restored, .out markers left"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+#### Undo Restore Group
+
+The first non-empty backup in .bak, .bak1, .bak2 order is the one restored. Only that backup's .out marker is read.
+
+```mermaid
+flowchart TD
+  R1["UndoTask.GetBackupSortKey(): order backups, .bak first, then .bak1, .bak2"]
+  R1 --> R2{"first non-empty backup found?"}
+  R2 -->|"a backup vanished, its length throws"| RX(["Exit 1, Error, run stops mid-way, S4"]):::suspect
+  R2 -->|"no"| R3(["Counted Failed, files left as they are"])
+  R2 -->|"yes"| R4{"base file exists?"}
+  R4 -->|"yes"| R5["UndoTask.TryDelete(): delete the current file, not counted, S2"]:::suspect
+  R5 -->|"fails"| R6(["Counted Failed, backup kept"])
+  R5 -->|"ok"| R7
+  R4 -->|"no"| R7["UndoTask.TryRestore(): move the backup to the base name"]
+  R7 -->|"IO or access error"| R8(["Counted Failed, backup kept"])
+  R7 -->|"ok"| R9["Count Restored"]
+  R9 --> R10["UndoTask.TryDelete(): delete the other backups as superseded, S3"]:::suspect
+  R10 -->|"a delete fails"| R11["Count Failed, continue"]
+  R10 -->|"ok"| R12["Count Deleted per backup"]
+  R11 --> R13
+  R12 --> R13{"marker named after the primary backup exists?, S4"}:::suspect
+  R13 -->|"yes"| R14["UndoTask.Execute(): read the output path from the marker"]
+  R14 -->|"read throws"| RX
+  R14 --> R15["UndoTask.TryDelete(): delete the marker first"]
+  R15 -->|"fails"| R16["Count Failed, continue"]
+  R15 -->|"ok"| R17["Count Deleted"]
+  R16 --> R18
+  R17 --> R18{"tracked path exists?"}
+  R18 -->|"no"| R19["Leave the converted output, no marker remains, S4"]:::suspect
+  R19 --> R30(["Counted Restored"])
+  R18 -->|"yes"| R20{"tracked path is a group base?"}
+  R20 -->|"yes, this group's own base"| R30
+  R20 -->|"yes, another group"| R21["Leave it to that group, which restores it as an original, S4"]:::suspect
+  R21 --> R30
+  R20 -->|"no"| R22["UndoTask.TryDelete(): delete the tracked output"]
+  R22 -->|"fails"| R23(["Counted Restored, output Counted Failed"])
+  R22 -->|"ok"| R24(["Counted Restored, output Counted Deleted"])
+  R13 -->|"no"| R25{"base extension is .mp4?"}
+  R25 -->|"yes"| R30
+  R25 -->|"no"| R26{"same-stem .mp4 exists and is not a group base?"}
+  R26 -->|"no"| R30
+  R26 -->|"yes"| R27["UndoTask.TryDelete(): delete it as a legacy converted output, S2"]:::suspect
+  R27 -->|"fails"| R28(["Counted Restored, the .mp4 Counted Failed"])
+  R27 -->|"ok"| R29(["Counted Restored, the .mp4 Counted Deleted"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+Restored counts groups and Deleted counts files. Failed counts each failed delete or restore, and one per group with no non-empty backup. A successful delete of the current file before a restore is not counted.
+
+### Verify
+
+#### Verify Screening
+
+Batches of 1024 files run in parallel, up to --threads at once. A per-file catch turns any screening exception into a Failed count, except cancellation.
+
+```mermaid
+flowchart TD
+  V1["CommandRunner.RunAsync(): run the verify work"] --> V2["FileEnumerator.Enumerate(): list every file under --path"]
+  V2 -->|"exception"| VE
+  V2 --> V3["DatabaseScope.RunAsync(): open --db read-write when given, no exiftool check"]
+  V3 -->|"exception"| VE
+  V3 --> V4["VerifyTask.RunAsync(): chunk into batches of 1024, run --threads at once"]
+  V4 --> V5["VerifyTask.ShouldVerifyAsync(): screen each file of the batch"]
+  V5 --> V6{"supported media extension?"}
+  V6 -->|"no"| V7(["Counted Ignored"])
+  V6 -->|"yes"| V8{"file still exists?"}
+  V8 -->|"no"| V9(["Counted Failed"])
+  V8 -->|"yes"| V10{"--db given?"}
+  V10 -->|"yes"| V11["IndexTask.IndexFileAsync(): hash or reuse cache, insert or update the row"]
+  V11 -->|"exception"| V9
+  V11 --> V12{"row unchanged, is_processed set, no --reprocess?"}
+  V12 -->|"yes"| V13(["Counted Skipped, flag shared with process"])
+  V12 -->|"no"| V14
+  V10 -->|"no"| V14["MediaUtilities.EnsureReadable(): open the file once"]
+  V14 -->|"exception"| V9
+  V14 --> V15["Add the file to the batch candidates"]
+  V15 --> V16{"batch has candidates?"}
+  V16 -->|"no"| V20
+  V16 -->|"yes"| V17["VerifyTask.PreflightAsync(): once per run, load Immich modules in Docker"]
+  V17 -->|"no docker, exit non-zero, or no sentinel"| VE
+  V17 --> V18["VerifyTask.DecodeBatchAsync(): decode the batch, see next diagram"]
+  V18 -->|"exception"| VE
+  V18 --> V20{"after all batches: Invalid or Failed above zero?"}
+  V20 -->|"yes"| V21(["Exit 2, Failed"])
+  V20 -->|"no"| V22(["Exit 0, Success"])
+  VE["CommandRunner.RunAsync(): log the exception, other batches cancelled"] --> V23(["Exit 1, Error"])
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+The preflight runs only when some batch has a candidate. A tree of non-media or already verified files never needs Docker.
+
+#### Verify Decode Batch
+
+One container judges a whole batch, reading container paths on stdin. Each verdict is matched back to its host file by container path.
+
+```mermaid
+flowchart TD
+  B1{"path has a line break?"}
+  B1 -->|"yes"| B2(["Counted Failed"])
+  B1 -->|"no"| B3{"VerifyTask.TryToContainerPath(): path stays under --path?"}
+  B3 -->|"no"| B2
+  B3 -->|"yes"| B4["VerifyTask.RunImmichAsync(): docker run Immich, read-only bind mount, paths on stdin"]
+  B4 -->|"fails to start, not a cancel"| B5(["Every mapped file Counted Failed"])
+  B4 --> B6{"Verify script: video extension?"}
+  B6 -->|"yes"| B7["Verify script: probe, transcode one preview frame"]
+  B6 -->|"no"| B8["Verify script: RAW preview extract best effort, decode a preview"]
+  B7 --> B9["Verify script: print one JSON verdict per path"]
+  B8 --> B9
+  B9 --> B10{"container exit code non-zero?"}
+  B10 -->|"yes"| B11["Log the exit code and stderr, keep going"]
+  B10 -->|"no"| B12
+  B11 --> B12["VerifyTask.ParseLine(): parse stdout lines, key verdicts by container path"]
+  B12 --> B13{"verdict returned for this file?"}
+  B13 -->|"no"| B2
+  B13 -->|"yes"| B14{"verdict ok?"}
+  B14 -->|"no"| B15{"host file still exists?"}
+  B15 -->|"no"| B2
+  B15 -->|"yes"| B16["Log Immich cannot render, also for a symlink leaving the mount"]
+  B16 --> B17(["Counted Invalid"])
+  B14 -->|"yes"| B18{"--db given?"}
+  B18 -->|"yes"| B19["Database.SetProcessedAsync(): set is_processed to 1"]
+  B19 -->|"exception"| B20(["Exit 1, Error, the run aborts"])
+  B19 --> B21(["Counted Verified"])
+  B18 -->|"no"| B21
+  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+```
+
+A verdict the container never printed is a tooling gap and counts Failed, never Invalid. Only Invalid and Failed make the exit code 2.
+
+### Suspect Branches
+
+Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
+
+- **S1.** `process` deletes a still or short GIF and the MP4 made from it under `--skipbackup`, #309.
+- **S2.** `undo` deletes a same-stem video that `process` never touched, and restores any `.bak` it finds over the current file, #310.
+- **S3.** `undo` deletes a second original kept as `.bakN`, and groups names that differ only in case, #311.
+- **S4.** `undo` leaves converted outputs behind, and one bad group stops the run, #312.
+- **S5.** Ctrl+C or SIGTERM ends the process without cancelling, so no cancel path runs and a child tool keeps running, #313.
+- **S6.** A `process` dry run loops forever on names that differ only in case, #314.
+- **S7.** A `process` dry run counts every file it would change as Failed and exits 2, #315.
+- **S8.** A dry run with `--db` creates, upgrades and writes the database, #316.
+- **S9.** A trashed file whose delete fails continues through the pipeline, and the run exits 0, #317.
+- **S10.** A created date with a time zone, or one held only in `Matroska:DateTimeOriginal`, reads as no date, #318.
+- **S11.** `import --deleteempty` throws when `--outpath` does not exist, so the run exits 1, #319.
+- **S12.** A copy-mode import that fails after the copy leaves the copy, and the next run imports it again as `_1`, #320.
+- **S13.** Two parallel imports with the same name and date can pick the same destination, #321.
+- **S14.** `import` drops `--tags`, `--tagpath` and the inferred date silently for a type exiftool cannot write, #322.
+- **S15.** `trash` stops at an empty page without marking the sync partial, and logs a timeout as a cancel, #323.
 
 ## State Management Pattern
 
@@ -199,8 +1254,8 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **Three-tier approach**: Remux (.m2t, .mkv) -> Re-encode (.asf, .wmv, .avi, .3gp, .gif) -> Audio-only re-encode (.mov/.mp4 with PCM audio)
 - **Even Dimensions**: The re-encode tier pads with `pad=ceil(iw/2)*2:ceil(ih/2)*2`, because libx264 at `yuv420p` rejects an odd width or height. Nothing is scaled. A GIF keeps every pixel and gains one edge row or column. An odd-sized subsampled source, such as a `yuv420p` AVI, loses its last odd row or column to the pad color instead.
 - **Rename Collisions**: The mixed-case and MIME extension renames go through `RenameToFreeName`. A file already holding the target name is never deleted or backed up. The renamed file takes the next free `_N` name from `MediaUtilities.GetUniqueFileName`, and a warning names both files. This holds with and without `--skipbackup`. A case-only rename on a case-insensitive filesystem is not a collision with itself. `ProcessCommand`'s extension-conflict deferral only keeps same-stem files out of one parallel pass, and it reserves no name on disk.
-- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path. It is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was taken. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once its metadata is copied.
-- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source> <output> -all:all -overwrite_original` copies all source metadata to the output file. The source is the `.bak` file in both modes. With `--skipbackup` that `.bak` is deleted only after this copy runs. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` does not reliably set the output's create date across every format pairing. So a separate `SetCreateDateAsync` call follows it, writing the date from the already-parsed `ExifToolJson` to the output.
+- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path. It is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was taken. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.
+- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source> <output> -all:all -overwrite_original` copies all source metadata to the output file. The source is the `.bak` file in both modes. A failed copy or date write removes the output, returns the `.bak` to the original name, and fails the file. When the output cannot be removed, both stay and an error names them. So `--skipbackup` never deletes an original after a failed exiftool write. Tags the MP4 cannot hold are skipped with exit 0, which counts as landed. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` does not reliably set the output's create date across every format pairing. So a separate `TrySetCreateDateAsync` call follows it, writing the date from the already-parsed `ExifToolJson` to the output.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
 ### Live Photo Detection
