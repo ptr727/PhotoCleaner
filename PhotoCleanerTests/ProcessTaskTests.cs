@@ -863,6 +863,50 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
+    public async Task ExecuteAsync_VideoExactlyAtDuration_DeletesShortClip()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "boundary.mp4");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=s=32x32:r=10",
+                    "-t",
+                    "1.1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(skipBackup: true, shortVideoDuration: 1.1),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_GifExactlyAtDuration_ConvertsToStillImage()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
@@ -904,7 +948,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
-    public async Task ExecuteAsync_Gif87aWithNoDuration_ConvertsToStillImage()
+    public async Task ExecuteAsync_Gif87aStill_ConvertsToStillImage()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
         try
