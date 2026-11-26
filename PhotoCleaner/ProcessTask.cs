@@ -221,13 +221,9 @@ internal sealed class ProcessTask(
             return true;
         }
 
-        try
+        if (MediaUtilities.TryDeleteFile(fileInfo.FullName) is { } failure)
         {
-            File.Delete(fileInfo.FullName);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Error(ex, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
+            Log.Error(failure, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
             return false;
         }
 

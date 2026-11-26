@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using CliWrap;
-using CliWrap.Buffered;
 
 namespace PhotoCleaner;
 
