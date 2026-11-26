@@ -11,6 +11,12 @@ internal sealed partial class UndoTask(CommandLine.Options options)
     [GeneratedRegex(@"\.bak\d+$")]
     private static partial Regex NumberedPattern();
 
+    internal const string MarkerExtension = ".out";
+
+    // Files removed and names taken so far, so a dry run picks the same free names a live run would.
+    private readonly HashSet<string> _removed = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _taken = new(StringComparer.Ordinal);
+
     internal static bool IsBackupFile(string path) => BackupPattern().IsMatch(path);
 
     internal static bool IsNumberedBackup(string path) => NumberedPattern().IsMatch(path);
@@ -25,260 +31,234 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         return m.Success ? int.Parse(m.Value[4..], CultureInfo.InvariantCulture) : 0;
     }
 
+    // Process backs up only media it supports, so any other .bak belongs to another tool.
+    internal static bool IsUndoableBackup(string path) =>
+        IsBackupFile(path)
+        && MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(GetBackupBase(path)));
+
+    // The marker holds the absolute path at conversion time, and the output sits beside its backup.
+    internal static string ResolveMarkerOutput(string backup, string markerText) =>
+        Path.Combine(
+            Path.GetDirectoryName(backup) ?? string.Empty,
+            Path.GetFileName(markerText.Trim())
+        );
+
+    private sealed record Backup(string Path, string Base, string? Marker, string? Output);
+
     internal (int restored, int deleted, int failed) Execute(
         IReadOnlyCollection<string> allFiles,
         CancellationToken cancellationToken = default
     )
     {
-        // Collect only backup files and group them by base path.
-        // For example, img.mov.bak and img.mp4.bak1 are grouped by img.mov and img.mp4.
-        Dictionary<string, List<string>> groups = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string file in allFiles)
+        List<string> backupPaths = [];
+        foreach (string file in allFiles.Where(IsBackupFile))
         {
-            if (!IsBackupFile(file))
+            if (IsUndoableBackup(file))
             {
-                continue;
+                backupPaths.Add(file);
             }
-
-            string basePath = GetBackupBase(file);
-            if (!groups.TryGetValue(basePath, out List<string>? backups))
+            else
             {
-                backups = [];
-                groups[basePath] = backups;
+                Log.Verbose("Skipping '{BackupPath}', not a backup of supported media", file);
             }
-
-            backups.Add(file);
         }
 
-        if (groups.Count == 0)
+        if (backupPaths.Count == 0)
         {
             Log.Information("No backup files found, nothing to undo");
             return (0, 0, 0);
         }
 
-        // Pass 1 - identify derived base paths
-        HashSet<string> derivedBases = new(StringComparer.OrdinalIgnoreCase);
-
-        // Among same-stem groups, the one whose base file still exists is the conversion output.
-        // The original was backed up then removed, so only the output remains on disk.
-        foreach (KeyValuePair<string, List<string>> kvp in groups)
-        {
-            string basePath = kvp.Key;
-            if (derivedBases.Contains(basePath))
-            {
-                continue;
-            }
-
-            string? directory = Path.GetDirectoryName(basePath);
-            string stem = Path.GetFileNameWithoutExtension(basePath);
-            string ext = Path.GetExtension(basePath);
-
-            bool hasStemPeer = groups.Keys.Any(other =>
-                !string.Equals(other, basePath, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(
-                    Path.GetDirectoryName(other),
-                    directory,
-                    StringComparison.OrdinalIgnoreCase
-                )
-                && string.Equals(
-                    Path.GetFileNameWithoutExtension(other),
-                    stem,
-                    StringComparison.OrdinalIgnoreCase
-                )
-                && !string.Equals(Path.GetExtension(other), ext, StringComparison.OrdinalIgnoreCase)
-            );
-
-            if (hasStemPeer && File.Exists(basePath))
-            {
-                _ = derivedBases.Add(basePath);
-            }
-        }
-
-        // Pass 2 - act on each group
         int restored = 0;
         int deleted = 0;
         int failed = 0;
 
-        Log.Information("Undoing {GroupCount} backup groups", groups.Count);
-        foreach (KeyValuePair<string, List<string>> kvp in groups)
+        // Read every marker first, since a marker on one backup names a file another backup may hold.
+        List<Backup> backups = [];
+        foreach (
+            string path in backupPaths
+                .OrderBy(GetBackupBase, StringComparer.Ordinal)
+                .ThenBy(GetBackupSortKey)
+        )
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            string basePath = kvp.Key;
-            Log.Information("Undoing '{FilePath}'", basePath);
-            List<string> backups = kvp.Value;
-
-            if (derivedBases.Contains(basePath))
+            try
             {
-                // Derived: delete the current (converted) file and all its backups
-                if (File.Exists(basePath))
+                if (new FileInfo(path).Length == 0)
                 {
-                    Log.Information("Deleting derived file: '{FilePath}'", basePath);
-                    if (!TryDelete(basePath))
+                    Log.Warning("Backup '{BackupPath}' is empty (0 bytes), leaving it", path);
+                    failed++;
+                    continue;
+                }
+
+                string marker = path + MarkerExtension;
+                string? output = null;
+                if (File.Exists(marker))
+                {
+                    string text = File.ReadAllText(marker);
+                    if (string.IsNullOrWhiteSpace(text))
                     {
+                        Log.Error(
+                            "Marker '{FilePath}' is empty, leaving '{BackupPath}'",
+                            marker,
+                            path
+                        );
                         failed++;
                         continue;
                     }
 
-                    deleted++;
+                    output = ResolveMarkerOutput(path, text);
                 }
 
-                foreach (string backup in backups)
+                backups.Add(
+                    new Backup(path, GetBackupBase(path), output is null ? null : marker, output)
+                );
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Error(ex, "Failed to read '{BackupPath}' or its marker, leaving it", path);
+                failed++;
+            }
+        }
+
+        // A backup of a recorded output is the output itself, backed up later as a short clip.
+        // It is told apart only when one marker names that output and one other backup holds it.
+        HashSet<Backup> derived = [];
+        HashSet<Backup> blocked = [];
+        Log.Information("Undoing {BackupCount} backups", backups.Count);
+        foreach (
+            IGrouping<string, Backup> record in backups
+                .Where(b => b.Output is not null)
+                .GroupBy(b => b.Output!, StringComparer.Ordinal)
+        )
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string output = record.Key;
+            List<Backup> holders = [.. record];
+            List<Backup> outputBackups =
+            [
+                .. backups.Where(b =>
+                    string.Equals(b.Base, output, StringComparison.Ordinal) && !holders.Contains(b)
+                ),
+            ];
+
+            if (holders.Count > 1 || outputBackups.Count > 1)
+            {
+                Log.Warning(
+                    "Cannot tell which file is the output '{FilePath}' recorded, leaving it and restoring every backup",
+                    output
+                );
+                continue;
+            }
+
+            if (outputBackups.Count == 1)
+            {
+                Log.Information(
+                    "Deleting backup of converted output: '{BackupPath}'",
+                    outputBackups[0].Path
+                );
+                if (TryDelete(outputBackups[0].Path))
                 {
-                    Log.Information("Deleting derived backup: '{BackupPath}'", backup);
-                    if (!TryDelete(backup))
-                    {
-                        failed++;
-                        continue;
-                    }
+                    deleted++;
+                    _ = derived.Add(outputBackups[0]);
+                }
+                else
+                {
+                    failed++;
+                    blocked.UnionWith(holders);
+                }
 
+                continue;
+            }
+
+            if (Exists(output))
+            {
+                Log.Information("Deleting converted output: '{FilePath}'", output);
+                if (TryDelete(output))
+                {
                     deleted++;
                 }
+                else
+                {
+                    failed++;
+                    blocked.UnionWith(holders);
+                }
+            }
+        }
+
+        // Every other backup is an original, and an original whose name is taken gets a free one.
+        foreach (Backup backup in backups.Where(b => !derived.Contains(b)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (blocked.Contains(backup))
+            {
+                Log.Warning(
+                    "Leaving '{BackupPath}' until its converted output is removed",
+                    backup.Path
+                );
+                continue;
+            }
+
+            string target = GetFreeName(backup.Base);
+            if (!string.Equals(target, backup.Base, StringComparison.Ordinal))
+            {
+                Log.Warning(
+                    "'{FilePath}' is taken, restoring '{BackupPath}' to '{TargetPath}'",
+                    backup.Base,
+                    backup.Path,
+                    target
+                );
             }
             else
             {
-                // Non-derived: restore original from primary backup (.bak)
-                // Select the first non-empty backup in natural order (.bak, .bak1, .bak2, ...)
-                string? primaryBackup = null;
-                foreach (string candidate in backups.OrderBy(GetBackupSortKey))
+                Log.Information("Restoring '{BackupPath}' to '{FilePath}'", backup.Path, target);
+            }
+
+            if (!TryRestore(backup.Path, target))
+            {
+                failed++;
+                continue;
+            }
+
+            restored++;
+            if (backup.Marker is not null)
+            {
+                Log.Information("Deleting conversion marker: '{FilePath}'", backup.Marker);
+                if (TryDelete(backup.Marker))
                 {
-                    if (new FileInfo(candidate).Length == 0)
-                    {
-                        Log.Warning(
-                            "Backup '{BackupPath}' is empty (0 bytes), skipping",
-                            candidate
-                        );
-                        continue;
-                    }
-
-                    primaryBackup = candidate;
-                    break;
+                    deleted++;
                 }
-
-                if (primaryBackup is null)
-                {
-                    Log.Warning(
-                        "No usable backup found for '{BasePath}' - all backups are empty, leaving file unchanged",
-                        basePath
-                    );
-                    failed++;
-                    continue;
-                }
-
-                // Delete the current file if it exists (date-from-path wrote it in-place)
-                if (File.Exists(basePath))
-                {
-                    Log.Information("Deleting current file before restore: '{FilePath}'", basePath);
-                    if (!TryDelete(basePath))
-                    {
-                        failed++;
-                        continue;
-                    }
-                }
-
-                // Restore primary backup -> original name
-                Log.Information(
-                    "Restoring '{BackupPath}' to '{FilePath}'",
-                    primaryBackup,
-                    basePath
-                );
-                if (!TryRestore(primaryBackup, basePath))
+                else
                 {
                     failed++;
-                    continue;
-                }
-
-                restored++;
-
-                // Once the original is restored the intermediate-state backups serve no purpose.
-                // TryRestore already consumed primaryBackup, so it is skipped.
-                foreach (
-                    string backup in backups.Where(b =>
-                        !string.Equals(b, primaryBackup, StringComparison.OrdinalIgnoreCase)
-                    )
-                )
-                {
-                    Log.Information("Deleting superseded backup: '{BackupPath}'", backup);
-                    if (!TryDelete(backup))
-                    {
-                        failed++;
-                    }
-                    else
-                    {
-                        deleted++;
-                    }
-                }
-
-                // The .bak.out companion stays reliable when the output name gained a counter suffix.
-                // The stem-based heuristic is the fallback for backups predating that companion.
-                string companionPath = primaryBackup + ".out";
-                if (File.Exists(companionPath))
-                {
-                    string trackedOutput = File.ReadAllText(companionPath).Trim();
-                    Log.Information("Deleting conversion tracker: '{FilePath}'", companionPath);
-                    if (!TryDelete(companionPath))
-                    {
-                        failed++;
-                    }
-                    else
-                    {
-                        deleted++;
-                    }
-
-                    if (File.Exists(trackedOutput) && !groups.ContainsKey(trackedOutput))
-                    {
-                        Log.Information(
-                            "Deleting tracked derived output: '{FilePath}'",
-                            trackedOutput
-                        );
-                        if (!TryDelete(trackedOutput))
-                        {
-                            failed++;
-                        }
-                        else
-                        {
-                            deleted++;
-                        }
-                    }
-                }
-                else if (
-                    !string.Equals(
-                        Path.GetExtension(basePath),
-                        MediaUtilities.VideoOutputExtension,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                {
-                    // Legacy fallback looking for a same-stem .mp4 with no backup of its own.
-                    // Only the known video output extension is targeted.
-                    // A format-agnostic scan would falsely delete companion images.
-                    string stem = Path.GetFileNameWithoutExtension(basePath);
-                    string? dir = Path.GetDirectoryName(basePath);
-                    string derivedOutput = Path.Combine(
-                        dir ?? string.Empty,
-                        stem + MediaUtilities.VideoOutputExtension
-                    );
-
-                    if (File.Exists(derivedOutput) && !groups.ContainsKey(derivedOutput))
-                    {
-                        Log.Information(
-                            "Deleting single-run derived output: '{FilePath}'",
-                            derivedOutput
-                        );
-                        if (!TryDelete(derivedOutput))
-                        {
-                            failed++;
-                        }
-                        else
-                        {
-                            deleted++;
-                        }
-                    }
                 }
             }
         }
 
         return (restored, deleted, failed);
+    }
+
+    private bool Exists(string path) =>
+        _taken.Contains(path) || (!_removed.Contains(path) && File.Exists(path));
+
+    private string GetFreeName(string path)
+    {
+        if (!Exists(path))
+        {
+            return path;
+        }
+
+        string directory = Path.GetDirectoryName(path) ?? string.Empty;
+        string stem = Path.GetFileNameWithoutExtension(path);
+        string extension = Path.GetExtension(path);
+        for (int counter = 1; ; counter++)
+        {
+            string candidate = Path.Combine(directory, $"{stem}_{counter}{extension}");
+            if (!Exists(candidate))
+            {
+                return candidate;
+            }
+        }
     }
 
     private bool IsDryRun([CallerMemberName] string function = "unknown")
@@ -293,37 +273,33 @@ internal sealed partial class UndoTask(CommandLine.Options options)
 
     private bool TryDelete(string path)
     {
-        if (IsDryRun())
-        {
-            return true;
-        }
-
-        Exception? failure = MediaUtilities.TryDeleteFile(path);
-        if (failure is not null)
+        if (!IsDryRun() && MediaUtilities.TryDeleteFile(path) is { } failure)
         {
             Log.Error(failure, "Failed to delete '{FilePath}'", path);
             return false;
         }
 
+        _ = _removed.Add(path);
         return true;
     }
 
     private bool TryRestore(string backup, string target)
     {
-        if (IsDryRun())
+        if (!IsDryRun())
         {
-            return true;
+            try
+            {
+                File.Move(backup, target);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Error(ex, "Failed to restore '{BackupPath}' to '{FilePath}'", backup, target);
+                return false;
+            }
         }
 
-        try
-        {
-            File.Move(backup, target);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Error(ex, "Failed to restore '{BackupPath}' to '{FilePath}'", backup, target);
-            return false;
-        }
+        _ = _removed.Add(backup);
+        _ = _taken.Add(target);
+        return true;
     }
 }

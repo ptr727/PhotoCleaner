@@ -500,19 +500,22 @@ original, with three exceptions. A file deleted because it matches the Immich tr
 Neither does a rename, such as the extension renames described below, and `--skipbackup` keeps none once a change completes.
 The first backup is `X.bak`. When that already exists from a prior run, the next is
 `X.bak1`, then `X.bak2`, and so on. The `undo` command reverses each change that left a backup.
-It scans the given directories for backup files and applies a two-pass algorithm:
+It scans the given directories for backup files of supported media types and reverses only what
+`process` recorded:
 
-1. **Identify derived files** - an output file is "derived" (not original) when either:
-   - a numbered backup (`.bak1`, `.bak2`, ...) exists for it (processed more than once), or
-   - it is a `.mp4` file whose stem has a non-`.mp4` primary backup in the same directory
-     (it was the conversion output).
-2. **Restore or delete**:
-   - *Derived* base: delete the current file and all its backup files.
-   - *Non-derived* base: delete the current file if it exists (overwritten in-place), rename
-     `X.bak` -> `X` to restore the original. The converted output is located via the
-     `X.bak.out` companion file written at conversion time (handles uniquified names like
-     `stem_1.mp4`). If no companion exists, falls back to deleting `stem.mp4` when present
-     and untracked (legacy single-run heuristic).
+1. **Remove converted outputs** - a conversion writes an `X.bak.out` marker naming its output.
+   Undo deletes that output, found by file name beside the backup, so a moved tree still works.
+   When the output was later backed up as a short clip, that backup is deleted instead. When
+   undo cannot tell which file is the output, it deletes nothing and restores every backup.
+2. **Restore originals** - every other backup is an original and moves back to its own name.
+   Another file can hold that name, such as a second original kept as `X.bak1`. The backup then
+   takes the next free name (e.g. `clip_1.mov`) and undo logs a warning. Undo never deletes an
+   original's backup and never overwrites a file it has no record of. An empty or unreadable
+   backup is left in place and counted as failed, and the run carries on with the rest.
+
+A backup of another file type, such as `notes.txt.bak` from another tool, is left alone. A
+conversion from a release that predates the `.out` marker has no record, so its `.mp4` output
+stays beside the restored original.
 
 **Known limitation**: extension renames (e.g. `photo.JPEG` -> `photo.jpg`) create no backup and
 cannot be undone by this command. When another file already holds the target name, the renamed

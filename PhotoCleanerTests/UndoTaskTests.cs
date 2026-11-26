@@ -80,7 +80,37 @@ public sealed class UndoTaskTests
     public void GetBackupBase_VariousPaths_ReturnsBase(string path, string expected) =>
         UndoTask.GetBackupBase(path).Should().Be(expected);
 
-    // -- Execute: no backups -----------------------------------------------
+    [Theory]
+    [InlineData("clip.mov.bak", true)]
+    [InlineData("photo.jpg.bak2", true)]
+    [InlineData("notes.txt.bak", false)]
+    [InlineData("archive.bak", false)]
+    [InlineData("clip.mov", false)]
+    public void IsUndoableBackup_VariousPaths_ReturnsExpected(string path, bool expected) =>
+        UndoTask.IsUndoableBackup(path).Should().Be(expected);
+
+    [Fact]
+    public void ResolveMarkerOutput_AbsolutePathFromAnotherTree_ResolvesBesideBackup()
+    {
+        string backup = Path.Combine("now", "here", "img.mov.bak");
+        string text = Path.Combine(Path.GetTempPath(), "old", "tree", "img_1.mp4") + "\n";
+
+        UndoTask
+            .ResolveMarkerOutput(backup, text)
+            .Should()
+            .Be(Path.Combine("now", "here", "img_1.mp4"));
+    }
+
+    // -- Execute -------------------------------------------------------------
+
+    private static (int restored, int deleted, int failed) Run(string dir, bool dryRun = false) =>
+        new UndoTask(CreateOptions(dryRun)).Execute(
+            Directory.GetFiles(dir),
+            cancellationToken: TestContext.Current.CancellationToken
+        );
+
+    private static string[] Names(string dir) =>
+        [.. Directory.GetFiles(dir).Select(Path.GetFileName).Order(StringComparer.Ordinal)!];
 
     [Fact]
     public void Execute_NoBackupFiles_ReturnsZeros()
@@ -89,16 +119,9 @@ public sealed class UndoTaskTests
         try
         {
             Touch(Path.Combine(dir, "photo.jpg"));
-            string[] files = Directory.GetFiles(dir);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                files,
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(0);
-            deleted.Should().Be(0);
-            failed.Should().Be(0);
+            Run(dir).Should().Be((0, 0, 0));
+            Names(dir).Should().Equal("photo.jpg");
         }
         finally
         {
@@ -106,28 +129,16 @@ public sealed class UndoTaskTests
         }
     }
 
-    // -- Scenario 1: deleted live photo / short video (only .bak exists) ------
-
     [Fact]
-    public void Execute_SingleBackupNoCurrentFile_RestoresOriginal()
+    public void Execute_DeletionBackup_RestoresOriginal()
     {
         string dir = TempDir();
         try
         {
-            // The only remaining artifact is img.mp4.bak, because img.mp4 was deleted
-            string bakPath = Path.Combine(dir, "img.mp4.bak");
-            WriteContent(bakPath);
+            WriteContent(Path.Combine(dir, "img.mp4.bak"));
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [bakPath],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(1);
-            deleted.Should().Be(0);
-            failed.Should().Be(0);
-            File.Exists(Path.Combine(dir, "img.mp4")).Should().BeTrue();
-            File.Exists(bakPath).Should().BeFalse();
+            Run(dir).Should().Be((1, 0, 0));
+            Names(dir).Should().Equal("img.mp4");
         }
         finally
         {
@@ -135,29 +146,19 @@ public sealed class UndoTaskTests
         }
     }
 
-    // -- Scenario 2: date-from-path (current file AND .bak both exist) --------
-
     [Fact]
-    public void Execute_BackupAndCurrentFileExist_DeletesCurrentAndRestoresBackup()
+    public void Execute_NameTakenByUnrecordedFile_RestoresToFreeNameAndKeepsCurrent()
     {
         string dir = TempDir();
         try
         {
-            string filePath = Path.Combine(dir, "photo.jpg");
-            string bakPath = filePath + ".bak";
-            Touch(filePath);
-            WriteContent(bakPath);
+            File.WriteAllBytes(Path.Combine(dir, "photo.jpg"), [200]);
+            WriteContent(Path.Combine(dir, "photo.jpg.bak"));
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [bakPath],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(1);
-            deleted.Should().Be(0);
-            failed.Should().Be(0);
-            File.Exists(filePath).Should().BeTrue(); // restored from .bak
-            File.Exists(bakPath).Should().BeFalse();
+            Run(dir).Should().Be((1, 0, 0));
+            Names(dir).Should().Equal("photo.jpg", "photo_1.jpg");
+            File.ReadAllBytes(Path.Combine(dir, "photo.jpg")).Should().Equal(200);
+            File.ReadAllBytes(Path.Combine(dir, "photo_1.jpg")).Should().Equal(1, 2, 3);
         }
         finally
         {
@@ -165,30 +166,20 @@ public sealed class UndoTaskTests
         }
     }
 
-    // -- Scenario 3: single-run video conversion (img.mov.bak + img.mp4) ------
-
     [Fact]
-    public void Execute_SingleRunConversion_RestoresMovAndDeletesMp4()
+    public void Execute_Conversion_RestoresOriginalAndDeletesOutputAndMarker()
     {
         string dir = TempDir();
         try
         {
-            string mp4Path = Path.Combine(dir, "img.mp4");
+            string mp4 = Path.Combine(dir, "img.mp4");
             string movBak = Path.Combine(dir, "img.mov.bak");
-            Touch(mp4Path);
+            Touch(mp4);
             WriteContent(movBak);
+            File.WriteAllText(movBak + ".out", mp4);
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [movBak],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(1);
-            deleted.Should().Be(1); // img.mp4 deleted
-            failed.Should().Be(0);
-            File.Exists(Path.Combine(dir, "img.mov")).Should().BeTrue();
-            File.Exists(movBak).Should().BeFalse();
-            File.Exists(mp4Path).Should().BeFalse();
+            Run(dir).Should().Be((1, 2, 0));
+            Names(dir).Should().Equal("img.mov");
         }
         finally
         {
@@ -196,34 +187,121 @@ public sealed class UndoTaskTests
         }
     }
 
-    // -- Scenario 4: two-run conversion (Rule 2 - .mp4 derived) --------------
-    // Files: img.mov.bak  img.mp4.bak  img.mp4
-
     [Fact]
-    public void Execute_TwoRunConversion_DeletesDerivedMp4AndRestoresMov()
+    public void Execute_DeletionBackupBesideUnrelatedMp4_KeepsTheMp4()
     {
         string dir = TempDir();
         try
         {
-            string mp4Path = Path.Combine(dir, "img.mp4");
-            string mp4Bak = mp4Path + ".bak";
+            WriteContent(Path.Combine(dir, "clip.mp4"));
+            WriteContent(Path.Combine(dir, "clip.mov.bak"));
+
+            Run(dir).Should().Be((1, 0, 0));
+            Names(dir).Should().Equal("clip.mov", "clip.mp4");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_SameStemGroupsWithoutMarkers_RestoresBoth()
+    {
+        string dir = TempDir();
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir, "img.mp4"), [200]);
+            WriteContent(Path.Combine(dir, "img.mp4.bak"));
+            WriteContent(Path.Combine(dir, "img.mov.bak"));
+
+            Run(dir).Should().Be((2, 0, 0));
+            Names(dir).Should().Equal("img.mov", "img.mp4", "img_1.mp4");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_TwoOriginalsSameName_RestoresBoth()
+    {
+        string dir = TempDir();
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir, "clip.mov.bak"), [1]);
+            File.WriteAllBytes(Path.Combine(dir, "clip.mov.bak1"), [2]);
+
+            Run(dir).Should().Be((2, 0, 0));
+            Names(dir).Should().Equal("clip.mov", "clip_1.mov");
+            File.ReadAllBytes(Path.Combine(dir, "clip.mov")).Should().Equal(1);
+            File.ReadAllBytes(Path.Combine(dir, "clip_1.mov")).Should().Equal(2);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_BackupsDifferingOnlyInCase_RestoresBoth()
+    {
+        string dir = TempDir();
+        try
+        {
+            WriteContent(Path.Combine(dir, "clip.mov.bak"));
+            Assert.SkipWhen(
+                File.Exists(Path.Combine(dir, "CLIP.mov.bak")),
+                "Requires a case-sensitive filesystem"
+            );
+            WriteContent(Path.Combine(dir, "CLIP.mov.bak"));
+
+            Run(dir).Should().Be((2, 0, 0));
+            Names(dir).Should().Equal("CLIP.mov", "clip.mov");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_ConvertedOutputBackedUpAsShortClip_RestoresOnlyTheOriginal()
+    {
+        string dir = TempDir();
+        try
+        {
+            string gpBak = Path.Combine(dir, "clip.3gp.bak");
+            WriteContent(gpBak);
+            File.WriteAllText(gpBak + ".out", Path.Combine(dir, "clip.mp4"));
+            WriteContent(Path.Combine(dir, "clip.mp4.bak"));
+
+            Run(dir).Should().Be((1, 2, 0));
+            Names(dir).Should().Equal("clip.3gp");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_MarkerFromMovedTree_DeletesTheOutputBesideTheBackup()
+    {
+        string dir = TempDir();
+        try
+        {
             string movBak = Path.Combine(dir, "img.mov.bak");
-            Touch(mp4Path);
-            WriteContent(mp4Bak);
             WriteContent(movBak);
-
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [mp4Bak, movBak],
-                cancellationToken: TestContext.Current.CancellationToken
+            File.WriteAllText(
+                movBak + ".out",
+                Path.Combine(Path.GetTempPath(), "moved-away", "img.mp4")
             );
+            Touch(Path.Combine(dir, "img.mp4"));
 
-            restored.Should().Be(1); // img.mov restored
-            deleted.Should().BeGreaterThanOrEqualTo(2); // img.mp4 + img.mp4.bak deleted
-            failed.Should().Be(0);
-            File.Exists(Path.Combine(dir, "img.mov")).Should().BeTrue();
-            File.Exists(mp4Path).Should().BeFalse();
-            File.Exists(mp4Bak).Should().BeFalse();
-            File.Exists(movBak).Should().BeFalse();
+            Run(dir).Should().Be((1, 2, 0));
+            Names(dir).Should().Equal("img.mov");
         }
         finally
         {
@@ -231,37 +309,105 @@ public sealed class UndoTaskTests
         }
     }
 
-    // -- Scenario 5: three-run conversion (Rule 1 - numbered backup) ----------
-    // Files: img.mov.bak  img.mp4.bak  img.mp4.bak1  img.mp4
-
     [Fact]
-    public void Execute_ThreeRunConversion_DeletesAllDerivedAndRestoresMov()
+    public void Execute_NumberedBackupMarker_DeletesItsOutput()
     {
         string dir = TempDir();
         try
         {
-            string mp4Path = Path.Combine(dir, "img.mp4");
-            string mp4Bak = mp4Path + ".bak";
-            string mp4Bak1 = mp4Path + ".bak1";
+            File.WriteAllBytes(Path.Combine(dir, "img.mov.bak"), [1]);
+            string bak1 = Path.Combine(dir, "img.mov.bak1");
+            File.WriteAllBytes(bak1, [2]);
+            File.WriteAllText(bak1 + ".out", Path.Combine(dir, "img_1.mp4"));
+            Touch(Path.Combine(dir, "img_1.mp4"));
+
+            Run(dir).Should().Be((2, 2, 0));
+            Names(dir).Should().Equal("img.mov", "img_1.mov");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_ConversionToSameName_DeletesOutputThenRestoresOriginal()
+    {
+        string dir = TempDir();
+        try
+        {
+            string mp4 = Path.Combine(dir, "img.mp4");
+            File.WriteAllBytes(mp4, [200]);
+            File.WriteAllBytes(mp4 + ".bak", [1]);
+            File.WriteAllText(mp4 + ".bak.out", mp4);
+
+            Run(dir).Should().Be((1, 2, 0));
+            Names(dir).Should().Equal("img.mp4");
+            File.ReadAllBytes(mp4).Should().Equal(1);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_AmbiguousOutputBackups_RestoresEveryBackupAndDeletesNothingElse()
+    {
+        string dir = TempDir();
+        try
+        {
+            WriteContent(Path.Combine(dir, "clip.mp4.bak"));
+            string gpBak = Path.Combine(dir, "clip.3gp.bak");
+            WriteContent(gpBak);
+            File.WriteAllText(gpBak + ".out", Path.Combine(dir, "clip.mp4"));
+            WriteContent(Path.Combine(dir, "clip.mp4.bak1"));
+
+            Run(dir).Should().Be((3, 1, 0));
+            Names(dir).Should().Equal("clip.3gp", "clip.mp4", "clip_1.mp4");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_VanishedBackup_FailsItAndRestoresTheRest()
+    {
+        string dir = TempDir();
+        try
+        {
+            string present = Path.Combine(dir, "a.mov.bak");
+            WriteContent(present);
+
+            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
+                [Path.Combine(dir, "gone.mov.bak"), present],
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+
+            (restored, deleted, failed).Should().Be((1, 0, 1));
+            Names(dir).Should().Equal("a.mov");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_EmptyMarker_FailsItsBackupAndLeavesIt()
+    {
+        string dir = TempDir();
+        try
+        {
             string movBak = Path.Combine(dir, "img.mov.bak");
-            Touch(mp4Path);
-            WriteContent(mp4Bak);
-            WriteContent(mp4Bak1);
             WriteContent(movBak);
+            File.WriteAllText(movBak + ".out", " \n");
+            Touch(Path.Combine(dir, "img.mp4"));
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [mp4Bak, mp4Bak1, movBak],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(1);
-            deleted.Should().BeGreaterThanOrEqualTo(3); // img.mp4 + img.mp4.bak + img.mp4.bak1
-            failed.Should().Be(0);
-            File.Exists(Path.Combine(dir, "img.mov")).Should().BeTrue();
-            File.Exists(mp4Path).Should().BeFalse();
-            File.Exists(mp4Bak).Should().BeFalse();
-            File.Exists(mp4Bak1).Should().BeFalse();
-            File.Exists(movBak).Should().BeFalse();
+            Run(dir).Should().Be((0, 0, 1));
+            Names(dir).Should().Equal("img.mov.bak", "img.mov.bak.out", "img.mp4");
         }
         finally
         {
@@ -269,74 +415,22 @@ public sealed class UndoTaskTests
         }
     }
 
-    // -- Scenario 6: dry run - no file changes --------------------------------
-
     [Fact]
-    public void Execute_DryRun_ReturnsCountsButDoesNotChangeFiles()
+    public void Execute_BackupOfUnsupportedType_IsLeftAlone()
     {
         string dir = TempDir();
         try
         {
-            string mp4Path = Path.Combine(dir, "img.mp4");
-            string movBak = Path.Combine(dir, "img.mov.bak");
-            Touch(mp4Path);
-            WriteContent(movBak);
+            WriteContent(Path.Combine(dir, "notes.txt.bak"));
 
-            (int restored, int deleted, int failed) = new UndoTask(
-                CreateOptions(dryRun: true)
-            ).Execute([movBak], cancellationToken: TestContext.Current.CancellationToken);
-
-            // Counts are still reported
-            restored.Should().Be(1);
-            deleted.Should().Be(1);
-            failed.Should().Be(0);
-
-            // But files are untouched
-            File.Exists(mp4Path).Should().BeTrue();
-            File.Exists(movBak).Should().BeTrue();
-            File.Exists(Path.Combine(dir, "img.mov")).Should().BeFalse();
+            Run(dir).Should().Be((0, 0, 0));
+            Names(dir).Should().Equal("notes.txt.bak");
         }
         finally
         {
             Directory.Delete(dir, recursive: true);
         }
     }
-
-    // -- Scenario: in-place double modification (regression: numbered backup != derived) ----
-
-    [Fact]
-    public void Execute_InPlaceDoubleModification_RestoresOriginalAndDeletesAllBackups()
-    {
-        string dir = TempDir();
-        try
-        {
-            // The img.jpg file was modified in place twice, such as by two date-from-path runs.
-            // The original became img.jpg.bak, the modified file became img.jpg.bak1, and img.jpg changed again.
-            string filePath = Path.Combine(dir, "img.jpg");
-            string bakPath = filePath + ".bak";
-            string bak1Path = filePath + ".bak1";
-            Touch(filePath);
-            WriteContent(bakPath);
-            WriteContent(bak1Path);
-
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [bakPath, bak1Path],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(1);
-            failed.Should().Be(0);
-            File.Exists(filePath).Should().BeTrue(); // restored from .bak
-            File.Exists(bakPath).Should().BeFalse(); // superseded backup removed
-            File.Exists(bak1Path).Should().BeFalse(); // superseded backup removed
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
-    }
-
-    // -- Companion image not touched -------------------------------------------
 
     [Fact]
     public void Execute_CompanionImageWithNoBackup_IsNotTouched()
@@ -344,18 +438,11 @@ public sealed class UndoTaskTests
         string dir = TempDir();
         try
         {
-            // The HEIC companion has no backup, so undo must leave it alone.
-            string heicPath = Path.Combine(dir, "img.heic");
-            string movBak = Path.Combine(dir, "img.mov.bak");
-            Touch(heicPath);
-            WriteContent(movBak);
+            Touch(Path.Combine(dir, "img.heic"));
+            WriteContent(Path.Combine(dir, "img.mov.bak"));
 
-            _ = new UndoTask(CreateOptions()).Execute(
-                [movBak],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            File.Exists(heicPath).Should().BeTrue();
+            Run(dir).Should().Be((1, 0, 0));
+            Names(dir).Should().Equal("img.heic", "img.mov");
         }
         finally
         {
@@ -363,37 +450,21 @@ public sealed class UndoTaskTests
         }
     }
 
-    // -- Scenario: uniquified output via .bak.out companion -------------------
     // The img.mp4 file existed before process wrote img_1.mp4, img.gif.bak, and img.gif.bak.out.
-
     [Fact]
-    public void Execute_CompanionOutFile_DeletesUniquifiedOutputAndLeavesPreExistingMp4()
+    public void Execute_UniquifiedOutput_DeletesItAndLeavesPreExistingMp4()
     {
         string dir = TempDir();
         try
         {
-            string preExistingMp4 = Path.Combine(dir, "img.mp4");
-            string uniquifiedMp4 = Path.Combine(dir, "img_1.mp4");
+            Touch(Path.Combine(dir, "img.mp4"));
+            Touch(Path.Combine(dir, "img_1.mp4"));
             string gifBak = Path.Combine(dir, "img.gif.bak");
-            string companionPath = gifBak + ".out";
-            Touch(preExistingMp4);
-            Touch(uniquifiedMp4);
             WriteContent(gifBak);
-            File.WriteAllText(companionPath, uniquifiedMp4);
+            File.WriteAllText(gifBak + ".out", Path.Combine(dir, "img_1.mp4"));
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [gifBak],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(1);
-            deleted.Should().Be(2); // img_1.mp4 + img.gif.bak.out
-            failed.Should().Be(0);
-            File.Exists(Path.Combine(dir, "img.gif")).Should().BeTrue(); // restored
-            File.Exists(gifBak).Should().BeFalse();
-            File.Exists(companionPath).Should().BeFalse();
-            File.Exists(uniquifiedMp4).Should().BeFalse(); // derived output deleted
-            File.Exists(preExistingMp4).Should().BeTrue(); // pre-existing untouched
+            Run(dir).Should().Be((1, 2, 0));
+            Names(dir).Should().Equal("img.gif", "img.mp4");
         }
         finally
         {
@@ -402,63 +473,21 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_CompanionOutFile_DryRun_ReportsCountsButLeavesFilesIntact()
+    public void Execute_DryRun_ReportsCountsAndChangesNothing()
     {
         string dir = TempDir();
         try
         {
-            string preExistingMp4 = Path.Combine(dir, "img.mp4");
-            string uniquifiedMp4 = Path.Combine(dir, "img_1.mp4");
-            string gifBak = Path.Combine(dir, "img.gif.bak");
-            string companionPath = gifBak + ".out";
-            Touch(preExistingMp4);
-            Touch(uniquifiedMp4);
-            WriteContent(gifBak);
-            File.WriteAllText(companionPath, uniquifiedMp4);
+            string gpBak = Path.Combine(dir, "clip.3gp.bak");
+            WriteContent(gpBak);
+            File.WriteAllText(gpBak + ".out", Path.Combine(dir, "clip.mp4"));
+            WriteContent(Path.Combine(dir, "clip.mp4.bak"));
+            WriteContent(Path.Combine(dir, "img.mov.bak"));
+            WriteContent(Path.Combine(dir, "img.mov.bak1"));
+            string[] before = Names(dir);
 
-            (int restored, int deleted, int failed) = new UndoTask(
-                CreateOptions(dryRun: true)
-            ).Execute([gifBak], cancellationToken: TestContext.Current.CancellationToken);
-
-            restored.Should().Be(1);
-            deleted.Should().Be(2);
-            failed.Should().Be(0);
-            File.Exists(gifBak).Should().BeTrue(); // not moved in dry-run
-            File.Exists(companionPath).Should().BeTrue(); // not deleted in dry-run
-            File.Exists(uniquifiedMp4).Should().BeTrue(); // not deleted in dry-run
-            File.Exists(preExistingMp4).Should().BeTrue();
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
-    }
-
-    // -- 0-byte backup handling -----------------------------------------------
-
-    [Fact]
-    public void Execute_ZeroByteBackup_FallsBackToNextBackup()
-    {
-        string dir = TempDir();
-        try
-        {
-            string filePath = Path.Combine(dir, "foo.jpg");
-            string bakPath = filePath + ".bak";
-            string bak1Path = filePath + ".bak1";
-            Touch(filePath);
-            Touch(bakPath); // 0 bytes - corrupted
-            WriteContent(bak1Path); // valid content
-
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [bakPath, bak1Path],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(1);
-            failed.Should().Be(0);
-            File.Exists(filePath).Should().BeTrue(); // restored from bak1
-            File.Exists(bakPath).Should().BeFalse(); // deleted as superseded
-            File.Exists(bak1Path).Should().BeFalse(); // moved to foo.jpg
+            Run(dir, dryRun: true).Should().Be((3, 2, 0));
+            Names(dir).Should().Equal(before);
         }
         finally
         {
@@ -467,25 +496,17 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_ZeroByteBackupNoAlternative_SkipsRestoreAndIncreasesFailed()
+    public void Execute_EmptyBackup_FailsItAndRestoresTheNext()
     {
         string dir = TempDir();
         try
         {
-            string filePath = Path.Combine(dir, "foo.jpg");
-            string bakPath = filePath + ".bak";
-            Touch(filePath); // original still intact
-            Touch(bakPath); // 0 bytes - corrupted, no alternative
+            File.WriteAllBytes(Path.Combine(dir, "foo.jpg"), [200]);
+            Touch(Path.Combine(dir, "foo.jpg.bak"));
+            WriteContent(Path.Combine(dir, "foo.jpg.bak1"));
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [bakPath],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(0);
-            failed.Should().Be(1);
-            File.Exists(filePath).Should().BeTrue(); // original left untouched
-            File.Exists(bakPath).Should().BeTrue(); // 0-byte backup left for inspection
+            Run(dir).Should().Be((1, 0, 1));
+            Names(dir).Should().Equal("foo.jpg", "foo.jpg.bak", "foo_1.jpg");
         }
         finally
         {
@@ -494,28 +515,17 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_AllBackupsZeroBytes_SkipsRestoreAndIncreasesFailed()
+    public void Execute_AllBackupsEmpty_FailsEachAndLeavesThem()
     {
         string dir = TempDir();
         try
         {
-            string filePath = Path.Combine(dir, "foo.jpg");
-            string bakPath = filePath + ".bak";
-            string bak1Path = filePath + ".bak1";
-            Touch(filePath); // original still intact
-            Touch(bakPath); // 0 bytes
-            Touch(bak1Path); // 0 bytes
+            Touch(Path.Combine(dir, "foo.jpg"));
+            Touch(Path.Combine(dir, "foo.jpg.bak"));
+            Touch(Path.Combine(dir, "foo.jpg.bak1"));
 
-            (int restored, int deleted, int failed) = new UndoTask(CreateOptions()).Execute(
-                [bakPath, bak1Path],
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-
-            restored.Should().Be(0);
-            failed.Should().Be(1);
-            File.Exists(filePath).Should().BeTrue(); // original left untouched
-            File.Exists(bakPath).Should().BeTrue(); // backups left for inspection
-            File.Exists(bak1Path).Should().BeTrue();
+            Run(dir).Should().Be((0, 0, 2));
+            Names(dir).Should().Equal("foo.jpg", "foo.jpg.bak", "foo.jpg.bak1");
         }
         finally
         {

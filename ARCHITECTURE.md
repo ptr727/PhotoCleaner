@@ -23,7 +23,7 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
   - `UndoCommand.cs`: Undo command orchestration
   - `VerifyCommand.cs`: Verify command orchestration, which enumerates, runs `VerifyTask`, and reports counts
   - `ProcessTask.cs`: Core file processing pipeline (validation, conversion, metadata)
-  - `UndoTask.cs`: Undo logic, two-pass algorithm that restores `.bak` files
+  - `UndoTask.cs`: Undo logic, reverses recorded conversions and restores `.bak` files
   - `ImportTask.cs`: Import logic, copies (default) or moves supported media files from source into date-based subdirectories under `--outpath`. Inserts a row keyed by SOURCE path into Import.db. Optional SQLite deduplication via `Database`. The opt-in `--imagehash` adds image data hash matching against Import.db and Trash.db. (Formerly `OrganizeTask`.)
   - `VerifyTask.cs`: Verification logic, a decode pass that runs Immich's own `MediaRepository` inside `ghcr.io/immich-app/immich-server:release` via `docker run`, batching paths over stdin. Preflights the image before judging any file, so an infrastructure failure exits `Error` rather than marking files invalid
   - `ImmichVerifyScript.cs`: The Node script run inside the Immich image, as const strings. Calls Immich's own compiled `MediaRepository`, `defaults`, and `ThumbnailConfig` rather than reimplementing the preview pipeline, so behavior tracks Immich across releases
@@ -967,98 +967,72 @@ A converted output is reprocessed in the same run. A short output is then backed
 
 #### Undo Grouping
 
-Undo groups backups by the path they would restore to. A group is derived when another group shares its folder and stem and its base file exists.
+Undo acts only on what process recorded. It reads every backup of supported media and its .out marker before it changes anything. One backup's marker can name a file another backup holds.
 
 ```mermaid
 flowchart TD
   U1["CommandRunner.RunAsync(): run the undo work"] --> U2["FileEnumerator.Enumerate(): list every file under --path"]
   U2 -->|"exception"| UE
-  U2 --> U3["UndoTask.IsBackupFile(): keep names ending .bak or .bakN, any file type, S2"]:::suspect
-  U3 --> U4["UndoTask.GetBackupBase(): group by base path, case-insensitive, S3"]:::suspect
-  U4 --> U5{"any groups?"}
+  U2 --> U3["UndoTask.IsUndoableBackup(): keep names ending .bak or .bakN whose base is supported media"]
+  U3 -->|"another type"| U4(["Skipped, left as it is"])
+  U3 --> U5{"any backups?"}
   U5 -->|"no"| U6(["Exit 0, Success, nothing to undo"])
-  U5 -->|"yes"| U7{"another group has the same folder and stem, and this base file exists?"}
-  U7 -->|"yes"| U8["UndoTask.Execute(): mark the group derived"]
-  U7 -->|"no"| U9["UndoTask.Execute(): mark the group for restore"]
-  U8 --> U10["UndoTask.Execute(): act on each group, see the next two diagrams"]
-  U9 --> U10
-  U10 -->|"cancelled between groups"| U11(["Exit 1, Error"])
-  U10 -->|"exception"| UE
-  U10 --> U12{"failed count above zero?"}
-  U12 -->|"yes"| U13(["Exit 2, Failed"])
-  U12 -->|"no"| U14(["Exit 0, Success"])
-  UE["CommandRunner.RunAsync(): log the exception, counters never logged"] --> U15(["Exit 1, Error, earlier groups already changed"])
-  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+  U5 -->|"yes"| U7["UndoTask.GetBackupSortKey(): order by base name, then .bak, .bak1, .bak2"]
+  U7 --> U8{"backup readable and not empty?"}
+  U8 -->|"empty, vanished or unreadable"| U9(["Counted Failed, backup left, the run continues"])
+  U8 -->|"yes"| U10{"marker named after this backup exists?"}
+  U10 -->|"no"| U13
+  U10 -->|"yes"| U11["UndoTask.ResolveMarkerOutput(): take the output's file name, beside the backup"]
+  U11 -->|"marker empty or unreadable"| U9
+  U11 --> U13["UndoTask.Execute(): reverse each recorded output, then restore each original, see the next two diagrams"]
+  U13 -->|"cancelled"| U14(["Exit 1, Error"])
+  U13 --> U15{"failed count above zero?"}
+  U15 -->|"yes"| U16(["Exit 2, Failed"])
+  U15 -->|"no"| U17(["Exit 0, Success"])
+  UE["CommandRunner.RunAsync(): log the exception, counters never logged"] --> U18(["Exit 1, Error"])
 ```
 
-There is no per-group catch. Any exception from a group ends the whole run. Under --dryrun, UndoTask.TryDelete() and UndoTask.TryRestore() return success without touching the disk.
+A file or marker error fails only its own backup. Under --dryrun, UndoTask.TryDelete() and UndoTask.TryRestore() change nothing on disk but record the result. A dry run so picks the same free names as a live run.
 
-#### Undo Derived Group
+#### Undo Converted Outputs
 
-A derived group is treated as a conversion output. Nothing in it is restored.
+Each output a marker names is reversed before any original is restored, so an original can take back a name its output held.
 
 ```mermaid
 flowchart TD
-  D1{"base file exists?"}
-  D1 -->|"yes"| D2["UndoTask.TryDelete(): delete the base file as a converted output"]
-  D2 -->|"fails"| D3(["Counted Failed, the group's backups kept"])
-  D2 -->|"ok"| D4["Count Deleted"]
-  D1 -->|"no"| D5
-  D4 --> D5["UndoTask.TryDelete(): delete every backup in the group, S2"]:::suspect
-  D5 -->|"a delete fails"| D6(["Counted Failed for that backup"])
-  D5 -->|"ok"| D7(["Counted Deleted, nothing restored, .out markers left"])
-  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+  C1{"how many markers name this output, and how many other backups hold it?"}
+  C1 -->|"more than one of either"| C2(["Warned, the output and its backups are left, every backup is restored as an original"])
+  C1 -->|"one marker, one other backup"| C3["UndoTask.TryDelete(): delete that backup, the output saved again as a short clip"]
+  C3 -->|"fails"| C4(["Counted Failed, the marker's backup is left for a rerun"])
+  C3 -->|"ok"| C5(["Counted Deleted, a current file with that name is left"])
+  C1 -->|"one marker, no other backup"| C6{"output exists?"}
+  C6 -->|"no"| C7(["Nothing to delete"])
+  C6 -->|"yes"| C8["UndoTask.TryDelete(): delete the converted output"]
+  C8 -->|"fails"| C4
+  C8 -->|"ok"| C9(["Counted Deleted"])
 ```
 
-#### Undo Restore Group
+#### Undo Restore
 
-The first non-empty backup in .bak, .bak1, .bak2 order is the one restored. Only that backup's .out marker is read.
+Every backup not deleted above is an original. Undo never deletes or overwrites a current file it has no record of.
 
 ```mermaid
 flowchart TD
-  R1["UndoTask.GetBackupSortKey(): order backups, .bak first, then .bak1, .bak2"]
-  R1 --> R2{"first non-empty backup found?"}
-  R2 -->|"a backup vanished, its length throws"| RX(["Exit 1, Error, run stops mid-way, S4"]):::suspect
-  R2 -->|"no"| R3(["Counted Failed, files left as they are"])
-  R2 -->|"yes"| R4{"base file exists?"}
-  R4 -->|"yes"| R5["UndoTask.TryDelete(): delete the current file, not counted, S2"]:::suspect
-  R5 -->|"fails"| R6(["Counted Failed, backup kept"])
-  R5 -->|"ok"| R7
-  R4 -->|"no"| R7["UndoTask.TryRestore(): move the backup to the base name"]
-  R7 -->|"IO or access error"| R8(["Counted Failed, backup kept"])
-  R7 -->|"ok"| R9["Count Restored"]
-  R9 --> R10["UndoTask.TryDelete(): delete the other backups as superseded, S3"]:::suspect
-  R10 -->|"a delete fails"| R11["Count Failed, continue"]
-  R10 -->|"ok"| R12["Count Deleted per backup"]
-  R11 --> R13
-  R12 --> R13{"marker named after the primary backup exists?, S4"}:::suspect
-  R13 -->|"yes"| R14["UndoTask.Execute(): read the output path from the marker"]
-  R14 -->|"read throws"| RX
-  R14 --> R15["UndoTask.TryDelete(): delete the marker first"]
-  R15 -->|"fails"| R16["Count Failed, continue"]
-  R15 -->|"ok"| R17["Count Deleted"]
-  R16 --> R18
-  R17 --> R18{"tracked path exists?"}
-  R18 -->|"no"| R19["Leave the converted output, no marker remains, S4"]:::suspect
-  R19 --> R30(["Counted Restored"])
-  R18 -->|"yes"| R20{"tracked path is a group base?"}
-  R20 -->|"yes, this group's own base"| R30
-  R20 -->|"yes, another group"| R21["Leave it to that group, which restores it as an original, S4"]:::suspect
-  R21 --> R30
-  R20 -->|"no"| R22["UndoTask.TryDelete(): delete the tracked output"]
-  R22 -->|"fails"| R23(["Counted Restored, output Counted Failed"])
-  R22 -->|"ok"| R24(["Counted Restored, output Counted Deleted"])
-  R13 -->|"no"| R25{"base extension is .mp4?"}
-  R25 -->|"yes"| R30
-  R25 -->|"no"| R26{"same-stem .mp4 exists and is not a group base?"}
-  R26 -->|"no"| R30
-  R26 -->|"yes"| R27["UndoTask.TryDelete(): delete it as a legacy converted output, S2"]:::suspect
-  R27 -->|"fails"| R28(["Counted Restored, the .mp4 Counted Failed"])
-  R27 -->|"ok"| R29(["Counted Restored, the .mp4 Counted Deleted"])
-  classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
+  R1{"its converted output failed to delete?"}
+  R1 -->|"yes"| R2(["Warned, backup and marker left for a rerun"])
+  R1 -->|"no"| R3["UndoTask.GetFreeName(): the base name, or name_N when a file holds it"]
+  R3 -->|"name_N"| R4["UndoTask.Execute(): warn, naming the taken file and the free name"]
+  R3 --> R5
+  R4 --> R5["UndoTask.TryRestore(): move the backup to that name"]
+  R5 -->|"IO or access error"| R6(["Counted Failed, backup kept"])
+  R5 -->|"ok"| R7{"backup has a marker?"}
+  R7 -->|"no"| R8(["Counted Restored"])
+  R7 -->|"yes"| R9["UndoTask.TryDelete(): delete the marker"]
+  R9 -->|"fails"| R10(["Counted Restored, marker Counted Failed"])
+  R9 -->|"ok"| R11(["Counted Restored, marker Counted Deleted"])
 ```
 
-Restored counts groups and Deleted counts files. Failed counts each failed delete or restore, and one per group with no non-empty backup. A successful delete of the current file before a restore is not counted.
+An output from a release before the .out marker has no record, so it stays beside its restored original.
 
 ### Verify
 
@@ -1144,9 +1118,6 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
-- **S2.** `undo` deletes a same-stem video that `process` never touched, and restores any `.bak` it finds over the current file, #310.
-- **S3.** `undo` deletes a second original kept as `.bakN`, and groups names that differ only in case, #311.
-- **S4.** `undo` leaves converted outputs behind, and one bad group stops the run, #312.
 - **S5.** Ctrl+C or SIGTERM ends the process without cancelling, so no cancel path runs and a child tool keeps running, #313.
 - **S6.** A `process` dry run loops forever on names that differ only in case, #314.
 - **S7.** A `process` dry run counts every file it would change as Failed and exits 2, #315.
@@ -1280,18 +1251,17 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 
 - **Backup naming**: `X.bak` (first), `X.bak1`, `X.bak2`, ... (subsequent runs of `process`)
 - **`FileEnumerator.Enumerate()`** enumerates all files including `.bak*` files before calling `Execute()`
-- **Two-pass algorithm** in `UndoTask.Execute()`:
-  - *Pass 1 - Identify derived bases*:
-    - **Rule 1**: any numbered backup (`.bak1`, `.bak2`, ...) present -> base is derived
-    - **Rule 2**: `.mp4` base with same-stem non-`.mp4` primary backup in same dir -> base is derived
-  - *Pass 2 - Act*:
-    - Derived base: delete current file + all its backups
-    - Non-derived base: delete current file if present, restore `X.bak` -> `X`; then locate the derived conversion output: if `X.bak.out` companion exists read the explicit output path from it and delete that file (handles uniquified names like `img_1.mp4`); otherwise fall back to checking whether `stem.mp4` exists and has no backup (legacy single-run heuristic)
+- **Records only** in `UndoTask.Execute()`:
+  - *Read*: every `.bak` or `.bakN` whose base is supported media, in base then number order, and the `.out` marker named after each one. A marker's output is its file name resolved beside the backup, so a moved or copied tree still matches. An empty, vanished, or unreadable backup or marker fails only itself.
+  - *Reverse outputs*: a marker's output is deleted when no other backup holds that name. When exactly one other backup holds it, that backup is the output saved again as a short clip, and it is deleted instead. Two markers or two such backups for one output are ambiguous, so nothing is deleted and every backup is restored.
+  - *Restore originals*: every other backup moves back to its base name, or to the next free `name_N` when a file holds it, with a warning. Its marker is deleted after the move. Undo never deletes a backup it cannot tie to a marker, and never overwrites a current file.
 - **Internal static helpers** (testable via `InternalsVisibleTo`):
   - `IsBackupFile(path)`: matches `.bak\d*$`
   - `IsNumberedBackup(path)`: matches `.bak\d+$`
   - `GetBackupBase(path)`: strips the `.bak\d*` suffix
-- **Dry run**: logs all intended operations but performs no file I/O
+  - `IsUndoableBackup(path)`: a backup whose base extension is supported media
+  - `ResolveMarkerOutput(backup, text)`: the marker's output file name, beside the backup
+- **Dry run**: logs all intended operations and changes no file. It tracks the names it would free and take, so its free names match a live run.
 - **Known limitation**: an extension rename creates no backup and cannot be undone. A rename whose target name was taken leaves the other file untouched, so undo has nothing of it to restore
 
 ### Error Handling Strategy
