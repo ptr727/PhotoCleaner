@@ -234,8 +234,9 @@ Options:
 - `--path`: must point to an existing directory. Accepts exactly one directory per command
   invocation.
 - `--threads`: defaults to `min(CPU count, 4)`. Must be `> 0` and `<= CPU count`.
-- `--skipbackup`: opt-in (`process` only). Leaves no `.bak` file behind. The `undo`
-  command cannot reverse a run made with this flag.
+- `--skipbackup`: opt-in (`process` only). Leaves no `.bak` file behind once a change completes.
+  A failed rollback can still leave one, with no `.out` marker. The `undo` command cannot reverse
+  a run made with this flag.
 - `--outpath`: required for `import`. Target directory (created on demand).
 - `--format`: optional (`import` only). A C# date format string used to name date
   subdirectories (default `"yyyy/MM/dd"`). Must be date-only, so time components are rejected.
