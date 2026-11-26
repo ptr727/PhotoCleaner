@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using PhotoCleaner;
 
 namespace PhotoCleanerTests;
@@ -875,6 +876,64 @@ public sealed class CommandLineTests
         finally
         {
             File.Delete(dbPath);
+        }
+    }
+
+    [Theory]
+    [InlineData(PosixSignal.SIGINT)]
+    [InlineData(PosixSignal.SIGTERM)]
+    public void OnTerminationSignal_FirstSignal_CancelsAndKeepsProcess(PosixSignal signal)
+    {
+        using CancellationTokenSource terminationSource = new();
+        PosixSignalContext context = new(signal);
+
+        Program.OnTerminationSignal(context, terminationSource);
+
+        context.Cancel.Should().BeTrue();
+        terminationSource.IsCancellationRequested.Should().BeTrue();
+    }
+
+    [Fact]
+    public void OnTerminationSignal_SecondSignal_TakesDefaultAction()
+    {
+        using CancellationTokenSource terminationSource = new();
+        Program.OnTerminationSignal(new PosixSignalContext(PosixSignal.SIGINT), terminationSource);
+        PosixSignalContext second = new(PosixSignal.SIGINT);
+
+        Program.OnTerminationSignal(second, terminationSource);
+
+        second.Cancel.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ConfigureInvocation_DisablesBuiltInTerminationHandler()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir]);
+
+        Program.ConfigureInvocation(cli.Result);
+
+        cli.Result.InvocationConfiguration.ProcessTerminationTimeout.Should().BeNull();
+        cli.Result.InvocationConfiguration.EnableDefaultExceptionHandler.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_CancelledToken_ExitsAsCancelled()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("PhotoCleanerTests_");
+        try
+        {
+            CommandLine cli = new(["process", "--path", directory.FullName]);
+            Program.ConfigureInvocation(cli.Result);
+            using CancellationTokenSource terminationSource = new();
+            await terminationSource.CancelAsync();
+
+            int exitCode = await cli.Result.InvokeAsync(cancellationToken: terminationSource.Token);
+
+            exitCode.Should().Be(ExitCode.Error);
+        }
+        finally
+        {
+            directory.Delete(true);
         }
     }
 }

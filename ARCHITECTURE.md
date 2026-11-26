@@ -138,8 +138,8 @@ flowchart TD
   failed(["ExitCode.Failed 2, logged complete with failures"])
   other(["Other code returned as is, logged as not complete"])
   mainCatch(["Exit 1 from the catch in Program.Main, not logged since Log.Logger is not set yet"])
-  ctrlc["Ctrl+C or SIGTERM at any point: no handler, the token never cancels, S5"]:::suspect
-  killed(["Process ends at once, no cleanup, log not flushed"])
+  signal["Program.OnTerminationSignal(): the first SIGINT or SIGTERM at any point cancels the token"]
+  killed(["Process ends at once by the signal's default action, no cleanup"])
 
   main --> bypass
   bypass -->|"yes"| scl --> sclEnd
@@ -165,11 +165,12 @@ flowchart TD
   code -->|"0"| ok
   code -->|"2"| failed
   code -->|"anything else"| other
-  ctrlc --> killed
+  signal -->|"the work throws OperationCanceledException"| how
+  signal -->|"a second signal, unless the process is PID 1"| killed
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main sets ProcessTerminationTimeout to null, so System.CommandLine registers no Ctrl+C handler. No other code registers one either.
+An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main registers its own SIGINT and SIGTERM handler and sets ProcessTerminationTimeout to null. That keeps System.CommandLine's own handler off. With a timeout set, that handler returns 130 or 143 once it expires, even while the cancel path still runs. The first signal cancels the token the command runs with, so CliWrap kills the child tool and the command's cleanup runs before the exit. A second signal takes the default action and ends the process at once, for a cancel path that hangs. Run as PID 1, as the container image's exec-form entrypoint runs it, the kernel drops that default action. There only a SIGKILL ends a hung cancel path, such as the one `docker kill` sends or the one `docker stop` sends after its timeout.
 
 ### Process
 
@@ -1132,7 +1133,6 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
-- **S5.** Ctrl+C or SIGTERM ends the process without cancelling, so no cancel path runs and a child tool keeps running, #313.
 - **S6.** A `process` dry run loops forever on names that differ only in case, #314.
 - **S7.** A `process` dry run counts every file it would change as Failed and exits 2, #315.
 - **S8.** A dry run with `--db` creates, upgrades and writes the database, #316.
