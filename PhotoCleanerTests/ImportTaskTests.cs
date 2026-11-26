@@ -501,8 +501,6 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    // -- CopyDefault: source file retained when --move is not set --------------
-
     [Fact]
     public async Task ExecuteAsync_MoveWithDatabase_RecordsSource()
     {
@@ -544,6 +542,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             File.Delete(dbPath);
         }
     }
+
+    // -- CopyDefault: source file retained when --move is not set --------------
 
     [Fact]
     public async Task ExecuteAsync_CopyDefault_SourceFileRetained()
@@ -1311,7 +1311,10 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "The exiftool stub is a shell script");
         string stub = Path.Combine(dir, "exiftool-stub.sh");
-        File.WriteAllText(stub, $"#!/bin/sh\necho '{output}' >&2\nexit {exitCode}\n");
+        File.WriteAllText(
+            stub,
+            $"#!/bin/sh\nfor last in \"$@\"; do :; done\ntouch \"$last\"\necho '{output}' >&2\nexit {exitCode}\n"
+        );
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(
@@ -1539,7 +1542,11 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         string standardOutput,
         string standardError,
         bool expected
-    ) => ImportTask.IsWriteFailure(exitCode, standardOutput, standardError).Should().Be(expected);
+    ) =>
+        MediaUtilities
+            .IsWriteFailure(exitCode, standardOutput, standardError)
+            .Should()
+            .Be(expected);
 
     // -- datePath: missing EXIF date inferred from path -----------------------
 

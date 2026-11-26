@@ -428,26 +428,31 @@ internal sealed class ImportTask(
             bool written = true;
             if (!string.IsNullOrEmpty(inferredDateStr) && canWriteTags)
             {
-                Log.Debug(
-                    "exiftool: Setting created date '{CreatedDate}' on '{DestinationPath}'",
-                    inferredDateStr,
+                written = ReportWrite(
+                    await MediaUtilities
+                        .TrySetCreateDateAsync(
+                            inferredDateStr,
+                            finalDest,
+                            ExifToolCommand,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false),
+                    "created date",
+                    file,
                     finalDest
                 );
-                written = await WriteDestinationAsync(
-                        MediaUtilities.CreateDateArguments(inferredDateStr, finalDest),
-                        file,
-                        finalDest,
-                        "created date",
-                        cancellationToken
-                    )
-                    .ConfigureAwait(false);
             }
 
             // Apply XMP Subject tags before restoring mtime so exiftool does not clobber it
             if (written && allTags.Length > 0)
             {
-                written = await ApplyTagsAsync(allTags, file, finalDest, cancellationToken)
-                    .ConfigureAwait(false);
+                written = ReportWrite(
+                    await ApplyTagsAsync(allTags, finalDest, cancellationToken)
+                        .ConfigureAwait(false),
+                    "tags",
+                    file,
+                    finalDest
+                );
             }
 
             if (!written)
@@ -517,14 +522,7 @@ internal sealed class ImportTask(
             // A move is atomic on one filesystem, and cross-device failure leaves the source intact.
             if (!options.Move && File.Exists(finalDest))
             {
-                try
-                {
-                    File.Delete(finalDest);
-                }
-                catch (IOException)
-                {
-                    Log.Warning("Failed to clean up partial file: '{FilePath}'", finalDest);
-                }
+                _ = DeleteCopy(finalDest);
             }
 
             throw;
@@ -670,9 +668,8 @@ internal sealed class ImportTask(
 
     // Remove-then-add per value replaces an existing copy instead of doubling it.
     // -overwrite_original skips exiftool's _original backup.
-    private Task<bool> ApplyTagsAsync(
+    private Task<string?> ApplyTagsAsync(
         string[] tags,
-        string sourceFile,
         string destFile,
         CancellationToken cancellationToken
     )
@@ -693,48 +690,31 @@ internal sealed class ImportTask(
             destFile
         );
         Log.Debug("exiftool: Setting XMP:Subject on '{FilePath}'", destFile);
-        return WriteDestinationAsync([.. args], sourceFile, destFile, "tags", cancellationToken);
+        return MediaUtilities.WriteExifToolAsync(ExifToolCommand, [.. args], cancellationToken);
     }
 
     // A caller may delete the source after an import succeeds, so a failed write fails the file.
-    private async Task<bool> WriteDestinationAsync(
-        string[] arguments,
-        string sourceFile,
-        string destFile,
+    private static bool ReportWrite(
+        string? failure,
         string what,
-        CancellationToken cancellationToken
+        string sourceFile,
+        string destFile
     )
     {
-        BufferedCommandResult result = await Cli.Wrap(ExifToolCommand)
-            .WithArguments(arguments)
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
-        if (!IsWriteFailure(result.ExitCode, result.StandardOutput, result.StandardError))
+        if (failure is null)
         {
             return true;
         }
 
-        Log.Warning(
-            "Failed to write {What} to '{DestinationPath}' imported from '{SourcePath}' (exit {ExitCode}): {Output}",
+        Log.Error(
+            "Failed to write {What} to '{DestinationPath}' imported from '{SourcePath}' ({Failure})",
             what,
             destFile,
             sourceFile,
-            result.ExitCode,
-            (result.StandardError + result.StandardOutput).Trim()
+            failure
         );
         return false;
     }
-
-    // An exiftool write failure prints an "Error:" line, normally with a non-zero exit.
-    internal static bool IsWriteFailure(
-        int exitCode,
-        string standardOutput,
-        string standardError
-    ) =>
-        exitCode != 0
-        || $"{standardError}\n{standardOutput}"
-            .Split('\n')
-            .Any(line => line.TrimStart().StartsWith("Error", StringComparison.Ordinal));
 
     // A copy is removed, so the untouched source imports cleanly on the next run.
     // A moved file has no source left to return to, so it stays where it landed.
@@ -744,25 +724,34 @@ internal sealed class ImportTask(
         {
             File.SetLastWriteTimeUtc(destFile, lastWriteTimeUtc);
             Log.Warning(
-                "Moved '{SourcePath}' to '{DestinationPath}' without its metadata",
-                sourceFile,
-                destFile
+                "Kept '{DestinationPath}' moved from '{SourcePath}' after the failed write",
+                destFile,
+                sourceFile
             );
             return;
         }
 
-        try
+        if (DeleteCopy(destFile))
         {
-            File.Delete(destFile);
             Log.Warning(
                 "Removed '{DestinationPath}' so '{SourcePath}' can be imported again",
                 destFile,
                 sourceFile
             );
         }
+    }
+
+    private static bool DeleteCopy(string destFile)
+    {
+        try
+        {
+            File.Delete(destFile);
+            return true;
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Log.Warning(ex, "Failed to remove '{DestinationPath}'", destFile);
+            return false;
         }
     }
 }
