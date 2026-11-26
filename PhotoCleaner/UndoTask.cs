@@ -14,8 +14,16 @@ internal sealed partial class UndoTask(CommandLine.Options options)
     internal const string MarkerExtension = ".out";
 
     // Files removed and names taken so far, so a dry run picks the same free names a live run would.
-    private readonly HashSet<string> _removed = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _taken = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _removed = new(s_pathComparer);
+    private readonly HashSet<string> _taken = new(s_pathComparer);
+
+    // Base names of originals still to restore, which a free name for another original never takes.
+    private readonly HashSet<string> _pending = new(s_pathComparer);
+
+    private static readonly StringComparer s_pathComparer =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
 
     internal static bool IsBackupFile(string path) => BackupPattern().IsMatch(path);
 
@@ -37,11 +45,15 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         && MediaUtilities.SupportedExtensions.Contains(Path.GetExtension(GetBackupBase(path)));
 
     // The marker holds the absolute path at conversion time, and the output sits beside its backup.
-    internal static string ResolveMarkerOutput(string backup, string markerText) =>
-        Path.Combine(
+    // A marker written on Windows holds backslashes, which Path.GetFileName keeps on Linux and macOS.
+    internal static string ResolveMarkerOutput(string backup, string markerText)
+    {
+        string text = markerText.Trim();
+        return Path.Combine(
             Path.GetDirectoryName(backup) ?? string.Empty,
-            Path.GetFileName(markerText.Trim())
+            text[(text.LastIndexOfAny(['/', '\\']) + 1)..]
         );
+    }
 
     private sealed record Backup(string Path, string Base, string? Marker, string? Output);
 
@@ -122,7 +134,7 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         }
 
         // A backup of a recorded output is the output itself, backed up later as a short clip.
-        // It is told apart only when one marker names that output and one other backup holds it.
+        // It is told apart only when one marker names that output, one other backup holds it, and the name is free.
         HashSet<Backup> derived = [];
         HashSet<Backup> blocked = [];
         Log.Information("Undoing {BackupCount} backups", backups.Count);
@@ -142,7 +154,11 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                 ),
             ];
 
-            if (holders.Count > 1 || outputBackups.Count > 1)
+            if (
+                holders.Count > 1
+                || outputBackups.Count > 1
+                || (outputBackups.Count == 1 && Exists(output))
+            )
             {
                 Log.Warning(
                     "Cannot tell which file is the output '{FilePath}' recorded, leaving it and restoring every backup",
@@ -171,7 +187,14 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                 continue;
             }
 
-            if (Exists(output))
+            if (!Exists(output))
+            {
+                Log.Information(
+                    "Converted output '{FilePath}' not found, nothing to delete",
+                    output
+                );
+            }
+            else
             {
                 Log.Information("Deleting converted output: '{FilePath}'", output);
                 if (TryDelete(output))
@@ -187,6 +210,9 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         }
 
         // Every other backup is an original, and an original whose name is taken gets a free one.
+        _pending.UnionWith(
+            backups.Where(b => !derived.Contains(b) && !blocked.Contains(b)).Select(b => b.Base)
+        );
         foreach (Backup backup in backups.Where(b => !derived.Contains(b)))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -199,7 +225,11 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                 continue;
             }
 
-            string target = GetFreeName(backup.Base);
+            string target = Exists(backup.Base)
+                ? MediaUtilities.GetUniqueFileName(backup.Base, candidate =>
+                    Exists(candidate) || _pending.Contains(candidate)
+                )
+                : backup.Base;
             if (!string.Equals(target, backup.Base, StringComparison.Ordinal))
             {
                 Log.Warning(
@@ -240,26 +270,6 @@ internal sealed partial class UndoTask(CommandLine.Options options)
 
     private bool Exists(string path) =>
         _taken.Contains(path) || (!_removed.Contains(path) && File.Exists(path));
-
-    private string GetFreeName(string path)
-    {
-        if (!Exists(path))
-        {
-            return path;
-        }
-
-        string directory = Path.GetDirectoryName(path) ?? string.Empty;
-        string stem = Path.GetFileNameWithoutExtension(path);
-        string extension = Path.GetExtension(path);
-        for (int counter = 1; ; counter++)
-        {
-            string candidate = Path.Combine(directory, $"{stem}_{counter}{extension}");
-            if (!Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-    }
 
     private bool IsDryRun([CallerMemberName] string function = "unknown")
     {

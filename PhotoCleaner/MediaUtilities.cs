@@ -50,9 +50,10 @@ internal static class MediaUtilities
         ".mp4",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    internal static string GetUniqueFileName(string filePath)
+    internal static string GetUniqueFileName(string filePath, Func<string, bool>? isTaken = null)
     {
-        if (!File.Exists(filePath))
+        isTaken ??= File.Exists;
+        if (!isTaken(filePath))
         {
             return filePath;
         }
@@ -66,7 +67,7 @@ internal static class MediaUtilities
         {
             candidate = Path.Combine(directory, $"{nameWithoutExt}_{counter}{ext}");
             counter++;
-        } while (File.Exists(candidate));
+        } while (isTaken(candidate));
         return candidate;
     }
 
