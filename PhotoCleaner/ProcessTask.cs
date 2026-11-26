@@ -340,25 +340,7 @@ internal sealed class ProcessTask(
             .StartsWith("pcm", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<float> GetDurationAsync() =>
-        float.Parse(
-            await GetDurationTextAsync().ConfigureAwait(false),
-            CultureInfo.InvariantCulture
-        );
-
-    private async Task<bool> IsStillOrShortGifAsync() =>
-        fileInfo.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
-        && (
-            !float.TryParse(
-                await GetDurationTextAsync().ConfigureAwait(false),
-                NumberStyles.Float,
-                CultureInfo.InvariantCulture,
-                out float duration
-            )
-            || duration <= options.ShortVideoDuration
-        );
-
-    private async Task<string> GetDurationTextAsync()
+    private async Task<float> GetDurationAsync()
     {
         Log.Debug("ffprobe: Getting play duration for '{FilePath}'", fileInfo.FullName);
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
@@ -374,7 +356,47 @@ internal sealed class ProcessTask(
                 fileInfo.FullName,
             ])
             .ExecuteBufferedAsync(cancellationToken);
-        return result.StandardOutput.Trim();
+        return float.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
+    }
+
+    private async Task<bool> IsStillOrShortGifAsync()
+    {
+        if (!fileInfo.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        Log.Debug("ffprobe: Counting frames and duration for '{FilePath}'", fileInfo.FullName);
+        BufferedCommandResult result = await Cli.Wrap("ffprobe")
+            .WithArguments([
+                "-loglevel",
+                "error",
+                "-count_packets",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=nb_read_packets:format=duration",
+                "-of",
+                "default=nw=1",
+                fileInfo.FullName,
+            ])
+            .ExecuteBufferedAsync(cancellationToken);
+        Dictionary<string, string> values = result
+            .StandardOutput.Split(
+                '\n',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            )
+            .Select(line => line.Split('=', 2))
+            .Where(pair => pair.Length == 2)
+            .ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
+        return values.GetValueOrDefault("nb_read_packets") == "1"
+            || !float.TryParse(
+                values.GetValueOrDefault("duration"),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out float duration
+            )
+            || duration <= options.ShortVideoDuration;
     }
 
     private async Task<bool> DeleteLivePhotosAsync()

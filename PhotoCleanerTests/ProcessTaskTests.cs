@@ -810,6 +810,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     [Theory]
     [InlineData("color=c=red:s=32x32", "-frames:v", "1", false)]
     [InlineData("color=c=red:s=32x32", "-frames:v", "1", true)]
+    [InlineData("color=c=red:s=32x32:r=0.5", "-frames:v", "1", false)]
+    [InlineData("color=c=red:s=32x32:r=0.5", "-frames:v", "1", true)]
     [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", false)]
     [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", true)]
     public async Task ExecuteAsync_StillOrShortGif_ConvertsToStillImageThatSurvives(
@@ -903,6 +905,18 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 ],
                 TestContext.Current.CancellationToken
             );
+            BufferedCommandResult probe = await Cli.Wrap("ffprobe")
+                .WithArguments([
+                    "-loglevel",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=nw=1:nk=1",
+                    filePath,
+                ])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            probe.StandardOutput.Trim().Should().Be("N/A");
 
             ProcessTask.ProcessResult result = await CreateContext(filePath, skipBackup: true);
 

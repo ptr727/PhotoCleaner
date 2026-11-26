@@ -495,15 +495,15 @@ The short clip rule needs no still and runs before any pairing. A deleted video 
 
 #### Process Video Conversion
 
-The temporary output is the source path with its extension changed to .temp. A finally block deletes that file whenever it still exists at the end. A single-frame or short GIF becomes a PNG rather than an MP4. As an MP4 it would meet the short clip rule in Process Live Photos in the next round. A GIF with no frame delay, such as a GIF87a still, has no duration and counts as single-frame.
+The temporary output is the source path with its extension changed to .temp. A finally block deletes that file whenever it still exists at the end. A single-frame or short GIF becomes a PNG rather than an MP4. As an MP4 it would meet the short clip rule in Process Live Photos in the next round. A GIF with no frame delay, such as a GIF87a still, has no duration and counts as a still too.
 
 ```mermaid
 flowchart TD
   v0["ProcessTask.ConvertVideoAsync(): pick the ffmpeg job by extension"]
   v1{"Extension .m2t or .mkv?"}
   vg{"Extension .gif?"}
-  gd["ProcessTask.IsStillOrShortGifAsync(): ffprobe format duration"]
-  gq{"Duration not a number, or at or below --duration, default 1s?"}
+  gd["ProcessTask.IsStillOrShortGifAsync(): ffprobe frame count and format duration"]
+  gq{"One frame, duration not a number, or at or below --duration, default 1s?"}
   still["Convert the first frame to a PNG still"]
   v2{"Extension .asf, .wmv, .avi or .3gp?"}
   v3{"Extension .mov or .mp4?"}
@@ -1259,7 +1259,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 ### Video Conversion Logic
 
 - **Three-tier approach**: Remux (.m2t, .mkv) -> Re-encode (.asf, .wmv, .avi, .3gp, .gif) -> Audio-only re-encode (.mov/.mp4 with PCM audio)
-- **Still GIF**: A GIF no longer than `--duration`, or with no duration at all, skips the re-encode tier. Its first frame becomes a PNG. As an MP4 it would meet the short clip rule in the next round and be deleted, the original with it under `--skipbackup`.
+- **Still GIF**: A GIF with one frame, no duration at all, or one no longer than `--duration` skips the re-encode tier. Its first frame becomes a PNG. As an MP4 it would meet the short clip rule in the next round and be deleted, the original with it under `--skipbackup`.
 - **Even Dimensions**: The re-encode tier pads with `pad=ceil(iw/2)*2:ceil(ih/2)*2`, because libx264 at `yuv420p` rejects an odd width or height. Nothing is scaled. A GIF keeps every pixel and gains one edge row or column. An odd-sized subsampled source, such as a `yuv420p` AVI, loses its last odd row or column to the pad color instead.
 - **Rename Collisions**: The mixed-case and MIME extension renames go through `RenameToFreeName`. A file already holding the target name is never deleted or backed up. The renamed file takes the next free `_N` name from `MediaUtilities.GetUniqueFileName`, and a warning names both files. This holds with and without `--skipbackup`. A case-only rename on a case-insensitive filesystem is not a collision with itself. `ProcessCommand`'s extension-conflict deferral only keeps same-stem files out of one parallel pass, and it reserves no name on disk.
 - **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path. It is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was taken. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.

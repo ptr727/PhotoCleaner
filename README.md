@@ -481,8 +481,8 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
-      - Still image: a GIF no longer than `--duration`, or with no duration at all, takes its
-        first frame to PNG. As an MP4 the short clip rule would delete it
+      - Still image: a GIF with one frame, or no longer than `--duration`, takes its first frame
+        to PNG. As an MP4 the short clip rule would delete it
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
