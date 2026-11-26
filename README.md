@@ -70,7 +70,7 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   whatever its name or folder. Without `--db` it is the same-folder file with the same basename,
   or the basename with the `_hevc` suffix stripped.
   Longer videos with a matching image trigger a warning but are kept.
-- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, and re-encodes WMV, AVI, 3GP,
+- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, and re-encodes WMV, ASF, AVI, 3GP,
   and GIF to MP4 (H.264/AAC). It re-encodes PCM audio to AAC in MOV and MP4 files while
   preserving the video stream. A GIF with one frame, no duration, or one no longer than
   `--duration` becomes a PNG instead. All source metadata (including `ContentIdentifier` and other
@@ -83,9 +83,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   re-runs skip already-imported files. `--tagpath` writes the source sub-directory path
   components as `XMP:Subject` tags on the destination file. `--tags` applies explicit
   comma-separated `XMP:Subject` tags to every imported file. `--datepath` infers and writes
-  EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
-  absent (opt-in, applied before the file is moved to a date-based directory so the source
-  path is still available).
+  EXIF (XMP for a GIF) or QuickTime creation dates from filenames or directory path
+  structures when metadata is absent. It is opt-in, and it applies before the file is moved
+  to a date-based directory so the source path is still available.
   A failed `--tagpath`, `--tags`, or `--datepath` write counts the file as failed, so `import`
   exits non-zero. A failed copy is removed so the next run imports it again. A moved file stays
   at its destination without the failed write.
@@ -183,7 +183,7 @@ Options:
   --move                         Move files instead of copying (default: copy)
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
   --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
-  --datepath                     Set missing EXIF creation date from file path
+  --datepath                     Set missing creation date from file path
   --db <db>                      SQLite database file for file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
   --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
@@ -410,7 +410,7 @@ PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --dele
 # Import with path-based XMP:Subject tagging (sub-directory names become tags)
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --tagpath
 
-# Import inferring missing EXIF dates from the source path
+# Import inferring missing creation dates from the source path
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --datepath
 
 # Import with explicit XMP:Subject tags applied to every file
@@ -480,10 +480,12 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
       `_hevc`-suffix match in the same folder is used.
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
-      - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
+      - Re-encode: WMV, ASF, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
       - Still image: a GIF with one frame, no duration, or no longer than `--duration` takes its
         first frame to PNG. As an MP4 the short clip rule would delete it
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
+      - A short clip converted from MTS, M2TS, MKV, WMV, ASF, AVI, or 3GP is deleted by the next
+        round. Under `--skipbackup` nothing of it is kept
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
 5. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
@@ -835,7 +837,9 @@ docker run --rm \
 `process` removes a Live Photo video when all of these hold. The video is a `.mov` or `.mp4`. The
 process database knows a HEIC, HEIF, JPG, or JPEG still with the same Apple `ContentIdentifier`. The video
 is under the Live Photo length bound. File names and date folders do not matter. It also removes a
-`.mov` or `.mp4` video at or under the `--duration` threshold. `import` keeps the original and the
+video at or under the `--duration` threshold. That covers a clip in any supported video format
+except GIF, which becomes a PNG. A clip that needs conversion is deleted after `process` converts
+it to MP4. `import` keeps the original and the
 edited rendition. The `-edited` name tells them apart.
 
 The Immich trash database keeps removed photos out at import and at process.

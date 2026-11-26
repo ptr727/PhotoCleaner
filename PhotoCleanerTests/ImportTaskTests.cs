@@ -1603,6 +1603,56 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
+    public async Task ExecuteAsync_DatePath_Gif_SetsXmpDate()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            string datedDir = Path.Combine(srcDir, "2021", "05", "02");
+            Directory.CreateDirectory(datedDir);
+            string gif = Path.Combine(datedDir, "anim.gif");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.GifFile), gif);
+            ExifToolJson? source = await MediaUtilities.GetExifToolJsonAsync(
+                gif,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            source!.IsDateSet().Should().BeFalse();
+
+            ImportTask task = new(
+                CreateOptions(outDir, datePath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [gif],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            failed.Should().Be(0);
+            string dest = Path.Combine(outDir, "2021-05", "anim.gif");
+            ExifToolJson? meta = await MediaUtilities.GetExifToolJsonAsync(
+                dest,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            meta!.XMPCreateDate.Should().Be("2021:05:02 00:00:00");
+            BufferedCommandResult original = await Cli.Wrap("exiftool")
+                .WithArguments(["-s3", "-XMP:DateTimeOriginal", dest])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            original.StandardOutput.Trim().Should().Be("2021:05:02 00:00:00");
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_DatePath_FileAlreadyHasDate_DateNotOverwritten()
     {
         string srcDir = TempDir();
