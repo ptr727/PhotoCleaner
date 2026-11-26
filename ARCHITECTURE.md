@@ -656,7 +656,7 @@ flowchart TD
   extQ -->|"yes"| anyDbQ{"Any of --db, --skipdb, --trashdb given?"}
   anyDbQ -->|"no"| metaQ{"Metadata already read for --imagehash?"}
   anyDbQ -->|"yes"| cache["Database.GetByPathAsync(): read the --db row for the source path"]
-  cache --> hash["Database.ResolveHashesAsync(): reuse cached hashes if size and mtime match"]
+  cache --> hash["Database.ResolveHashesAsync(): reuse cached hashes if size and mtime match without --rehash"]
   hash --> trashQ{"TrashDatabase.Sha1ExistsAsync(): --trashdb holds the SHA-1?"}
   trashQ -->|"yes"| trashed(["Counted TrashedInImmich"])
   trashQ -->|"no, or no --trashdb"| skipQ{"Database.Sha256ExistsAsync(): --skipdb holds the SHA-256?"}
@@ -1050,7 +1050,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Restored counts groups and Deleted counts files. Failed counts each failed delete, and one per group with no non-empty backup. A successful delete of the current file before a restore is not counted.
+Restored counts groups and Deleted counts files. Failed counts each failed delete or restore, and one per group with no non-empty backup. A successful delete of the current file before a restore is not counted.
 
 ### Verify
 

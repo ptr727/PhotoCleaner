@@ -492,7 +492,7 @@ rather than pulling it into the collection.
 
 Every file modification or deletion made by `process` creates a `.bak` backup alongside the
 original, with three exceptions. A file deleted because it matches the Immich trash database has no backup.
-Neither does a rename, such as the extension renames described below, and `--skipbackup` writes none at all.
+Neither does a rename, such as the extension renames described below, and `--skipbackup` keeps none once a change completes.
 The first backup is `X.bak`. When that already exists from a prior run, the next is
 `X.bak1`, then `X.bak2`, and so on. The `undo` command reverses each change that left a backup.
 It scans the given directories for backup files and applies a two-pass algorithm:

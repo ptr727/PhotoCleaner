@@ -890,6 +890,50 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ConvertedMetadataWriteThrows_KeepsOriginal(bool skipBackup)
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
+            byte[] original = await File.ReadAllBytesAsync(
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+            ProcessTask task = new(
+                CreateOptions(skipBackup: skipBackup),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            )
+            {
+                ExifToolCommand = Path.Combine(workDir, "missing", "exiftool"),
+            };
+
+            // Act
+            Func<Task> act = task.ExecuteAsync;
+
+            // Assert
+            await act.Should().ThrowAsync<Exception>();
+            (await File.ReadAllBytesAsync(filePath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(original);
+            Directory.GetFiles(workDir).Should().Equal([filePath]);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     private static string ExifToolWriteStub(string dir, string failOn) =>
         TempDirectoryFixture.WriteExifToolStub(
             dir,
