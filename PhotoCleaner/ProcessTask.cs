@@ -11,6 +11,7 @@ internal sealed class ProcessTask(
     TrashDatabase? trashDatabase,
     ConcurrentBag<string> reProcessNames,
     SkippedExtensionTracker skippedExtensions,
+    ConcurrentDictionary<string, string> convertedOutputs,
     CancellationToken cancellationToken
 )
 {
@@ -73,6 +74,28 @@ internal sealed class ProcessTask(
         ConcurrentBag<string> reProcessNames,
         SkippedExtensionTracker skippedExtensions,
         CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            options,
+            fileInfo,
+            database,
+            trashDatabase,
+            reProcessNames,
+            skippedExtensions,
+            new ConcurrentDictionary<string, string>(),
+            cancellationToken
+        );
+
+    // The converted outputs are this run's record, which lets a cull delete its own output without a backup.
+    public static Task<ProcessResult> ExecuteAsync(
+        CommandLine.Options options,
+        FileInfo fileInfo,
+        Database? database,
+        TrashDatabase? trashDatabase,
+        ConcurrentBag<string> reProcessNames,
+        SkippedExtensionTracker skippedExtensions,
+        ConcurrentDictionary<string, string> convertedOutputs,
+        CancellationToken cancellationToken
     )
     {
         ProcessTask processTask = new(
@@ -82,6 +105,7 @@ internal sealed class ProcessTask(
             trashDatabase,
             reProcessNames,
             skippedExtensions,
+            convertedOutputs,
             cancellationToken
         );
         return processTask.ExecuteAsync();
@@ -228,6 +252,9 @@ internal sealed class ProcessTask(
             Log.Error(failure, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
             return false;
         }
+
+        // A later file taking this name must not read as this run's converted output.
+        _ = convertedOutputs.TryRemove(fileInfo.FullName, out _);
 
         // The row stays, since a Live video pairs against the cataloged ContentIdentifier of a deleted still.
         return true;
@@ -423,14 +450,7 @@ internal sealed class ProcessTask(
 
             _modified = true;
             _deleted = true;
-            if (options.SkipBackup)
-            {
-                File.Delete(fileInfo.FullName);
-            }
-            else
-            {
-                _ = BackupFile(fileInfo.FullName, false);
-            }
+            CullFile();
             return false;
         }
 
@@ -569,15 +589,35 @@ internal sealed class ProcessTask(
 
         _modified = true;
         _deleted = true;
+        CullFile();
+        return false;
+    }
+
+    // An output converted earlier in this run keeps its original in a backup, so it needs no backup of its own.
+    private void CullFile()
+    {
         if (options.SkipBackup)
         {
             File.Delete(fileInfo.FullName);
+            return;
         }
-        else
+
+        if (convertedOutputs.TryRemove(fileInfo.FullName, out string? marker))
         {
-            _ = BackupFile(fileInfo.FullName, false);
+            Log.Information(
+                "Deleting converted output '{FilePath}', its original stays in '{BackupPath}'",
+                fileInfo.FullName,
+                marker[..^UndoTask.MarkerExtension.Length]
+            );
+            File.Delete(fileInfo.FullName);
+            if (MediaUtilities.TryDeleteFile(marker) is { } failure)
+            {
+                Log.Warning(failure, "Failed to remove '{FilePath}'", marker);
+            }
+            return;
         }
-        return false;
+
+        _ = BackupFile(fileInfo.FullName, false);
     }
 
     private async Task<bool> ConvertVideoAsync()
@@ -739,7 +779,7 @@ internal sealed class ProcessTask(
                 if (!options.SkipBackup)
                 {
                     await File.WriteAllTextAsync(
-                            sourceForMetadata + ".out",
+                            sourceForMetadata + UndoTask.MarkerExtension,
                             target,
                             cancellationToken
                         )
@@ -776,6 +816,11 @@ internal sealed class ProcessTask(
                     sourceForMetadata
                 );
                 File.Delete(sourceForMetadata);
+            }
+            else
+            {
+                await RecordConvertedOutputAsync(sourceForMetadata, outputFile)
+                    .ConfigureAwait(false);
             }
 
             // Restore original file's modified timestamp on the converted output
@@ -865,6 +910,23 @@ internal sealed class ProcessTask(
         return failure;
     }
 
+    // A file converted again was this run's own output, so its original's marker takes the new output.
+    private async Task RecordConvertedOutputAsync(string backupFile, string outputFile)
+    {
+        string marker = backupFile + UndoTask.MarkerExtension;
+        if (convertedOutputs.TryRemove(fileInfo.FullName, out string? originalMarker))
+        {
+            await File.WriteAllTextAsync(originalMarker, outputFile, cancellationToken)
+                .ConfigureAwait(false);
+            Log.Information("Deleting intermediate conversion: '{FilePath}'", backupFile);
+            File.Delete(backupFile);
+            File.Delete(marker);
+            marker = originalMarker;
+        }
+
+        convertedOutputs[outputFile] = marker;
+    }
+
     // Puts the original back under its own name, so the next run converts it from the start.
     private void RollBackConversion(string backupFile, string? outputFile)
     {
@@ -879,9 +941,15 @@ internal sealed class ProcessTask(
             return;
         }
         RenameFile(backupFile, fileInfo.FullName);
-        if (MediaUtilities.TryDeleteFile(backupFile + ".out") is { } markerFailure)
+        if (
+            MediaUtilities.TryDeleteFile(backupFile + UndoTask.MarkerExtension) is { } markerFailure
+        )
         {
-            Log.Warning(markerFailure, "Failed to remove '{FilePath}'", backupFile + ".out");
+            Log.Warning(
+                markerFailure,
+                "Failed to remove '{FilePath}'",
+                backupFile + UndoTask.MarkerExtension
+            );
         }
     }
 

@@ -496,23 +496,29 @@ rather than pulling it into the collection.
 ## Undo Flow
 
 Every file modification or deletion made by `process` creates a `.bak` backup alongside the
-original, with three exceptions. A file deleted because it matches the Immich trash database has no backup.
+original, with these exceptions. A file deleted because it matches the Immich trash database has no backup.
 Neither does a rename, such as the extension renames described below, and `--skipbackup` keeps none once a change completes.
+A converted output culled in the same run is deleted with no backup, since its original already has one.
+So is a converted output converted again in the same run, such as a PCM remux re-encoded to AAC.
 The first backup is `X.bak`. When that already exists from a prior run, the next is
 `X.bak1`, then `X.bak2`, and so on. The `undo` command reverses each change that left a backup.
-It scans the given directories for backup files and applies a two-pass algorithm:
+It scans the given directories for backup files of supported media types and reverses only what
+`process` recorded:
 
-1. **Identify derived files** - an output file is "derived" (not original) when either:
-   - a numbered backup (`.bak1`, `.bak2`, ...) exists for it (processed more than once), or
-   - it is a `.mp4` file whose stem has a non-`.mp4` primary backup in the same directory
-     (it was the conversion output).
-2. **Restore or delete**:
-   - *Derived* base: delete the current file and all its backup files.
-   - *Non-derived* base: delete the current file if it exists (overwritten in-place), rename
-     `X.bak` -> `X` to restore the original. The converted output is located via the
-     `X.bak.out` companion file written at conversion time (handles uniquified names like
-     `stem_1.mp4`). If no companion exists, falls back to deleting `stem.mp4` when present
-     and untracked (legacy single-run heuristic).
+1. **Remove converted outputs** - a conversion writes an `X.bak.out` marker naming its output.
+   Undo deletes that output, found by file name beside the backup, so a moved tree still works.
+   `process` can cull an output it converted in the same run, as a short clip or a live photo
+   video. It then deletes the output and the marker rather than backing them up. When undo
+   cannot tell which file is the output, it changes nothing in that group and counts it as failed.
+2. **Restore originals** - every other backup is an original and moves back to its own name.
+   Another file can hold that name, such as the original from `X.bak` when `X.bak1` restores.
+   The backup then takes the next free name (e.g. `clip_1.mov`) and undo logs a warning. Undo
+   never deletes an original's backup and never overwrites a file it has no record of. An empty
+   or unreadable backup is left in place and counted as failed, and the run carries on.
+
+A backup of another file type, such as `notes.txt.bak` from another tool, is left alone. A
+conversion from a release that predates the `.out` marker has no record, so its `.mp4` output
+stays beside the restored original.
 
 **Known limitation**: extension renames (e.g. `photo.JPEG` -> `photo.jpg`) create no backup and
 cannot be undone by this command. When another file already holds the target name, the renamed
