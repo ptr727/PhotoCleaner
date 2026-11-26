@@ -479,8 +479,8 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
       the image is found in the database by that tag. Without it, a direct name match or
       `_hevc`-suffix match in the same folder is used.
    4. Convert legacy or incompatible video formats to MP4:
-      - A short clip in any of these formats but GIF is deleted by the next round, after its conversion.
-        Under `--skipbackup` nothing of it is kept
+      - A short clip in the remux and re-encode formats above, GIF excepted, is deleted by the next
+        round, after its conversion. Under `--skipbackup` nothing of it is kept
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
       - Still image: a GIF with one frame, no duration, or no longer than `--duration` takes its
