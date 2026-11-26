@@ -580,5 +580,10 @@ public sealed class VerifyTaskTests(TempDirectoryFixture fixture)
         ImmichVerifyScript.Verify.Should().Contain("generateThumbnail");
         ImmichVerifyScript.Verify.Should().Contain("defaults.image.preview");
         ImmichVerifyScript.Preflight.Should().Contain(ImmichVerifyScript.PreflightSentinel);
+
+        // A preflight that only loads modules passes a changed call, and every file is then judged invalid.
+        ImmichVerifyScript.Preflight.Should().Contain("media.repository.js");
+        ImmichVerifyScript.Preflight.Should().Contain("await verifyImage(");
+        ImmichVerifyScript.Preflight.Should().Contain("await verifyVideo(");
     }
 }

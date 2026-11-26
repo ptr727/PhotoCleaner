@@ -2,8 +2,9 @@ namespace PhotoCleaner;
 
 // Calls Immich's own compiled modules rather than reimplementing the preview pipeline.
 // Behavior therefore tracks Immich across releases.
-// The coupling surface is three module paths and the methods the checks call.
-// The preflight runs both checks on generated media, so a moved module or a changed call fails before any file is judged.
+// The coupling surface is three module paths, the methods the checks call, and ffmpeg on the image's PATH.
+// The preflight runs both checks on generated media, so a moved module or a changed decode or transcode call fails first.
+// RAW preview extraction stays best effort, as in Immich, so the preflight does not cover it.
 internal static class ImmichVerifyScript
 {
     // Required for module resolution inside the image.
@@ -74,15 +75,12 @@ internal static class ImmichVerifyScript
         + "\n"
         + """
             const { execFileSync } = require("node:child_process");
-            const sharp = require("sharp");
             (async () => {
                 const image = "/tmp/photocleaner-preflight.jpg";
                 const video = "/tmp/photocleaner-preflight.mp4";
-                await sharp({
-                    create: { width: 64, height: 64, channels: 3, background: { r: 255, g: 0, b: 0 } },
-                })
-                    .jpeg()
-                    .toFile(image);
+                execFileSync("ffmpeg", [
+                    "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1", "-y", image,
+                ]);
                 execFileSync("ffmpeg", [
                     "-v", "error", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=5", "-t", "1",
                     "-pix_fmt", "yuv420p", "-y", video,
