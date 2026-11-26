@@ -579,6 +579,17 @@ public sealed class VerifyTaskTests(TempDirectoryFixture fixture)
         ImmichVerifyScript.Verify.Should().Contain("media.repository.js");
         ImmichVerifyScript.Verify.Should().Contain("generateThumbnail");
         ImmichVerifyScript.Verify.Should().Contain("defaults.image.preview");
+
+        // Immich 3.4.2 moved the defaults module and made generateThumbnail take a decoded image.
+        ImmichVerifyScript.Verify.Should().Contain("/dtos/config.dto.js");
+        ImmichVerifyScript.Verify.Should().NotContain("/config.js\"");
+        ImmichVerifyScript.Verify.Should().Contain("repo.decodeImage(file");
+        ImmichVerifyScript.Verify.Should().Contain("repo.generateThumbnail(decoded");
         ImmichVerifyScript.Preflight.Should().Contain(ImmichVerifyScript.PreflightSentinel);
+
+        // A preflight that only loads modules passes a changed call, and every file is then judged invalid.
+        ImmichVerifyScript.Preflight.Should().Contain("media.repository.js");
+        ImmichVerifyScript.Preflight.Should().Contain("await verifyImage(");
+        ImmichVerifyScript.Preflight.Should().Contain("await verifyVideo(");
     }
 }

@@ -627,6 +627,8 @@ container. There is no offline mode, because the decoder is the whole check.
 
 Before any file is judged, the command runs a preflight against the image. If Docker is
 unreachable or the image cannot be prepared, it exits `1` without marking a single file invalid.
+The preflight runs the image and video checks on a generated JPEG and MP4. So an Immich update
+that changes the decode or transcode calls also exits `1`, rather than reporting every file invalid.
 
 ## Supported File Types
 
