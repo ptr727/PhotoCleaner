@@ -854,11 +854,12 @@ The trash command opens the trash database read-write and the process database r
 
 ```mermaid
 flowchart TD
-  T1["CommandRunner.RunAsync(): run the trash work"] --> T2["TrashDatabaseScope.RunAsync(): create the --trashdb folder"]
+  T1["CommandRunner.RunAsync(): run the trash work"] --> T2["TrashDatabaseScope.RunAsync(): open the trash database"]
   T2 --> T3{"--trashdb given?"}
   T3 -->|"no"| T4["TrashCommand.ExecuteAsync(): throw, trash database path is required"]
   T4 -->|"exception"| TE
-  T3 -->|"yes"| T5["TrashDatabase.InitializeAsync(): create table, add image_hash column and index"]
+  T3 -->|"yes"| T3a["Create the --trashdb folder"]
+  T3a --> T5["TrashDatabase.InitializeAsync(): create table, add image_hash column and index"]
   T5 -->|"exception"| TE
   T5 --> T6{"--processdb given?"}
   T6 -->|"yes"| T7["Database.InitializeAsync(): open --processdb read-only, check the files table"]
@@ -943,7 +944,7 @@ flowchart TD
   P12 --> P13["ProcessTask.ConvertVideoAsync(): rename temp to name.mp4 or name_N.mp4"]
   P13 --> P14["ProcessTask.WriteConvertedMetadataAsync(): copy tags, set created date"]
   P14 -->|"fails or throws"| P15["ProcessTask.RollBackConversion(): delete output, rename backup back, drop marker"]
-  P15 -->|"output delete fails"| P16(["On disk: backup, marker and output, file fails"])
+  P15 -->|"output delete fails"| P16(["On disk: backup and output, plus the marker without --skipbackup, file fails"])
   P15 --> P17(["Original back under its name, file fails"])
   P14 -->|"ok"| P18{"--skipbackup?"}
   P18 -->|"yes"| P19(["Original deleted, output only, nothing for undo"])
