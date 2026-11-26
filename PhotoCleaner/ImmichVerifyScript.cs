@@ -2,28 +2,15 @@ namespace PhotoCleaner;
 
 // Calls Immich's own compiled modules rather than reimplementing the preview pipeline.
 // Behavior therefore tracks Immich across releases.
-// The coupling surface is three module paths and their exported names, which the preflight checks.
+// The coupling surface is three module paths and the methods the checks call.
+// The preflight runs both checks on generated media, so a moved module or a changed call fails before any file is judged.
 internal static class ImmichVerifyScript
 {
     // Required for module resolution inside the image.
     internal const string WorkingDirectory = "/usr/src/app/server";
 
-    // Loads the same modules the verify script needs, so a moved module fails before any file is judged.
-    internal const string Preflight = """
-        const ROOT = "/usr/src/app/server/dist";
-        const { MediaRepository } = require(ROOT + "/repositories/media.repository.js");
-        const { defaults } = require(ROOT + "/dtos/config.dto.js");
-        const { ThumbnailConfig } = require(ROOT + "/utils/media.js");
-        if (!MediaRepository || !defaults || !defaults.image || !ThumbnailConfig) {
-            throw new Error("Immich modules loaded but expected exports are missing");
-        }
-        process.stdout.write("PHOTOCLEANER_PREFLIGHT_OK\n");
-        """;
-
-    internal const string PreflightSentinel = "PHOTOCLEANER_PREFLIGHT_OK";
-
-    // Reads absolute paths on stdin and writes one JSON object per line: { path, ok, via, error }.
-    internal const string Verify = """
+    // Loads Immich's modules and defines the image and video checks that both scripts below run.
+    private const string Setup = """
         const path = require("node:path");
         const readline = require("node:readline");
         const ROOT = "/usr/src/app/server/dist";
@@ -79,32 +66,68 @@ internal static class ImmichVerifyScript
             await repo.generateThumbnail(decoded, { ...defaults.image.preview, ...options }, OUT);
             return via;
         }
-
-        const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-        (async () => {
-            for await (const line of rl) {
-                const file = line.trim();
-                if (!file) {
-                    continue;
-                }
-                const ext = path.extname(file).toLowerCase();
-                try {
-                    const via = VIDEO.has(ext)
-                        ? await verifyVideo(file)
-                        : await verifyImage(file, ext);
-                    process.stdout.write(JSON.stringify({ path: file, ok: true, via }) + "\n");
-                } catch (e) {
-                    const error = String((e && e.message) || e)
-                        .replaceAll(/\s+/g, " ")
-                        .slice(0, 300);
-                    process.stdout.write(
-                        JSON.stringify({ path: file, ok: false, via: "", error }) + "\n",
-                    );
-                }
-            }
-        })().catch((e) => {
-            process.stderr.write("fatal: " + String((e && e.message) || e) + "\n");
-            process.exit(1);
-        });
         """;
+
+    // Runs both checks on generated media, so an Immich change fails here instead of judging every file invalid.
+    internal const string Preflight =
+        Setup
+        + "\n"
+        + """
+            const { execFileSync } = require("node:child_process");
+            const sharp = require("sharp");
+            (async () => {
+                const image = "/tmp/photocleaner-preflight.jpg";
+                const video = "/tmp/photocleaner-preflight.mp4";
+                await sharp({
+                    create: { width: 64, height: 64, channels: 3, background: { r: 255, g: 0, b: 0 } },
+                })
+                    .jpeg()
+                    .toFile(image);
+                execFileSync("ffmpeg", [
+                    "-v", "error", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=5", "-t", "1",
+                    "-pix_fmt", "yuv420p", "-y", video,
+                ]);
+                await verifyImage(image, ".jpg");
+                await verifyVideo(video);
+                process.stdout.write("PHOTOCLEANER_PREFLIGHT_OK\n");
+            })().catch((e) => {
+                process.stderr.write("preflight: " + String((e && e.message) || e) + "\n");
+                process.exit(1);
+            });
+            """;
+
+    internal const string PreflightSentinel = "PHOTOCLEANER_PREFLIGHT_OK";
+
+    // Reads absolute paths on stdin and writes one JSON object per line: { path, ok, via, error }.
+    internal const string Verify =
+        Setup
+        + "\n"
+        + """
+            const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+            (async () => {
+                for await (const line of rl) {
+                    const file = line.trim();
+                    if (!file) {
+                        continue;
+                    }
+                    const ext = path.extname(file).toLowerCase();
+                    try {
+                        const via = VIDEO.has(ext)
+                            ? await verifyVideo(file)
+                            : await verifyImage(file, ext);
+                        process.stdout.write(JSON.stringify({ path: file, ok: true, via }) + "\n");
+                    } catch (e) {
+                        const error = String((e && e.message) || e)
+                            .replaceAll(/\s+/g, " ")
+                            .slice(0, 300);
+                        process.stdout.write(
+                            JSON.stringify({ path: file, ok: false, via: "", error }) + "\n",
+                        );
+                    }
+                }
+            })().catch((e) => {
+                process.stderr.write("fatal: " + String((e && e.message) || e) + "\n");
+                process.exit(1);
+            });
+            """;
 }
