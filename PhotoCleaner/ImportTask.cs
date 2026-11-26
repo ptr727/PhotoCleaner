@@ -14,6 +14,8 @@ internal sealed class ImportTask(
 {
     private readonly ConcurrentDictionary<string, Claim> _claims = new(StringComparer.Ordinal);
 
+    internal string ExifToolCommand { get; init; } = "exiftool";
+
     internal sealed record Claim(string File)
     {
         internal TaskCompletionSource<bool> Imported { get; } =
@@ -400,7 +402,9 @@ internal sealed class ImportTask(
 
         try
         {
+            // FileInfo reads lazily, and a move leaves nothing at the source path to read.
             FileInfo sourceInfo = new(file);
+            sourceInfo.Refresh();
             _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
             if (finalDest != requestedDest)
             {
@@ -421,22 +425,35 @@ internal sealed class ImportTask(
             }
 
             // Write inferred date to destination before restoring mtime
-            if (
-                !string.IsNullOrEmpty(inferredDateStr)
-                && s_exiftoolWriteExtensions.Contains(
-                    "." + (meta?.FileTypeExtension ?? string.Empty)
-                )
-            )
+            bool written = true;
+            if (!string.IsNullOrEmpty(inferredDateStr) && canWriteTags)
             {
-                await MediaUtilities
-                    .SetCreateDateAsync(inferredDateStr, finalDest, cancellationToken)
+                Log.Debug(
+                    "exiftool: Setting created date '{CreatedDate}' on '{DestinationPath}'",
+                    inferredDateStr,
+                    finalDest
+                );
+                written = await WriteDestinationAsync(
+                        MediaUtilities.CreateDateArguments(inferredDateStr, finalDest),
+                        file,
+                        finalDest,
+                        "created date",
+                        cancellationToken
+                    )
                     .ConfigureAwait(false);
             }
 
             // Apply XMP Subject tags before restoring mtime so exiftool does not clobber it
-            if (allTags.Length > 0)
+            if (written && allTags.Length > 0)
             {
-                await ApplyTagsAsync(allTags, finalDest, cancellationToken).ConfigureAwait(false);
+                written = await ApplyTagsAsync(allTags, file, finalDest, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (!written)
+            {
+                RollBackDestination(file, finalDest, sourceInfo.LastWriteTimeUtc);
+                return ImportResult.Failed;
             }
 
             // Restore source mtime last - after any exiftool writes
@@ -653,10 +670,11 @@ internal sealed class ImportTask(
 
     // Remove-then-add per value replaces an existing copy instead of doubling it.
     // -overwrite_original skips exiftool's _original backup.
-    private static async Task ApplyTagsAsync(
+    private Task<bool> ApplyTagsAsync(
         string[] tags,
+        string sourceFile,
         string destFile,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken
     )
     {
         List<string> args = new((tags.Length * 2) + 2);
@@ -675,9 +693,76 @@ internal sealed class ImportTask(
             destFile
         );
         Log.Debug("exiftool: Setting XMP:Subject on '{FilePath}'", destFile);
-        _ = await Cli.Wrap("exiftool")
-            .WithArguments([.. args])
+        return WriteDestinationAsync([.. args], sourceFile, destFile, "tags", cancellationToken);
+    }
+
+    // A caller may delete the source after an import succeeds, so a failed write fails the file.
+    private async Task<bool> WriteDestinationAsync(
+        string[] arguments,
+        string sourceFile,
+        string destFile,
+        string what,
+        CancellationToken cancellationToken
+    )
+    {
+        BufferedCommandResult result = await Cli.Wrap(ExifToolCommand)
+            .WithArguments(arguments)
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(cancellationToken);
+        if (!IsWriteFailure(result.ExitCode, result.StandardOutput, result.StandardError))
+        {
+            return true;
+        }
+
+        Log.Warning(
+            "Failed to write {What} to '{DestinationPath}' imported from '{SourcePath}' (exit {ExitCode}): {Output}",
+            what,
+            destFile,
+            sourceFile,
+            result.ExitCode,
+            (result.StandardError + result.StandardOutput).Trim()
+        );
+        return false;
+    }
+
+    // An exiftool write failure prints an "Error:" line, normally with a non-zero exit.
+    internal static bool IsWriteFailure(
+        int exitCode,
+        string standardOutput,
+        string standardError
+    ) =>
+        exitCode != 0
+        || $"{standardError}\n{standardOutput}"
+            .Split('\n')
+            .Any(line => line.TrimStart().StartsWith("Error", StringComparison.Ordinal));
+
+    // A copy is removed, so the untouched source imports cleanly on the next run.
+    // A moved file has no source left to return to, so it stays where it landed.
+    private void RollBackDestination(string sourceFile, string destFile, DateTime lastWriteTimeUtc)
+    {
+        if (options.Move)
+        {
+            File.SetLastWriteTimeUtc(destFile, lastWriteTimeUtc);
+            Log.Warning(
+                "Moved '{SourcePath}' to '{DestinationPath}' without its metadata",
+                sourceFile,
+                destFile
+            );
+            return;
+        }
+
+        try
+        {
+            File.Delete(destFile);
+            Log.Warning(
+                "Removed '{DestinationPath}' so '{SourcePath}' can be imported again",
+                destFile,
+                sourceFile
+            );
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(ex, "Failed to remove '{DestinationPath}'", destFile);
+        }
     }
 }

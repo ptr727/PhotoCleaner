@@ -192,7 +192,13 @@ internal static class MediaUtilities
             createdDate,
             outputFile
         );
-        string[] arguments = s_quicktimeExtensions.Contains(Path.GetExtension(outputFile))
+        _ = await Cli.Wrap("exiftool")
+            .WithArguments(CreateDateArguments(createdDate, outputFile))
+            .ExecuteBufferedAsync(cancellationToken);
+    }
+
+    internal static string[] CreateDateArguments(string createdDate, string outputFile) =>
+        s_quicktimeExtensions.Contains(Path.GetExtension(outputFile))
             ?
             [
                 "-overwrite_original",
@@ -207,8 +213,4 @@ internal static class MediaUtilities
                 $"-EXIF:DateTimeOriginal={createdDate}",
                 outputFile,
             ];
-        _ = await Cli.Wrap("exiftool")
-            .WithArguments(arguments)
-            .ExecuteBufferedAsync(cancellationToken);
-    }
 }
