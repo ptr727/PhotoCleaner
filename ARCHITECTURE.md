@@ -1026,7 +1026,7 @@ A backup can hold the name of an output that still exists. It may be one an olde
 
 #### Undo Restore
 
-Every backup not deleted above is an original. Undo never deletes or overwrites a current file it has no record of.
+Every backup in a group not left above is an original. Undo never deletes a backup, and never overwrites a current file.
 
 ```mermaid
 flowchart TD
@@ -1266,7 +1266,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **Records only** in `UndoTask.Execute()`:
   - *Read*: every `.bak` or `.bakN` whose base is supported media, in base then number order, and the `.out` marker named after each one. A marker's output is its file name resolved beside the backup, so a moved or copied tree still matches. An empty, vanished, or unreadable backup or marker fails only itself.
   - *Reverse outputs*: a marker's output is deleted when it exists, one marker names it, and no backup holds its name. When the output is gone, every backup holding its name is an original. Two markers, or a backup holding the name of an output that still exists, are ambiguous. Then the group is left as it is and counted Failed, so the record survives for a hand fix.
-  - *Restore originals*: every other backup moves back to its base name, or to the next free `name_N` when a file holds it, with a warning. A free name never takes another original's base name. Its marker is deleted after the move. Undo never deletes a backup it cannot tie to a marker, and never overwrites a current file.
+  - *Restore originals*: every other backup moves back to its base name, or to the next free `name_N` when a file holds it, with a warning. A free name never takes another original's base name. Its marker is deleted after the move. Undo never deletes a backup, and never overwrites a current file.
 - **Internal static helpers** (testable via `InternalsVisibleTo`):
   - `IsBackupFile(path)`: matches `.bak\d*$`
   - `IsNumberedBackup(path)`: matches `.bak\d+$`

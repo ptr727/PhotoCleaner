@@ -937,6 +937,76 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
+    public async Task ExecuteAsync_PcmRemuxConvertedAgain_KeepsOneMarkerOnTheOriginal()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string source = Path.Combine(workDir, "clip.mkv");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=s=32x32:r=10:d=3",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=d=3",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-shortest",
+                    source,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+            string output = Path.Combine(workDir, "clip.mp4");
+            string originalMarker = source + ".bak" + UndoTask.MarkerExtension;
+            ConcurrentDictionary<string, string> converted = new();
+
+            ProcessTask.ProcessResult remux = await RunWithRecord(source, converted);
+
+            remux.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            converted.Should().ContainKey(output).WhoseValue.Should().Be(originalMarker);
+
+            ProcessTask.ProcessResult reencode = await RunWithRecord(output, converted);
+
+            reencode.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            converted.Should().ContainKey(output).WhoseValue.Should().Be(originalMarker);
+            File.Exists(output + ".bak").Should().BeFalse();
+            File.Exists(output + ".bak" + UndoTask.MarkerExtension).Should().BeFalse();
+            File.Exists(source + ".bak").Should().BeTrue();
+            (await File.ReadAllTextAsync(originalMarker, TestContext.Current.CancellationToken))
+                .Should()
+                .Be(output);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    private static Task<ProcessTask.ProcessResult> RunWithRecord(
+        string filePath,
+        ConcurrentDictionary<string, string> converted
+    ) =>
+        ProcessTask.ExecuteAsync(
+            CreateOptions(),
+            new FileInfo(filePath),
+            null,
+            null,
+            [],
+            new SkippedExtensionTracker(),
+            converted,
+            TestContext.Current.CancellationToken
+        );
+
+    [Fact]
     public async Task ExecuteAsync_VideoExactlyAtDuration_DeletesShortClip()
     {
         string workDir = TempDirectoryFixture.CreateWorkDir();
