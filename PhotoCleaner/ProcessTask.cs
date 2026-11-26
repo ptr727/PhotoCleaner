@@ -11,7 +11,7 @@ internal sealed class ProcessTask(
     TrashDatabase? trashDatabase,
     ConcurrentBag<string> reProcessNames,
     SkippedExtensionTracker skippedExtensions,
-    ConcurrentDictionary<string, string>? convertedOutputs,
+    ConcurrentDictionary<string, string> convertedOutputs,
     CancellationToken cancellationToken
 )
 {
@@ -82,7 +82,7 @@ internal sealed class ProcessTask(
             trashDatabase,
             reProcessNames,
             skippedExtensions,
-            null,
+            new ConcurrentDictionary<string, string>(),
             cancellationToken
         );
 
@@ -94,7 +94,7 @@ internal sealed class ProcessTask(
         TrashDatabase? trashDatabase,
         ConcurrentBag<string> reProcessNames,
         SkippedExtensionTracker skippedExtensions,
-        ConcurrentDictionary<string, string>? convertedOutputs,
+        ConcurrentDictionary<string, string> convertedOutputs,
         CancellationToken cancellationToken
     )
     {
@@ -252,6 +252,9 @@ internal sealed class ProcessTask(
             Log.Error(failure, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
             return false;
         }
+
+        // A later file taking this name must not read as this run's converted output.
+        _ = convertedOutputs.TryRemove(fileInfo.FullName, out _);
 
         // The row stays, since a Live video pairs against the cataloged ContentIdentifier of a deleted still.
         return true;
@@ -599,10 +602,7 @@ internal sealed class ProcessTask(
             return;
         }
 
-        if (
-            convertedOutputs is not null
-            && convertedOutputs.TryRemove(fileInfo.FullName, out string? marker)
-        )
+        if (convertedOutputs.TryRemove(fileInfo.FullName, out string? marker))
         {
             Log.Information(
                 "Deleting converted output '{FilePath}', its original stays in '{BackupPath}'",
@@ -817,7 +817,7 @@ internal sealed class ProcessTask(
                 );
                 File.Delete(sourceForMetadata);
             }
-            else if (convertedOutputs is not null)
+            else
             {
                 await RecordConvertedOutputAsync(sourceForMetadata, outputFile)
                     .ConfigureAwait(false);
@@ -914,7 +914,7 @@ internal sealed class ProcessTask(
     private async Task RecordConvertedOutputAsync(string backupFile, string outputFile)
     {
         string marker = backupFile + UndoTask.MarkerExtension;
-        if (convertedOutputs!.TryRemove(fileInfo.FullName, out string? originalMarker))
+        if (convertedOutputs.TryRemove(fileInfo.FullName, out string? originalMarker))
         {
             await File.WriteAllTextAsync(originalMarker, outputFile, cancellationToken)
                 .ConfigureAwait(false);

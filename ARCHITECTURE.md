@@ -585,6 +585,7 @@ flowchart TD
   failEnd(["Failure, counted Failed"])
   sb{"--skipbackup?"}
   delOrig["File.Delete name.bak, the original"]
+  rec["ProcessTask.RecordConvertedOutputAsync(): record the output; when this run converted the source, point the original's marker at it and delete the intermediate and its marker"]
   stamp["File.SetLastWriteTimeUtc on the output from the original time"]
   rq["ProcessTask.ReProcess(): queue the output for the next round"]
   rqEnd(["Reprocess, counted Modified"])
@@ -604,7 +605,8 @@ flowchart TD
   rb1 -->|"yes"| rb2 --> rb3 --> failEnd
   rb2 -->|"exception"| wxEnd
   sb -->|"yes"| delOrig --> stamp
-  sb -->|"no"| stamp
+  sb -->|"no"| rec --> stamp
+  rec -->|"exception"| wxEnd
   delOrig -->|"exception"| wxEnd
   stamp -->|"exception"| wxEnd
   stamp --> rq --> rqEnd

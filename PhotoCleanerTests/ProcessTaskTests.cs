@@ -1196,7 +1196,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 null,
                 [],
                 new SkippedExtensionTracker(),
-                null,
+                new ConcurrentDictionary<string, string>(),
                 TestContext.Current.CancellationToken
             )
             {
@@ -1265,7 +1265,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 null,
                 [],
                 new SkippedExtensionTracker(),
-                null,
+                new ConcurrentDictionary<string, string>(),
                 TestContext.Current.CancellationToken
             )
             {
@@ -2008,6 +2008,11 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 cancellationToken: TestContext.Current.CancellationToken
             );
 
+            ConcurrentDictionary<string, string> converted = new()
+            {
+                [filePath] = Path.Combine(workDir, "photo.png.bak.out"),
+            };
+
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
                 CreateOptions(),
                 new FileInfo(filePath),
@@ -2015,11 +2020,13 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 trashDb,
                 [],
                 new SkippedExtensionTracker(),
+                converted,
                 TestContext.Current.CancellationToken
             );
 
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
             File.Exists(filePath).Should().BeFalse();
+            converted.Should().BeEmpty();
             FileRecord? row = await db.GetByPathAsync(
                 filePath,
                 cancellationToken: TestContext.Current.CancellationToken
