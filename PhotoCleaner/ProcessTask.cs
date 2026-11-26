@@ -709,16 +709,9 @@ internal sealed class ProcessTask(
         finally
         {
             // Clean up temp file if conversion did not complete (rename did not happen)
-            if (File.Exists(tempFile))
+            if (File.Exists(tempFile) && MediaUtilities.TryDeleteFile(tempFile) is { } failure)
             {
-                try
-                {
-                    File.Delete(tempFile);
-                }
-                catch (IOException)
-                {
-                    Log.Warning("Failed to clean up temp file: '{FilePath}'", tempFile);
-                }
+                Log.Warning(failure, "Failed to clean up temp file: '{FilePath}'", tempFile);
             }
         }
     }

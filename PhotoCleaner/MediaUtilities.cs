@@ -237,6 +237,20 @@ internal static class MediaUtilities
             : null;
     }
 
+    // Returns why a delete failed, or null once the file is gone, so each caller picks its log level.
+    internal static Exception? TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex;
+        }
+    }
+
     // An exiftool write failure prints an "Error:" line, normally with a non-zero exit.
     internal static bool IsWriteFailure(
         int exitCode,

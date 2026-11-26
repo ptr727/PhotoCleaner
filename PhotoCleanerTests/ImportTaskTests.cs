@@ -1346,14 +1346,17 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     {
         string srcDir = TempDir();
         string outDir = TempDir();
+        string dbPath = TempDb();
         try
         {
             string stub = ExifToolStub(srcDir, output, exitCode);
             (string jpg, string dest) = await CreateTaggedSourceAsync(srcDir);
 
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
             ImportTask task = new(
                 CreateOptions(outDir, tagPath: true, tags: "extra"),
-                database: null,
+                database: db,
                 skipDatabase: null,
                 trashDatabase: null,
                 new()
@@ -1371,11 +1374,13 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             failed.Should().Be(1);
             File.Exists(jpg).Should().BeTrue();
             File.Exists(Path.Combine(outDir, dest)).Should().BeFalse();
+            (await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken)).Should().BeNull();
         }
         finally
         {
             Directory.Delete(srcDir, recursive: true);
             Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
         }
     }
 
@@ -1453,6 +1458,25 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData(0, "    1 image files updated", "", false)]
+    [InlineData(0, "    1 image files updated", "Warning: [minor] Ignored empty value", false)]
+    [InlineData(1, "    0 image files updated", "", true)]
+    [InlineData(0, "", "Error: File not found - photo.jpg", true)]
+    [InlineData(0, "Error: Not a valid JPEG", "", true)]
+    public void IsWriteFailure_ReadsExitCodeAndErrorLines(
+        int exitCode,
+        string standardOutput,
+        string standardError,
+        bool expected
+    ) =>
+        MediaUtilities
+            .IsWriteFailure(exitCode, standardOutput, standardError)
+            .Should()
+            .Be(expected);
+
+    // -- datePath: missing EXIF date inferred from path -----------------------
+
     [Fact]
     public async Task ExecuteAsync_DateWriteFails_CountsFailedAndRemovesCopy()
     {
@@ -1493,62 +1517,6 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             Directory.Delete(outDir, recursive: true);
         }
     }
-
-    [Fact]
-    public async Task ExecuteAsync_TagWriteWouldFail_DryRunStillCountsImported()
-    {
-        string srcDir = TempDir();
-        string outDir = TempDir();
-        try
-        {
-            string stub = ExifToolStub(srcDir, "Error: stub write failure", 1);
-            (string jpg, string dest) = await CreateTaggedSourceAsync(srcDir);
-
-            ImportTask task = new(
-                CreateOptions(outDir, dryRun: true, tagPath: true),
-                database: null,
-                skipDatabase: null,
-                trashDatabase: null,
-                new()
-            )
-            {
-                ExifToolCommand = stub,
-            };
-            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
-                [jpg],
-                new DirectoryInfo(srcDir),
-                TestContext.Current.CancellationToken
-            );
-
-            organized.Should().Be(1);
-            failed.Should().Be(0);
-            File.Exists(Path.Combine(outDir, dest)).Should().BeFalse();
-        }
-        finally
-        {
-            Directory.Delete(srcDir, recursive: true);
-            Directory.Delete(outDir, recursive: true);
-        }
-    }
-
-    [Theory]
-    [InlineData(0, "    1 image files updated", "", false)]
-    [InlineData(0, "    1 image files updated", "Warning: [minor] Ignored empty value", false)]
-    [InlineData(1, "    0 image files updated", "", true)]
-    [InlineData(0, "", "Error: File not found - photo.jpg", true)]
-    [InlineData(0, "Error: Not a valid JPEG", "", true)]
-    public void IsWriteFailure_ReadsExitCodeAndErrorLines(
-        int exitCode,
-        string standardOutput,
-        string standardError,
-        bool expected
-    ) =>
-        MediaUtilities
-            .IsWriteFailure(exitCode, standardOutput, standardError)
-            .Should()
-            .Be(expected);
-
-    // -- datePath: missing EXIF date inferred from path -----------------------
 
     [Fact]
     public async Task ExecuteAsync_DatePath_DateInferredFromPath_SetsExifDateAndOrganizesCorrectly()

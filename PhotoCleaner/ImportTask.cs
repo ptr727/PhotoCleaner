@@ -743,15 +743,12 @@ internal sealed class ImportTask(
 
     private static bool DeleteCopy(string destFile)
     {
-        try
+        Exception? failure = MediaUtilities.TryDeleteFile(destFile);
+        if (failure is not null)
         {
-            File.Delete(destFile);
-            return true;
+            Log.Warning(failure, "Failed to remove '{DestinationPath}'", destFile);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Warning(ex, "Failed to remove '{DestinationPath}'", destFile);
-            return false;
-        }
+
+        return failure is null;
     }
 }

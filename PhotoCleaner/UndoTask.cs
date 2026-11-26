@@ -298,16 +298,14 @@ internal sealed partial class UndoTask(CommandLine.Options options)
             return true;
         }
 
-        try
+        Exception? failure = MediaUtilities.TryDeleteFile(path);
+        if (failure is not null)
         {
-            File.Delete(path);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Error(ex, "Failed to delete '{FilePath}'", path);
+            Log.Error(failure, "Failed to delete '{FilePath}'", path);
             return false;
         }
+
+        return true;
     }
 
     private bool TryRestore(string backup, string target)
