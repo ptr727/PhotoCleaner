@@ -85,6 +85,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
   absent (opt-in, applied before the file is moved to a date-based directory so the source
   path is still available).
+  A failed `--tagpath`, `--tags`, or `--datepath` write counts the file as failed, so `import`
+  exits non-zero. A failed copy is removed so the next run imports it again. A moved file stays
+  at its destination without the failed write.
   The opt-in `--imagehash` also skips a file whose image data hash is already in the database.
 - **Syncs Immich trash hashes** (via `trash` command): Connects to an Immich server via its
   REST API, fetches all trashed asset checksums (SHA-1), and stores them in a local SQLite

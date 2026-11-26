@@ -221,13 +221,9 @@ internal sealed class ProcessTask(
             return true;
         }
 
-        try
+        if (MediaUtilities.TryDeleteFile(fileInfo.FullName) is { } failure)
         {
-            File.Delete(fileInfo.FullName);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Error(ex, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
+            Log.Error(failure, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
             return false;
         }
 
@@ -709,16 +705,9 @@ internal sealed class ProcessTask(
         finally
         {
             // Clean up temp file if conversion did not complete (rename did not happen)
-            if (File.Exists(tempFile))
+            if (File.Exists(tempFile) && MediaUtilities.TryDeleteFile(tempFile) is { } failure)
             {
-                try
-                {
-                    File.Delete(tempFile);
-                }
-                catch (IOException)
-                {
-                    Log.Warning("Failed to clean up temp file: '{FilePath}'", tempFile);
-                }
+                Log.Warning(failure, "Failed to clean up temp file: '{FilePath}'", tempFile);
             }
         }
     }

@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using CliWrap;
-using CliWrap.Buffered;
 
 namespace PhotoCleaner;
 
@@ -13,6 +11,8 @@ internal sealed class ImportTask(
 )
 {
     private readonly ConcurrentDictionary<string, Claim> _claims = new(StringComparer.Ordinal);
+
+    internal string ExifToolCommand { get; init; } = "exiftool";
 
     internal sealed record Claim(string File)
     {
@@ -400,7 +400,9 @@ internal sealed class ImportTask(
 
         try
         {
+            // FileInfo reads lazily, and a move leaves nothing at the source path to read.
             FileInfo sourceInfo = new(file);
+            sourceInfo.Refresh();
             _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
             if (finalDest != requestedDest)
             {
@@ -421,22 +423,40 @@ internal sealed class ImportTask(
             }
 
             // Write inferred date to destination before restoring mtime
-            if (
-                !string.IsNullOrEmpty(inferredDateStr)
-                && s_exiftoolWriteExtensions.Contains(
-                    "." + (meta?.FileTypeExtension ?? string.Empty)
-                )
-            )
+            bool written = true;
+            if (!string.IsNullOrEmpty(inferredDateStr) && canWriteTags)
             {
-                await MediaUtilities
-                    .SetCreateDateAsync(inferredDateStr, finalDest, cancellationToken)
-                    .ConfigureAwait(false);
+                written = ReportWrite(
+                    await MediaUtilities
+                        .TrySetCreateDateAsync(
+                            inferredDateStr,
+                            finalDest,
+                            ExifToolCommand,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false),
+                    "created date",
+                    file,
+                    finalDest
+                );
             }
 
             // Apply XMP Subject tags before restoring mtime so exiftool does not clobber it
-            if (allTags.Length > 0)
+            if (written && allTags.Length > 0)
             {
-                await ApplyTagsAsync(allTags, finalDest, cancellationToken).ConfigureAwait(false);
+                written = ReportWrite(
+                    await ApplyTagsAsync(allTags, finalDest, cancellationToken)
+                        .ConfigureAwait(false),
+                    "tags",
+                    file,
+                    finalDest
+                );
+            }
+
+            if (!written)
+            {
+                RollBackDestination(file, finalDest, sourceInfo.LastWriteTimeUtc);
+                return ImportResult.Failed;
             }
 
             // Restore source mtime last - after any exiftool writes
@@ -500,14 +520,7 @@ internal sealed class ImportTask(
             // A move is atomic on one filesystem, and cross-device failure leaves the source intact.
             if (!options.Move && File.Exists(finalDest))
             {
-                try
-                {
-                    File.Delete(finalDest);
-                }
-                catch (IOException)
-                {
-                    Log.Warning("Failed to clean up partial file: '{FilePath}'", finalDest);
-                }
+                _ = DeleteCopy(finalDest);
             }
 
             throw;
@@ -653,10 +666,10 @@ internal sealed class ImportTask(
 
     // Remove-then-add per value replaces an existing copy instead of doubling it.
     // -overwrite_original skips exiftool's _original backup.
-    private static async Task ApplyTagsAsync(
+    private Task<string?> ApplyTagsAsync(
         string[] tags,
         string destFile,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken
     )
     {
         List<string> args = new((tags.Length * 2) + 2);
@@ -675,9 +688,65 @@ internal sealed class ImportTask(
             destFile
         );
         Log.Debug("exiftool: Setting XMP:Subject on '{FilePath}'", destFile);
-        _ = await Cli.Wrap("exiftool")
-            .WithArguments([.. args])
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
+        return MediaUtilities.WriteExifToolAsync(ExifToolCommand, [.. args], cancellationToken);
+    }
+
+    // A caller may delete the source after an import succeeds, so a failed write fails the file.
+    private static bool ReportWrite(
+        string? failure,
+        string what,
+        string sourceFile,
+        string destFile
+    )
+    {
+        if (failure is null)
+        {
+            return true;
+        }
+
+        Log.Error(
+            "Failed to write {What} to '{DestinationPath}' imported from '{SourcePath}' ({Failure})",
+            what,
+            destFile,
+            sourceFile,
+            failure
+        );
+        return false;
+    }
+
+    // A copy is removed, so the untouched source imports cleanly on the next run.
+    // A moved file has no source left to return to, so it stays where it landed.
+    private void RollBackDestination(string sourceFile, string destFile, DateTime lastWriteTimeUtc)
+    {
+        if (options.Move)
+        {
+            File.SetLastWriteTimeUtc(destFile, lastWriteTimeUtc);
+            Log.Warning(
+                "Kept '{DestinationPath}' moved from '{SourcePath}' after the failed write",
+                destFile,
+                sourceFile
+            );
+            return;
+        }
+
+        if (DeleteCopy(destFile))
+        {
+            Log.Warning(
+                "Removed '{DestinationPath}' so '{SourcePath}' can be imported again",
+                destFile,
+                sourceFile
+            );
+        }
+    }
+
+    private static bool DeleteCopy(string destFile)
+    {
+        Exception? failure = MediaUtilities.TryDeleteFile(destFile);
+        if (failure is not null)
+        {
+            Log.Warning(failure, "Failed to remove '{DestinationPath}'", destFile);
+        }
+
+        return failure is null;
     }
 }

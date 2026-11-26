@@ -187,12 +187,83 @@ internal static class MediaUtilities
         CancellationToken cancellationToken = default
     )
     {
+        string? failure = await TrySetCreateDateAsync(
+                createdDate,
+                outputFile,
+                "exiftool",
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        if (failure is not null)
+        {
+            throw new InvalidOperationException(
+                $"Failed to set created date on '{outputFile}' ({failure})"
+            );
+        }
+    }
+
+    internal static Task<string?> TrySetCreateDateAsync(
+        string createdDate,
+        string outputFile,
+        string exifTool,
+        CancellationToken cancellationToken = default
+    )
+    {
         Log.Debug(
             "exiftool: Setting created date '{CreatedDate}' on '{DestinationPath}'",
             createdDate,
             outputFile
         );
-        string[] arguments = s_quicktimeExtensions.Contains(Path.GetExtension(outputFile))
+        return WriteExifToolAsync(
+            exifTool,
+            CreateDateArguments(createdDate, outputFile),
+            cancellationToken
+        );
+    }
+
+    // Returns exiftool's exit code and output for a failed write, or null for a successful one.
+    internal static async Task<string?> WriteExifToolAsync(
+        string exifTool,
+        string[] arguments,
+        CancellationToken cancellationToken = default
+    )
+    {
+        BufferedCommandResult result = await Cli.Wrap(exifTool)
+            .WithArguments(arguments)
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+        return IsWriteFailure(result.ExitCode, result.StandardOutput, result.StandardError)
+            ? $"exit {result.ExitCode}: {(result.StandardError + result.StandardOutput).Trim()}"
+            : null;
+    }
+
+    // Returns why a delete failed, or null once the file is gone, so each caller picks its log level.
+    internal static Exception? TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex;
+        }
+    }
+
+    // An exiftool write failure prints an "Error:" line, normally with a non-zero exit.
+    internal static bool IsWriteFailure(
+        int exitCode,
+        string standardOutput,
+        string standardError
+    ) =>
+        exitCode != 0
+        || $"{standardError}\n{standardOutput}"
+            .Split('\n')
+            .Any(line => line.TrimStart().StartsWith("Error", StringComparison.Ordinal));
+
+    private static string[] CreateDateArguments(string createdDate, string outputFile) =>
+        s_quicktimeExtensions.Contains(Path.GetExtension(outputFile))
             ?
             [
                 "-overwrite_original",
@@ -207,8 +278,4 @@ internal static class MediaUtilities
                 $"-EXIF:DateTimeOriginal={createdDate}",
                 outputFile,
             ];
-        _ = await Cli.Wrap("exiftool")
-            .WithArguments(arguments)
-            .ExecuteBufferedAsync(cancellationToken);
-    }
 }
