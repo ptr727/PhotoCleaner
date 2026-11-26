@@ -183,7 +183,7 @@ Options:
   --move                         Move files instead of copying (default: copy)
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
   --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
-  --datepath                     Set missing EXIF creation date from file path
+  --datepath                     Set missing creation date from file path
   --db <db>                      SQLite database file for file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
   --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
