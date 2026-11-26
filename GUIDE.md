@@ -123,7 +123,7 @@ A cloud export may deliver the motion parts as short videos with no sidecar of t
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
 - **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
 - **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded, including an identical file earlier in the same run.
-- **`process` renames a file whose extension disagrees with its content.** When another file already holds the corrected name, the renamed file takes the next free name, such as `photo_1.jpg`, and the run logs a warning. It also converts a GIF to an MP4 video. A single-frame GIF, or one no longer than `--duration`, becomes a PNG of its first frame instead, so the short-video rule never deletes it. Raising `--duration` therefore also turns longer animated GIFs into stills.
+- **`process` renames a file whose extension disagrees with its content.** When another file already holds the corrected name, the renamed file takes the next free name, such as `photo_1.jpg`, and the run logs a warning. It also converts a GIF to an MP4 video. A GIF with one frame, no duration, or one no longer than `--duration` becomes a PNG of its first frame instead. The short-video rule then never deletes it. Raising `--duration` therefore also turns longer animated GIFs into stills.
 - **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
 
 <!-- Repo -->

@@ -340,7 +340,7 @@ internal sealed class ProcessTask(
             .StartsWith("pcm", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<float> GetDurationAsync()
+    private async Task<double> GetDurationAsync()
     {
         Log.Debug("ffprobe: Getting play duration for '{FilePath}'", fileInfo.FullName);
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
@@ -356,7 +356,7 @@ internal sealed class ProcessTask(
                 fileInfo.FullName,
             ])
             .ExecuteBufferedAsync(cancellationToken);
-        return float.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
+        return double.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
     }
 
     private async Task<bool> IsStillOrShortGifAsync()
@@ -390,11 +390,11 @@ internal sealed class ProcessTask(
             .Where(pair => pair.Length == 2)
             .ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
         return values.GetValueOrDefault("nb_read_packets") == "1"
-            || !float.TryParse(
+            || !double.TryParse(
                 values.GetValueOrDefault("duration"),
                 NumberStyles.Float,
                 CultureInfo.InvariantCulture,
-                out float duration
+                out double duration
             )
             || duration <= options.ShortVideoDuration;
     }
@@ -408,7 +408,7 @@ internal sealed class ProcessTask(
         }
 
         // Short videos, always delete
-        float duration = await GetDurationAsync().ConfigureAwait(false);
+        double duration = await GetDurationAsync().ConfigureAwait(false);
         if (duration <= options.ShortVideoDuration)
         {
             Log.Warning(
@@ -504,7 +504,7 @@ internal sealed class ProcessTask(
         return DeleteLiveVideo();
     }
 
-    private async Task<bool> DeleteLiveVideoByCatalogAsync(float duration)
+    private async Task<bool> DeleteLiveVideoByCatalogAsync(double duration)
     {
         // The row of a still whose file is gone still pairs, since the catalog outlives the file
         string? videoContentId = _exifToolJson?.ContentIdentifier;

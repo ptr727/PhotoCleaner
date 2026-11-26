@@ -72,9 +72,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   Longer videos with a matching image trigger a warning but are kept.
 - **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, and re-encodes WMV, AVI, 3GP,
   and GIF to MP4 (H.264/AAC). It re-encodes PCM audio to AAC in MOV and MP4 files while
-  preserving the video stream. A single-frame GIF, or one no longer than `--duration`, becomes a PNG
-  instead. All source metadata (including `ContentIdentifier` and other QuickTime tags) is copied
-  to the converted file using `exiftool -TagsFromFile`.
+  preserving the video stream. A GIF with one frame, no duration, or one no longer than
+  `--duration` becomes a PNG instead. All source metadata (including `ContentIdentifier` and other
+  QuickTime tags) is copied to the converted file using `exiftool -TagsFromFile`.
 - **Imports into date folders** (via `import` command): Copies (default) or moves supported
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
   Falls back to a deterministic `0001/01` bucket when no date is found. Supports a custom
@@ -481,8 +481,8 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
-      - Still image: a GIF with one frame, or no longer than `--duration`, takes its first frame
-        to PNG. As an MP4 the short clip rule would delete it
+      - Still image: a GIF with one frame, no duration, or no longer than `--duration` takes its
+        first frame to PNG. As an MP4 the short clip rule would delete it
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
