@@ -61,18 +61,6 @@ public sealed class UndoTaskTests
     public void IsBackupFile_VariousPaths_ReturnsExpected(string path, bool expected) =>
         UndoTask.IsBackupFile(path).Should().Be(expected);
 
-    // -- IsNumberedBackup -----------------------------------------------------
-
-    [Theory]
-    [InlineData("photo.jpg.bak", false)]
-    [InlineData("photo.jpg.bak1", true)]
-    [InlineData("photo.jpg.bak99", true)]
-    [InlineData("photo.jpg", false)]
-    public void IsNumberedBackup_VariousPaths_ReturnsExpected(string path, bool expected) =>
-        UndoTask.IsNumberedBackup(path).Should().Be(expected);
-
-    // -- GetBackupBase ---------------------------------------------------------
-
     [Theory]
     [InlineData("photo.jpg.bak", "photo.jpg")]
     [InlineData("photo.jpg.bak1", "photo.jpg")]
@@ -410,7 +398,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_EmptyMarker_FailsItsBackupAndLeavesIt()
+    public void Execute_EmptyMarker_RestoresTheOriginalAndKeepsTheMp4()
     {
         string dir = TempDir();
         try
@@ -420,8 +408,8 @@ public sealed class UndoTaskTests
             File.WriteAllText(movBak + ".out", " \n");
             Touch(Path.Combine(dir, "img.mp4"));
 
-            Run(dir).Should().Be((0, 0, 1));
-            Names(dir).Should().Equal("img.mov.bak", "img.mov.bak.out", "img.mp4");
+            Run(dir).Should().Be((1, 1, 0));
+            Names(dir).Should().Equal("img.mov", "img.mp4");
         }
         finally
         {

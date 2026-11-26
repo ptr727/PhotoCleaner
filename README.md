@@ -496,8 +496,9 @@ rather than pulling it into the collection.
 ## Undo Flow
 
 Every file modification or deletion made by `process` creates a `.bak` backup alongside the
-original, with three exceptions. A file deleted because it matches the Immich trash database has no backup.
+original, with four exceptions. A file deleted because it matches the Immich trash database has no backup.
 Neither does a rename, such as the extension renames described below, and `--skipbackup` keeps none once a change completes.
+A converted output culled in the same run is deleted with no backup, since its original already has one.
 The first backup is `X.bak`. When that already exists from a prior run, the next is
 `X.bak1`, then `X.bak2`, and so on. The `undo` command reverses each change that left a backup.
 It scans the given directories for backup files of supported media types and reverses only what

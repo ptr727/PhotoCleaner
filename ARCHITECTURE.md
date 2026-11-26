@@ -996,7 +996,7 @@ flowchart TD
   U8 -->|"yes"| U10{"marker named after this backup exists?"}
   U10 -->|"no"| U13
   U10 -->|"yes"| U11["UndoTask.ResolveMarkerOutput(): take the output's file name, beside the backup"]
-  U11 -->|"marker empty or unreadable"| U9
+  U11 -->|"marker unreadable"| U9
   U11 --> U13["UndoTask.Execute(): reverse each recorded output, then restore each original, see the next two diagrams"]
   U13 -->|"cancelled"| U14(["Exit 1, Error"])
   U13 --> U15{"failed count above zero?"}
@@ -1264,12 +1264,11 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **Backup naming**: `X.bak` (first), `X.bak1`, `X.bak2`, ... (subsequent runs of `process`)
 - **`FileEnumerator.Enumerate()`** enumerates all files including `.bak*` files before calling `Execute()`
 - **Records only** in `UndoTask.Execute()`:
-  - *Read*: every `.bak` or `.bakN` whose base is supported media, in base then number order, and the `.out` marker named after each one. A marker's output is its file name resolved beside the backup, so a moved or copied tree still matches. An empty, vanished, or unreadable backup or marker fails only itself.
+  - *Read*: every `.bak` or `.bakN` whose base is supported media, in base then number order, and the `.out` marker named after each one. A marker's output is its file name resolved beside the backup, so a moved or copied tree still matches. An empty, vanished, or unreadable backup, or an unreadable marker, fails only itself. An empty marker records no output.
   - *Reverse outputs*: a marker's output is deleted when it exists, one marker names it, and no backup holds its name. When the output is gone, every backup holding its name is an original. Two markers, or a backup holding the name of an output that still exists, are ambiguous. Then the group is left as it is and counted Failed, so the record survives for a hand fix.
   - *Restore originals*: every other backup moves back to its base name, or to the next free `name_N` when a file holds it, with a warning. A free name never takes another original's base name. Its marker is deleted after the move. Undo never deletes a backup, and never overwrites a current file.
 - **Internal static helpers** (testable via `InternalsVisibleTo`):
   - `IsBackupFile(path)`: matches `.bak\d*$`
-  - `IsNumberedBackup(path)`: matches `.bak\d+$`
   - `GetBackupBase(path)`: strips the `.bak\d*` suffix
   - `IsUndoableBackup(path)`: a backup whose base extension is supported media
   - `ResolveMarkerOutput(backup, text)`: the marker's output file name, beside the backup

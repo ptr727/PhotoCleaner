@@ -27,8 +27,6 @@ internal sealed partial class UndoTask(CommandLine.Options options)
 
     internal static bool IsBackupFile(string path) => BackupPattern().IsMatch(path);
 
-    internal static bool IsNumberedBackup(string path) => NumberedPattern().IsMatch(path);
-
     internal static string GetBackupBase(string path) =>
         BackupPattern().Replace(path, string.Empty);
 
@@ -103,28 +101,23 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                     continue;
                 }
 
-                string marker = path + MarkerExtension;
+                // An empty marker is a conversion that stopped before its output was placed.
+                string? marker = path + MarkerExtension;
                 string? output = null;
-                if (File.Exists(marker))
+                if (!File.Exists(marker))
                 {
-                    string text = File.ReadAllText(marker);
-                    if (string.IsNullOrWhiteSpace(text))
-                    {
-                        Log.Error(
-                            "Marker '{FilePath}' is empty, leaving '{BackupPath}'",
-                            marker,
-                            path
-                        );
-                        failed++;
-                        continue;
-                    }
-
+                    marker = null;
+                }
+                else if (File.ReadAllText(marker) is { } text && !string.IsNullOrWhiteSpace(text))
+                {
                     output = ResolveMarkerOutput(path, text);
                 }
+                else
+                {
+                    Log.Warning("Marker '{FilePath}' is empty, no output to delete", marker);
+                }
 
-                backups.Add(
-                    new Backup(path, GetBackupBase(path), output is null ? null : marker, output)
-                );
+                backups.Add(new Backup(path, GetBackupBase(path), marker, output));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
