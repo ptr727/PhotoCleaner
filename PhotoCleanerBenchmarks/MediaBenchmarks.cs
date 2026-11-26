@@ -96,7 +96,7 @@ public class MediaBenchmarks : IAsyncDisposable
         await MediaUtilities.GetExifToolJsonAsync(_jpegPath);
 
     [Benchmark]
-    public async Task<float> FfprobeGetDuration()
+    public async Task<double> FfprobeGetDuration()
     {
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
             .WithArguments([
@@ -111,7 +111,7 @@ public class MediaBenchmarks : IAsyncDisposable
                 _movPath,
             ])
             .ExecuteBufferedAsync();
-        return float.Parse(result.StandardOutput.Trim(), CultureInfo.InvariantCulture);
+        return double.Parse(result.StandardOutput.Trim(), CultureInfo.InvariantCulture);
     }
 
     [Benchmark]

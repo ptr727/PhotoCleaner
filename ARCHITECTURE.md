@@ -495,7 +495,7 @@ The short clip rule needs no still and runs before any pairing. A deleted video 
 
 #### Process Video Conversion
 
-The temporary output is the source path with its extension changed to .temp. A finally block deletes that file whenever it still exists at the end. A single-frame or short GIF becomes a PNG rather than an MP4. As an MP4 it would meet the short clip rule in Process Live Photos in the next round. A GIF with no frame delay, such as a GIF87a still, has no duration and counts as a still too.
+The temporary output is the source path with its extension changed to .temp. A finally block deletes that file whenever it still exists at the end. A single-frame or short GIF becomes a PNG rather than an MP4. As an MP4 it would meet the short clip rule in Process Live Photos in the next round. A GIF that ffprobe gives no duration, such as a GIF87a still, counts as a still too.
 
 ```mermaid
 flowchart TD
