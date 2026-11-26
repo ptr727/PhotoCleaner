@@ -281,7 +281,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_ConvertedOutputBackedUpAsShortClip_RestoresOnlyTheOriginal()
+    public void Execute_BackupHoldingAMissingOutputsName_RestoresItAsAnOriginal()
     {
         string dir = TempDir();
         try
@@ -291,8 +291,8 @@ public sealed class UndoTaskTests
             File.WriteAllText(gpBak + ".out", Path.Combine(dir, "clip.mp4"));
             WriteContent(Path.Combine(dir, "clip.mp4.bak"));
 
-            Run(dir).Should().Be((1, 2, 0));
-            Names(dir).Should().Equal("clip.3gp");
+            Run(dir).Should().Be((2, 1, 0));
+            Names(dir).Should().Equal("clip.3gp", "clip.mp4");
         }
         finally
         {
@@ -366,7 +366,7 @@ public sealed class UndoTaskTests
     }
 
     [Fact]
-    public void Execute_AmbiguousOutputBackups_LeavesTheGroupAndFails()
+    public void Execute_TwoBackupsHoldingAMissingOutputsName_RestoresEveryBackup()
     {
         string dir = TempDir();
         try
@@ -377,10 +377,8 @@ public sealed class UndoTaskTests
             File.WriteAllText(gpBak + ".out", Path.Combine(dir, "clip.mp4"));
             WriteContent(Path.Combine(dir, "clip.mp4.bak1"));
 
-            string[] before = Names(dir);
-
-            Run(dir).Should().Be((0, 0, 1));
-            Names(dir).Should().Equal(before);
+            Run(dir).Should().Be((3, 1, 0));
+            Names(dir).Should().Equal("clip.3gp", "clip.mp4", "clip_1.mp4");
         }
         finally
         {
@@ -502,7 +500,7 @@ public sealed class UndoTaskTests
             WriteContent(Path.Combine(dir, "img.mov.bak1"));
             string[] before = Names(dir);
 
-            Run(dir, dryRun: true).Should().Be((3, 2, 0));
+            Run(dir, dryRun: true).Should().Be((4, 1, 0));
             Names(dir).Should().Equal(before);
         }
         finally
@@ -590,6 +588,86 @@ public sealed class UndoTaskTests
         finally
         {
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_TwoMarkersNameOneLiveOutput_LeavesTheGroupAndFails()
+    {
+        string dir = TempDir();
+        try
+        {
+            string output = Path.Combine(dir, "clip.mp4");
+            WriteContent(output);
+            WriteContent(Path.Combine(dir, "clip.avi.bak"));
+            File.WriteAllText(Path.Combine(dir, "clip.avi.bak.out"), output);
+            WriteContent(Path.Combine(dir, "clip.wmv.bak"));
+            File.WriteAllText(Path.Combine(dir, "clip.wmv.bak.out"), output);
+            string[] before = Names(dir);
+
+            Run(dir).Should().Be((0, 0, 1));
+            Names(dir).Should().Equal(before);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_FreeNameSkipsALeftGroupsBaseName()
+    {
+        string dir = TempDir();
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir, "clip.mov"), [200]);
+            File.WriteAllBytes(Path.Combine(dir, "clip.mov.bak"), [1]);
+            string leftBak = Path.Combine(dir, "clip_1.mov.bak");
+            WriteContent(leftBak);
+            File.WriteAllText(leftBak + ".out", Path.Combine(dir, "clip_1.mp4"));
+            WriteContent(Path.Combine(dir, "clip_1.mp4"));
+            WriteContent(Path.Combine(dir, "clip_1.mp4.bak"));
+
+            Run(dir).Should().Be((1, 0, 1));
+            File.ReadAllBytes(Path.Combine(dir, "clip_2.mov")).Should().Equal(1);
+            File.Exists(Path.Combine(dir, "clip_1.mov")).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_RecordedOutputDeleteFails_LeavesItsOriginal()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
+        }
+        else
+        {
+            string dir = TempDir();
+            try
+            {
+                string movBak = Path.Combine(dir, "img.mov.bak");
+                WriteContent(movBak);
+                File.WriteAllText(movBak + ".out", Path.Combine(dir, "img.mp4"));
+                Touch(Path.Combine(dir, "img.mp4"));
+                string[] before = Names(dir);
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+
+                Run(dir).Should().Be((0, 0, 1));
+                Names(dir).Should().Equal(before);
+            }
+            finally
+            {
+                File.SetUnixFileMode(
+                    dir,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+                Directory.Delete(dir, recursive: true);
+            }
         }
     }
 }

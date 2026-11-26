@@ -440,6 +440,8 @@ flowchart TD
   dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
   sskip{"--skipbackup?"}
   sdel["File.Delete the clip"]
+  smark{"ProcessTask.FindConversionMarker(): a marker whose backup exists names the clip?"}
+  sout["File.Delete the clip and its marker, the original stays in its backup"]
   sbak["ProcessTask.BackupFile(): rename the clip to name.bak"]
   delEnd(["Deleted, counted Deleted"])
   hasdb{"--db given?"}
@@ -458,6 +460,8 @@ flowchart TD
   ddry{"--dryrun?"}
   dskip{"--skipbackup?"}
   ddel["File.Delete the video"]
+  dmark{"ProcessTask.FindConversionMarker(): a marker whose backup exists names the video?"}
+  dout["File.Delete the video and its marker, the original stays in its backup"]
   dbak["ProcessTask.BackupFile(): rename the video to name.bak"]
 
   l0 --> l1
@@ -467,7 +471,9 @@ flowchart TD
   sdry -->|"yes"| dryEnd
   sdry -->|"no"| sskip
   sskip -->|"yes"| sdel --> delEnd
-  sskip -->|"no"| sbak --> delEnd
+  sskip -->|"no"| smark
+  smark -->|"yes"| sout --> delEnd
+  smark -->|"no"| sbak --> delEnd
   l3 -->|"no"| hasdb
   hasdb -->|"yes"| k1
   k1 -->|"no"| pass
@@ -487,7 +493,9 @@ flowchart TD
   ddry -->|"yes"| dryEnd
   ddry -->|"no"| dskip
   dskip -->|"yes"| ddel --> delEnd
-  dskip -->|"no"| dbak --> delEnd
+  dskip -->|"no"| dmark
+  dmark -->|"yes"| dout --> delEnd
+  dmark -->|"no"| dbak --> delEnd
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
@@ -943,7 +951,9 @@ flowchart TD
   P2 --> P4{"--skipbackup?"}
   P3 --> P4
   P4 -->|"yes"| P5(["Deleted, nothing for undo"])
-  P4 -->|"no"| P6["ProcessTask.BackupFile(): rename to .bak, or .bakN when taken"]
+  P4 -->|"no"| P4a{"ProcessTask.FindConversionMarker(): process converted this file?"}
+  P4a -->|"yes"| P4b(["Output and its marker deleted, the original's backup stays for undo"])
+  P4a -->|"no"| P6["ProcessTask.BackupFile(): rename to .bak, or .bakN when taken"]
   P6 --> P7(["On disk: backup only, no .out marker"])
   P1 -->|"convert video"| P8["ProcessTask.ConvertVideoAsync(): ffmpeg writes name.temp"]
   P8 -->|"ffmpeg fails"| P9(["Original untouched, temp removed, file fails"])
@@ -963,7 +973,7 @@ flowchart TD
   P1 -->|"trashed in Immich"| P22(["Deleted with no backup, undo cannot reverse it"])
 ```
 
-A converted output is reprocessed in the same run. A short clip or live photo video output is then backed up again under the next free backup name. Deletion backups never get a marker.
+A converted output is reprocessed in the same run. A short clip or live photo video output is then deleted with its marker, since its original already sits in a backup. Deletion backups never get a marker. An older release backed up such an output instead.
 
 #### Undo Grouping
 
@@ -996,21 +1006,20 @@ A file or marker error fails only its own backup. Under --dryrun, UndoTask.TryDe
 
 #### Undo Converted Outputs
 
-Each output a marker names is reversed before any original is restored, so an original can take back a name its output held.
+Each output a marker names is reversed before any original is restored, so an original can take back a name its output held. Process deletes an output it culls, so a backup holding an output's name is an original.
 
 ```mermaid
 flowchart TD
-  C1{"how many markers name this output, how many other backups hold it, and does the output exist?"}
-  C1 -->|"more than one of either, or one backup while the output exists"| C2(["Counted Failed, warned, the output, its marker and every backup in the group are left"])
-  C1 -->|"one marker, one other backup, output gone"| C3["UndoTask.TryDelete(): delete that backup, the output saved again as a short clip"]
-  C3 -->|"fails"| C4(["Counted Failed, every backup in the group and the marker are left for a rerun"])
-  C3 -->|"ok"| C5(["Counted Deleted"])
-  C1 -->|"one marker, no other backup"| C6{"output exists?"}
-  C6 -->|"no"| C7(["Logged, nothing to delete"])
-  C6 -->|"yes"| C8["UndoTask.TryDelete(): delete the converted output"]
-  C8 -->|"fails"| C4
-  C8 -->|"ok"| C9(["Counted Deleted"])
+  C1{"output exists?"}
+  C1 -->|"no"| C2(["Logged, nothing to delete, every backup holding its name is restored as an original"])
+  C1 -->|"yes"| C3{"one marker names it, and no backup holds its name?"}
+  C3 -->|"no"| C4(["Counted Failed, warned, the output, its markers and every backup in the group are left"])
+  C3 -->|"yes"| C5["UndoTask.TryDelete(): delete the converted output"]
+  C5 -->|"fails"| C6(["Counted Failed, the marker and its backup are left for a rerun"])
+  C5 -->|"ok"| C7(["Counted Deleted"])
 ```
+
+A backup can hold the name of an output that still exists. It may be one an older release culled, or an original backed up before the conversion took its name. Undo cannot tell them apart, so it leaves that group.
 
 #### Undo Restore
 
@@ -1233,7 +1242,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **Still GIF**: A GIF with one frame, no duration at all, or one no longer than `--duration` skips the re-encode tier. Its first frame becomes a PNG. As an MP4 it would meet the short clip rule in the next round and be deleted, the original with it under `--skipbackup`.
 - **Even Dimensions**: The re-encode tier pads with `pad=ceil(iw/2)*2:ceil(ih/2)*2`, because libx264 at `yuv420p` rejects an odd width or height. Nothing is scaled. A GIF keeps every pixel and gains one edge row or column. An odd-sized subsampled source, such as a `yuv420p` AVI, loses its last odd row or column to the pad color instead.
 - **Rename Collisions**: The mixed-case and MIME extension renames go through `RenameToFreeName`. A file already holding the target name is never deleted or backed up. The renamed file takes the next free `_N` name from `MediaUtilities.GetUniqueFileName`, and a warning names both files. This holds with and without `--skipbackup`. A case-only rename on a case-insensitive filesystem is not a collision with itself. `ProcessCommand`'s extension-conflict deferral only keeps same-stem files out of one parallel pass, and it reserves no name on disk.
-- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path. It is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was taken. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.
+- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path, which may carry a `GetUniqueFileName` counter suffix (e.g. `img_1.mp4`). It is the only record undo has of a converted output. A culled output that a marker names is deleted with that marker, with no backup of its own. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.
 - **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source> <output> -all:all -overwrite_original` copies all source metadata to the output file. The source is the `.bak` file in both modes. A failed copy or date write removes the output, returns the `.bak` to the original name, and fails the file. When the output cannot be removed, both stay and an error names them. So `--skipbackup` never deletes an original after a failed exiftool write. Tags the MP4 cannot hold are skipped with exit 0, which counts as landed. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` does not reliably set the output's create date across every format pairing. So a separate `TrySetCreateDateAsync` call follows it, writing the date from the already-parsed `ExifToolJson` to the output.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
@@ -1253,7 +1262,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **`FileEnumerator.Enumerate()`** enumerates all files including `.bak*` files before calling `Execute()`
 - **Records only** in `UndoTask.Execute()`:
   - *Read*: every `.bak` or `.bakN` whose base is supported media, in base then number order, and the `.out` marker named after each one. A marker's output is its file name resolved beside the backup, so a moved or copied tree still matches. An empty, vanished, or unreadable backup or marker fails only itself.
-  - *Reverse outputs*: a marker's output is deleted when no other backup holds that name. Exactly one other backup can hold it while the name is free. That backup is then the output saved again as a short clip, and it is deleted instead. Two markers or two such backups for one output are ambiguous, and so is one such backup while the output still exists. Then the group is left as it is and counted Failed, so the record survives for a hand fix.
+  - *Reverse outputs*: a marker's output is deleted when it exists, one marker names it, and no backup holds its name. When the output is gone, every backup holding its name is an original. Two markers, or a backup holding the name of an output that still exists, are ambiguous. Then the group is left as it is and counted Failed, so the record survives for a hand fix.
   - *Restore originals*: every other backup moves back to its base name, or to the next free `name_N` when a file holds it, with a warning. A free name never takes another original's base name. Its marker is deleted after the move. Undo never deletes a backup it cannot tie to a marker, and never overwrites a current file.
 - **Internal static helpers** (testable via `InternalsVisibleTo`):
   - `IsBackupFile(path)`: matches `.bak\d*$`

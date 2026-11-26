@@ -423,14 +423,7 @@ internal sealed class ProcessTask(
 
             _modified = true;
             _deleted = true;
-            if (options.SkipBackup)
-            {
-                File.Delete(fileInfo.FullName);
-            }
-            else
-            {
-                _ = BackupFile(fileInfo.FullName, false);
-            }
+            CullFile();
             return false;
         }
 
@@ -569,15 +562,80 @@ internal sealed class ProcessTask(
 
         _modified = true;
         _deleted = true;
+        CullFile();
+        return false;
+    }
+
+    // A converted output's original already sits in a backup, so the output needs none of its own.
+    private void CullFile()
+    {
         if (options.SkipBackup)
         {
             File.Delete(fileInfo.FullName);
+            return;
         }
-        else
+
+        if (FindConversionMarker() is { } marker)
         {
-            _ = BackupFile(fileInfo.FullName, false);
+            Log.Information(
+                "Deleting converted output '{FilePath}', its original stays in '{BackupPath}'",
+                fileInfo.FullName,
+                marker[..^UndoTask.MarkerExtension.Length]
+            );
+            File.Delete(fileInfo.FullName);
+            if (MediaUtilities.TryDeleteFile(marker) is { } failure)
+            {
+                Log.Warning(failure, "Failed to remove '{FilePath}'", marker);
+            }
+            return;
         }
-        return false;
+
+        _ = BackupFile(fileInfo.FullName, false);
+    }
+
+    // The marker of a backup still on disk that names this file, or null for an original.
+    internal string? FindConversionMarker()
+    {
+        if (fileInfo.DirectoryName is not { } directory)
+        {
+            return null;
+        }
+
+        foreach (
+            string marker in Directory.EnumerateFiles(directory, "*" + UndoTask.MarkerExtension)
+        )
+        {
+            string backup = marker[..^UndoTask.MarkerExtension.Length];
+            if (!UndoTask.IsBackupFile(backup) || !File.Exists(backup))
+            {
+                continue;
+            }
+
+            string text;
+            try
+            {
+                text = File.ReadAllText(marker);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Warning(ex, "Failed to read '{FilePath}'", marker);
+                continue;
+            }
+
+            if (
+                !string.IsNullOrWhiteSpace(text)
+                && string.Equals(
+                    UndoTask.ResolveMarkerOutput(backup, text),
+                    fileInfo.FullName,
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                return marker;
+            }
+        }
+
+        return null;
     }
 
     private async Task<bool> ConvertVideoAsync()
@@ -739,7 +797,7 @@ internal sealed class ProcessTask(
                 if (!options.SkipBackup)
                 {
                     await File.WriteAllTextAsync(
-                            sourceForMetadata + ".out",
+                            sourceForMetadata + UndoTask.MarkerExtension,
                             target,
                             cancellationToken
                         )
@@ -879,9 +937,15 @@ internal sealed class ProcessTask(
             return;
         }
         RenameFile(backupFile, fileInfo.FullName);
-        if (MediaUtilities.TryDeleteFile(backupFile + ".out") is { } markerFailure)
+        if (
+            MediaUtilities.TryDeleteFile(backupFile + UndoTask.MarkerExtension) is { } markerFailure
+        )
         {
-            Log.Warning(markerFailure, "Failed to remove '{FilePath}'", backupFile + ".out");
+            Log.Warning(
+                markerFailure,
+                "Failed to remove '{FilePath}'",
+                backupFile + UndoTask.MarkerExtension
+            );
         }
     }
 

@@ -399,6 +399,65 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
+    public async Task ExecuteAsync_ShortVideoThatIsAConvertedOutput_DeletesItAndItsMarkerWithoutBackup()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.ShortVideoFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ShortVideoFile), filePath);
+            string originalBackup = Path.Combine(workDir, "original.3gp.bak");
+            await File.WriteAllBytesAsync(
+                originalBackup,
+                [1, 2, 3],
+                TestContext.Current.CancellationToken
+            );
+            await File.WriteAllTextAsync(
+                originalBackup + UndoTask.MarkerExtension,
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(filePath + ".bak").Should().BeFalse();
+            File.Exists(originalBackup + UndoTask.MarkerExtension).Should().BeFalse();
+            File.Exists(originalBackup).Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShortVideoNamedByAnOrphanMarker_IsBackedUp()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.ShortVideoFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ShortVideoFile), filePath);
+            await File.WriteAllTextAsync(
+                Path.Combine(workDir, "gone.3gp.bak.out"),
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+
+            ProcessTask.ProcessResult result = await CreateContext(filePath);
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_LivePhotoVideo_DeletesVideoWithMatchingContentIdentifier()
     {
         // Arrange

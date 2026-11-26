@@ -133,9 +133,8 @@ internal sealed partial class UndoTask(CommandLine.Options options)
             }
         }
 
-        // A backup of a recorded output is the output itself, backed up later as a short clip.
-        // It is told apart only when one marker names that output, one other backup holds it, and the name is free.
-        HashSet<Backup> derived = [];
+        // Process deletes an output it culls, so a backup holding an output's name is an original.
+        // Beside a live output it may also be one an older release culled, so that group is left.
         HashSet<Backup> blocked = [];
         Log.Information("Undoing {BackupCount} backups", backups.Count);
         foreach (
@@ -154,11 +153,16 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                 ),
             ];
 
-            if (
-                holders.Count > 1
-                || outputBackups.Count > 1
-                || (outputBackups.Count == 1 && Exists(output))
-            )
+            if (!Exists(output))
+            {
+                Log.Information(
+                    "Converted output '{FilePath}' not found, nothing to delete",
+                    output
+                );
+                continue;
+            }
+
+            if (holders.Count > 1 || outputBackups.Count > 0)
             {
                 Log.Warning(
                     "Cannot tell which file is the output '{FilePath}' recorded, leaving it, its marker, and its backups",
@@ -170,54 +174,21 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                 continue;
             }
 
-            if (outputBackups.Count == 1)
+            Log.Information("Deleting converted output: '{FilePath}'", output);
+            if (TryDelete(output))
             {
-                Log.Information(
-                    "Deleting backup of converted output: '{BackupPath}'",
-                    outputBackups[0].Path
-                );
-                if (TryDelete(outputBackups[0].Path))
-                {
-                    deleted++;
-                    _ = derived.Add(outputBackups[0]);
-                }
-                else
-                {
-                    failed++;
-                    blocked.UnionWith(holders);
-                    blocked.UnionWith(outputBackups);
-                }
-
-                continue;
-            }
-
-            if (!Exists(output))
-            {
-                Log.Information(
-                    "Converted output '{FilePath}' not found, nothing to delete",
-                    output
-                );
+                deleted++;
             }
             else
             {
-                Log.Information("Deleting converted output: '{FilePath}'", output);
-                if (TryDelete(output))
-                {
-                    deleted++;
-                }
-                else
-                {
-                    failed++;
-                    blocked.UnionWith(holders);
-                }
+                failed++;
+                blocked.UnionWith(holders);
             }
         }
 
         // Every other backup is an original, and an original whose name is taken gets a free one.
-        _pending.UnionWith(
-            backups.Where(b => !derived.Contains(b) && !blocked.Contains(b)).Select(b => b.Base)
-        );
-        foreach (Backup backup in backups.Where(b => !derived.Contains(b)))
+        _pending.UnionWith(backups.Select(b => b.Base));
+        foreach (Backup backup in backups)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (blocked.Contains(backup))
