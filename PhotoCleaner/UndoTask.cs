@@ -133,8 +133,8 @@ internal sealed partial class UndoTask(CommandLine.Options options)
             }
         }
 
-        // Process deletes an output it culls, so a backup holding an output's name is an original.
-        // Beside a live output it may also be one an older release culled, so that group is left.
+        // A backup holding a gone output's name may be that output, culled by a later run or an older release.
+        // Restoring it leaves an extra file, while deleting it could lose an original, so it is restored.
         HashSet<Backup> blocked = [];
         Log.Information("Undoing {BackupCount} backups", backups.Count);
         foreach (

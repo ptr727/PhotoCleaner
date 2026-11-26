@@ -976,7 +976,7 @@ flowchart TD
   P1 -->|"trashed in Immich"| P22(["Deleted with no backup, undo cannot reverse it"])
 ```
 
-A converted output is reprocessed in the same run, and the run records it. A short clip or live photo video output is then deleted with its marker, since its original already sits in a backup. A second conversion of it leaves one marker on the original. Only the run's own record decides this, never a marker found on disk, which can be stale. Deletion backups never get a marker. An older release backed up such an output instead.
+A converted output is reprocessed in the same run, and the run records it. A short clip or live photo video output is then deleted with its marker, since its original already sits in a backup. A second conversion of it leaves one marker on the original. Only the run's own record decides this, never a marker found on disk, which can be stale. Deletion backups never get a marker. A later run, or an older release, backs up such an output instead, since the record lasts one run.
 
 #### Undo Grouping
 
@@ -1009,7 +1009,7 @@ A file or marker error fails only its own backup. Under --dryrun, UndoTask.TryDe
 
 #### Undo Converted Outputs
 
-Each output a marker names is reversed before any original is restored, so an original can take back a name its output held. Process deletes an output it culls, so a backup holding an output's name is an original.
+Each output a marker names is reversed before any original is restored, so an original can take back a name its output held. A backup holding a gone output's name may be that output, culled by a later run or an older release. Undo restores it as an original, which leaves an extra file but never loses one.
 
 ```mermaid
 flowchart TD
@@ -1022,7 +1022,7 @@ flowchart TD
   C5 -->|"ok"| C7(["Counted Deleted"])
 ```
 
-A backup can hold the name of an output that still exists. It may be one an older release culled, or an original backed up before the conversion took its name. Undo cannot tell them apart, so it leaves that group.
+A backup can hold the name of an output that still exists. It may be the output culled by a later run or an older release, or an original backed up before the conversion took its name. Undo cannot tell them apart, so it leaves that group.
 
 #### Undo Restore
 

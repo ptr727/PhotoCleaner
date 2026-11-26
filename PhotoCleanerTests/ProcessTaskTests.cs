@@ -460,7 +460,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 TestContext.Current.CancellationToken
             );
 
-            ProcessTask.ProcessResult result = await CreateContext(filePath);
+            ProcessTask.ProcessResult result = await RunWithRecord(filePath, new());
 
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
             File.Exists(filePath + ".bak").Should().BeTrue();
