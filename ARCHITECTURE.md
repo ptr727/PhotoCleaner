@@ -440,7 +440,7 @@ flowchart TD
   dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
   sskip{"--skipbackup?"}
   sdel["File.Delete the clip"]
-  smark{"ProcessTask.FindConversionMarker(): a marker whose backup exists names the clip?"}
+  smark{"ProcessTask.CullFile(): this run converted the clip?"}
   sout["File.Delete the clip and its marker, the original stays in its backup"]
   sbak["ProcessTask.BackupFile(): rename the clip to name.bak"]
   delEnd(["Deleted, counted Deleted"])
@@ -460,7 +460,7 @@ flowchart TD
   ddry{"--dryrun?"}
   dskip{"--skipbackup?"}
   ddel["File.Delete the video"]
-  dmark{"ProcessTask.FindConversionMarker(): a marker whose backup exists names the video?"}
+  dmark{"ProcessTask.CullFile(): this run converted the video?"}
   dout["File.Delete the video and its marker, the original stays in its backup"]
   dbak["ProcessTask.BackupFile(): rename the video to name.bak"]
 
@@ -951,7 +951,7 @@ flowchart TD
   P2 --> P4{"--skipbackup?"}
   P3 --> P4
   P4 -->|"yes"| P5(["Deleted, nothing for undo"])
-  P4 -->|"no"| P4a{"ProcessTask.FindConversionMarker(): process converted this file?"}
+  P4 -->|"no"| P4a{"ProcessTask.CullFile(): this run converted this file?"}
   P4a -->|"yes"| P4b(["Output and its marker deleted, the original's backup stays for undo"])
   P4a -->|"no"| P6["ProcessTask.BackupFile(): rename to .bak, or .bakN when taken"]
   P6 --> P7(["On disk: backup only, no .out marker"])
@@ -968,12 +968,15 @@ flowchart TD
   P15 --> P17(["Original back under its name, file fails"])
   P14 -->|"ok"| P18{"--skipbackup?"}
   P18 -->|"yes"| P19(["Original deleted, output only, nothing for undo"])
-  P18 -->|"no"| P20(["On disk: backup, backup.out, output queued for reprocess"])
+  P18 -->|"no"| P18a{"this run converted the source too?"}
+  P18a -->|"yes"| P18b["ProcessTask.RecordConvertedOutputAsync(): point the original's marker at the new output, delete the intermediate and its marker"]
+  P18b --> P20
+  P18a -->|"no"| P20(["On disk: backup, backup.out, output queued for reprocess"])
   P1 -->|"rename extension or case"| P21(["Renamed with no backup, undo cannot reverse it"])
   P1 -->|"trashed in Immich"| P22(["Deleted with no backup, undo cannot reverse it"])
 ```
 
-A converted output is reprocessed in the same run. A short clip or live photo video output is then deleted with its marker, since its original already sits in a backup. Deletion backups never get a marker. An older release backed up such an output instead.
+A converted output is reprocessed in the same run, and the run records it. A short clip or live photo video output is then deleted with its marker, since its original already sits in a backup. A second conversion of it leaves one marker on the original. Only the run's own record decides this, never a marker found on disk, which can be stale. Deletion backups never get a marker. An older release backed up such an output instead.
 
 #### Undo Grouping
 
@@ -1002,7 +1005,7 @@ flowchart TD
   UE["CommandRunner.RunAsync(): log the exception, counters never logged"] --> U18(["Exit 1, Error"])
 ```
 
-A file or marker error fails only its own backup. Under --dryrun, UndoTask.TryDelete() and UndoTask.TryRestore() change nothing on disk but record the result. A dry run so picks the same free names as a live run.
+A file or marker error fails only its own backup. Under --dryrun, UndoTask.TryDelete() and UndoTask.TryRestore() change nothing on disk but record the result. A dry run so picks the same free names as a live run, where the volume's case rules match the OS default.
 
 #### Undo Converted Outputs
 
@@ -1242,7 +1245,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **Still GIF**: A GIF with one frame, no duration at all, or one no longer than `--duration` skips the re-encode tier. Its first frame becomes a PNG. As an MP4 it would meet the short clip rule in the next round and be deleted, the original with it under `--skipbackup`.
 - **Even Dimensions**: The re-encode tier pads with `pad=ceil(iw/2)*2:ceil(ih/2)*2`, because libx264 at `yuv420p` rejects an odd width or height. Nothing is scaled. A GIF keeps every pixel and gains one edge row or column. An odd-sized subsampled source, such as a `yuv420p` AVI, loses its last odd row or column to the pad color instead.
 - **Rename Collisions**: The mixed-case and MIME extension renames go through `RenameToFreeName`. A file already holding the target name is never deleted or backed up. The renamed file takes the next free `_N` name from `MediaUtilities.GetUniqueFileName`, and a warning names both files. This holds with and without `--skipbackup`. A case-only rename on a case-insensitive filesystem is not a collision with itself. `ProcessCommand`'s extension-conflict deferral only keeps same-stem files out of one parallel pass, and it reserves no name on disk.
-- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path, which may carry a `GetUniqueFileName` counter suffix (e.g. `img_1.mp4`). It is the only record undo has of a converted output. A culled output that a marker names is deleted with that marker, with no backup of its own. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.
+- **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path, which may carry a `GetUniqueFileName` counter suffix (e.g. `img_1.mp4`). It is the only record undo has of a converted output. An output that this run converted and then culls is deleted with its marker, with no backup of its own. A second conversion of it deletes the intermediate and points the original's marker at the new output. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.
 - **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source> <output> -all:all -overwrite_original` copies all source metadata to the output file. The source is the `.bak` file in both modes. A failed copy or date write removes the output, returns the `.bak` to the original name, and fails the file. When the output cannot be removed, both stay and an error names them. So `--skipbackup` never deletes an original after a failed exiftool write. Tags the MP4 cannot hold are skipped with exit 0, which counts as landed. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` does not reliably set the output's create date across every format pairing. So a separate `TrySetCreateDateAsync` call follows it, writing the date from the already-parsed `ExifToolJson` to the output.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
@@ -1270,7 +1273,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
   - `GetBackupBase(path)`: strips the `.bak\d*` suffix
   - `IsUndoableBackup(path)`: a backup whose base extension is supported media
   - `ResolveMarkerOutput(backup, text)`: the marker's output file name, beside the backup
-- **Dry run**: logs all intended operations and changes no file. It tracks the names it would free and take, so its free names match a live run.
+- **Dry run**: logs all intended operations and changes no file. It tracks the names it would free and take. Its free names match a live run where the volume's case rules match the OS default.
 - **Known limitation**: an extension rename creates no backup and cannot be undone. A rename whose target name was taken leaves the other file untouched, so undo has nothing of it to restore
 
 ### Error Handling Strategy

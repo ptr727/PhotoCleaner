@@ -11,6 +11,7 @@ internal sealed class ProcessTask(
     TrashDatabase? trashDatabase,
     ConcurrentBag<string> reProcessNames,
     SkippedExtensionTracker skippedExtensions,
+    ConcurrentDictionary<string, string>? convertedOutputs,
     CancellationToken cancellationToken
 )
 {
@@ -73,6 +74,28 @@ internal sealed class ProcessTask(
         ConcurrentBag<string> reProcessNames,
         SkippedExtensionTracker skippedExtensions,
         CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            options,
+            fileInfo,
+            database,
+            trashDatabase,
+            reProcessNames,
+            skippedExtensions,
+            null,
+            cancellationToken
+        );
+
+    // The converted outputs are this run's record, which lets a cull delete its own output without a backup.
+    public static Task<ProcessResult> ExecuteAsync(
+        CommandLine.Options options,
+        FileInfo fileInfo,
+        Database? database,
+        TrashDatabase? trashDatabase,
+        ConcurrentBag<string> reProcessNames,
+        SkippedExtensionTracker skippedExtensions,
+        ConcurrentDictionary<string, string>? convertedOutputs,
+        CancellationToken cancellationToken
     )
     {
         ProcessTask processTask = new(
@@ -82,6 +105,7 @@ internal sealed class ProcessTask(
             trashDatabase,
             reProcessNames,
             skippedExtensions,
+            convertedOutputs,
             cancellationToken
         );
         return processTask.ExecuteAsync();
@@ -566,7 +590,7 @@ internal sealed class ProcessTask(
         return false;
     }
 
-    // A converted output's original already sits in a backup, so the output needs none of its own.
+    // An output converted earlier in this run keeps its original in a backup, so it needs no backup of its own.
     private void CullFile()
     {
         if (options.SkipBackup)
@@ -575,7 +599,10 @@ internal sealed class ProcessTask(
             return;
         }
 
-        if (FindConversionMarker() is { } marker)
+        if (
+            convertedOutputs is not null
+            && convertedOutputs.TryRemove(fileInfo.FullName, out string? marker)
+        )
         {
             Log.Information(
                 "Deleting converted output '{FilePath}', its original stays in '{BackupPath}'",
@@ -591,51 +618,6 @@ internal sealed class ProcessTask(
         }
 
         _ = BackupFile(fileInfo.FullName, false);
-    }
-
-    // The marker of a backup still on disk that names this file, or null for an original.
-    internal string? FindConversionMarker()
-    {
-        if (fileInfo.DirectoryName is not { } directory)
-        {
-            return null;
-        }
-
-        foreach (
-            string marker in Directory.EnumerateFiles(directory, "*" + UndoTask.MarkerExtension)
-        )
-        {
-            string backup = marker[..^UndoTask.MarkerExtension.Length];
-            if (!UndoTask.IsBackupFile(backup) || !File.Exists(backup))
-            {
-                continue;
-            }
-
-            string text;
-            try
-            {
-                text = File.ReadAllText(marker);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                Log.Warning(ex, "Failed to read '{FilePath}'", marker);
-                continue;
-            }
-
-            if (
-                !string.IsNullOrWhiteSpace(text)
-                && string.Equals(
-                    UndoTask.ResolveMarkerOutput(backup, text),
-                    fileInfo.FullName,
-                    StringComparison.Ordinal
-                )
-            )
-            {
-                return marker;
-            }
-        }
-
-        return null;
     }
 
     private async Task<bool> ConvertVideoAsync()
@@ -835,6 +817,11 @@ internal sealed class ProcessTask(
                 );
                 File.Delete(sourceForMetadata);
             }
+            else if (convertedOutputs is not null)
+            {
+                await RecordConvertedOutputAsync(sourceForMetadata, outputFile)
+                    .ConfigureAwait(false);
+            }
 
             // Restore original file's modified timestamp on the converted output
             File.SetLastWriteTimeUtc(outputFile, sourceLastWriteTimeUtc);
@@ -921,6 +908,23 @@ internal sealed class ProcessTask(
                 .ConfigureAwait(false);
         }
         return failure;
+    }
+
+    // A file converted again was this run's own output, so its original's marker takes the new output.
+    private async Task RecordConvertedOutputAsync(string backupFile, string outputFile)
+    {
+        string marker = backupFile + UndoTask.MarkerExtension;
+        if (convertedOutputs!.TryRemove(fileInfo.FullName, out string? originalMarker))
+        {
+            await File.WriteAllTextAsync(originalMarker, outputFile, cancellationToken)
+                .ConfigureAwait(false);
+            Log.Information("Deleting intermediate conversion: '{FilePath}'", backupFile);
+            File.Delete(backupFile);
+            File.Delete(marker);
+            marker = originalMarker;
+        }
+
+        convertedOutputs[outputFile] = marker;
     }
 
     // Puts the original back under its own name, so the next run converts it from the start.

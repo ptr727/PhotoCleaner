@@ -9,6 +9,11 @@ internal sealed class ProcessCommand(
 {
     private ConcurrentBag<string> _fileNames = [];
     private readonly SkippedExtensionTracker _skippedExtensions = new();
+
+    // Outputs this run converted, each with the marker its original's backup carries.
+    private readonly ConcurrentDictionary<string, string> _convertedOutputs = new(
+        StringComparer.Ordinal
+    );
     private int _failedCount;
     private int _invalidCount;
     private int _deletedCount;
@@ -128,6 +133,7 @@ internal sealed class ProcessCommand(
                                     trashDatabase,
                                     reProcessNames,
                                     _skippedExtensions,
+                                    _convertedOutputs,
                                     ct
                                 )
                                 .ConfigureAwait(false)
