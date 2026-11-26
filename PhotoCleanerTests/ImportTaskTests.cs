@@ -1307,24 +1307,11 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    private static string ExifToolStub(string dir, string output, int exitCode)
-    {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "The exiftool stub is a shell script");
-        string stub = Path.Combine(dir, "exiftool-stub.sh");
-        File.WriteAllText(
-            stub,
-            $"#!/bin/sh\nfor last in \"$@\"; do :; done\ntouch \"$last\"\necho '{output}' >&2\nexit {exitCode}\n"
+    private static string ExifToolStub(string dir, string output, int exitCode) =>
+        TempDirectoryFixture.WriteExifToolStub(
+            dir,
+            $"for last in \"$@\"; do :; done\ntouch \"$last\"\necho '{output}' >&2\nexit {exitCode}\n"
         );
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                stub,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            );
-        }
-
-        return stub;
-    }
 
     private async Task<(string jpg, string dest)> CreateTaggedSourceAsync(string srcDir)
     {

@@ -491,9 +491,10 @@ rather than pulling it into the collection.
 ## Undo Flow
 
 Every file modification or deletion made by `process` creates a `.bak` backup alongside the
-original: the first backup is `X.bak`, and if that already exists (from a prior run) the next is
-`X.bak1`, then `X.bak2`, etc. The `undo` command reverses all processing by scanning the given
-directories for backup files and applying a two-pass algorithm:
+original. The one exception is a file deleted because it matches the Immich trash database.
+The first backup is `X.bak`. When that already exists from a prior run, the next is
+`X.bak1`, then `X.bak2`, and so on. The `undo` command reverses all processing.
+It scans the given directories for backup files and applies a two-pass algorithm:
 
 1. **Identify derived files** - an output file is "derived" (not original) when either:
    - a numbered backup (`.bak1`, `.bak2`, ...) exists for it (processed more than once), or

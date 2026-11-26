@@ -890,25 +890,11 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    private static string ExifToolWriteStub(string dir, string failOn)
-    {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "The exiftool stub is a shell script");
-        _ = Directory.CreateDirectory(dir);
-        string stub = Path.Combine(dir, "exiftool-stub.sh");
-        File.WriteAllText(
-            stub,
-            $"#!/bin/sh\ncase \"$*\" in *{failOn}*) echo 'Error: stub write failure' >&2; exit 1;; esac\nexit 0\n"
+    private static string ExifToolWriteStub(string dir, string failOn) =>
+        TempDirectoryFixture.WriteExifToolStub(
+            dir,
+            $"case \"$*\" in *{failOn}*) echo 'Error: stub write failure' >&2; exit 1;; esac\nexit 0\n"
         );
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                stub,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            );
-        }
-
-        return stub;
-    }
 
     // -- Video conversion - odd dimensions ------------------------------------
 

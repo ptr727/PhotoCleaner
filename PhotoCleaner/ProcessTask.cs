@@ -663,7 +663,7 @@ internal sealed class ProcessTask(
             _modified = true;
             string sourceForMetadata = BackupFile(fileInfo.FullName, false);
 
-            // Every step from here on returns the original to its own name if it fails.
+            // A failure before the metadata writes land returns the original to its own name.
             // The original is deleted only after every metadata write to the output has landed.
             string? placedOutput = null;
             string? failure;

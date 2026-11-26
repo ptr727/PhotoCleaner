@@ -44,9 +44,7 @@ internal static class MediaUtilities
     // A QuickTime container takes no EXIF, and exiftool reports such a file unchanged with exit 0.
     private static readonly FrozenSet<string> s_quicktimeExtensions = new[]
     {
-        ".3g2",
         ".3gp",
-        ".m4v",
         ".mov",
         ".mp4",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
