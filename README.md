@@ -70,7 +70,7 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   whatever its name or folder. Without `--db` it is the same-folder file with the same basename,
   or the basename with the `_hevc` suffix stripped.
   Longer videos with a matching image trigger a warning but are kept.
-- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, and re-encodes WMV, AVI, 3GP,
+- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, and re-encodes WMV, ASF, AVI, 3GP,
   and GIF to MP4 (H.264/AAC). It re-encodes PCM audio to AAC in MOV and MP4 files while
   preserving the video stream. A GIF with one frame, no duration, or one no longer than
   `--duration` becomes a PNG instead. All source metadata (including `ContentIdentifier` and other
