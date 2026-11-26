@@ -702,7 +702,6 @@ internal sealed class ProcessTask(
                     fileInfo.FullName,
                     failure
                 );
-                _modified = false;
                 RollBackConversion(sourceForMetadata, outputFile);
                 return false;
             }

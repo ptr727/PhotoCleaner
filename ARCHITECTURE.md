@@ -427,7 +427,7 @@ The old path keeps its database row and the new name gets a fresh row in the nex
 
 #### Process Live Photos
 
-Only .mov and .mp4 files reach this step. A GetDurationAsync output that is not a number throws to the per-file catch.
+Every file reaches this step, and a file that is not .mov or .mp4 passes it unchanged. A GetDurationAsync output that is not a number throws to the per-file catch.
 
 ```mermaid
 flowchart TD
@@ -560,7 +560,7 @@ flowchart TD
   w5{"Date write failed?"}
   wx["ProcessTask.RollBackConversion(): undo the swap, then rethrow"]
   wxEnd(["Exception to the per-file catch, counted Failed"])
-  f0["Log an error and clear the modified flag"]
+  f0["Log an error naming the output and the original"]
   rb["ProcessTask.RollBackConversion(): undo the swap"]
   rb1{"MediaUtilities.TryDeleteFile(): output removed?"}
   rbKeep["Log an error, the output and name.bak both stay"]
