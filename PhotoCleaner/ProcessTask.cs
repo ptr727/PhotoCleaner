@@ -698,9 +698,9 @@ internal sealed class ProcessTask(
             if (failure is not null)
             {
                 Log.Error(
-                    "exiftool: Failed to write metadata to '{DestinationPath}', keeping the original '{SourcePath}' ({Failure})",
+                    "exiftool: Failed to write metadata to '{DestinationPath}' converted from '{SourcePath}' ({Failure})",
                     outputFile,
-                    fileInfo.FullName,
+                    sourceForMetadata,
                     failure
                 );
                 RollBackConversion(sourceForMetadata, outputFile);
