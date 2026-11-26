@@ -12,7 +12,7 @@ internal static class ImmichVerifyScript
     internal const string Preflight = """
         const ROOT = "/usr/src/app/server/dist";
         const { MediaRepository } = require(ROOT + "/repositories/media.repository.js");
-        const { defaults } = require(ROOT + "/config.js");
+        const { defaults } = require(ROOT + "/dtos/config.dto.js");
         const { ThumbnailConfig } = require(ROOT + "/utils/media.js");
         if (!MediaRepository || !defaults || !defaults.image || !ThumbnailConfig) {
             throw new Error("Immich modules loaded but expected exports are missing");
@@ -28,7 +28,7 @@ internal static class ImmichVerifyScript
         const readline = require("node:readline");
         const ROOT = "/usr/src/app/server/dist";
         const { MediaRepository } = require(ROOT + "/repositories/media.repository.js");
-        const { defaults } = require(ROOT + "/config.js");
+        const { defaults } = require(ROOT + "/dtos/config.dto.js");
         const { ThumbnailConfig } = require(ROOT + "/utils/media.js");
 
         // MediaRepository calls whatever the logger interface exposes, and that set has grown before.
@@ -71,11 +71,12 @@ internal static class ImmichVerifyScript
                     // Immich treats extraction as best effort too; only the decode must succeed
                 }
             }
-            await repo.generateThumbnail(
-                file,
-                { ...defaults.image.preview, colorspace: "srgb", processInvalidImages: false },
-                OUT,
-            );
+            const options = { colorspace: "srgb", processInvalidImages: false };
+            const decoded = await repo.decodeImage(file, {
+                ...options,
+                size: defaults.image.preview.size,
+            });
+            await repo.generateThumbnail(decoded, { ...defaults.image.preview, ...options }, OUT);
             return via;
         }
 
