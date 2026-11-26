@@ -340,7 +340,7 @@ internal sealed class ProcessTask(
             .StartsWith("pcm", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<float> GetDurationAsync()
+    private async Task<double> GetDurationAsync()
     {
         Log.Debug("ffprobe: Getting play duration for '{FilePath}'", fileInfo.FullName);
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
@@ -356,7 +356,47 @@ internal sealed class ProcessTask(
                 fileInfo.FullName,
             ])
             .ExecuteBufferedAsync(cancellationToken);
-        return float.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
+        return double.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
+    }
+
+    private async Task<bool> IsStillOrShortGifAsync()
+    {
+        if (!fileInfo.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        Log.Debug("ffprobe: Counting frames and duration for '{FilePath}'", fileInfo.FullName);
+        BufferedCommandResult result = await Cli.Wrap("ffprobe")
+            .WithArguments([
+                "-loglevel",
+                "error",
+                "-count_packets",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=nb_read_packets:format=duration",
+                "-of",
+                "default=nw=1",
+                fileInfo.FullName,
+            ])
+            .ExecuteBufferedAsync(cancellationToken);
+        Dictionary<string, string> values = result
+            .StandardOutput.Split(
+                '\n',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            )
+            .Select(line => line.Split('=', 2))
+            .Where(pair => pair.Length == 2)
+            .ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
+        return values.GetValueOrDefault("nb_read_packets") == "1"
+            || !double.TryParse(
+                values.GetValueOrDefault("duration"),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double duration
+            )
+            || duration <= options.ShortVideoDuration;
     }
 
     private async Task<bool> DeleteLivePhotosAsync()
@@ -368,7 +408,7 @@ internal sealed class ProcessTask(
         }
 
         // Short videos, always delete
-        float duration = await GetDurationAsync().ConfigureAwait(false);
+        double duration = await GetDurationAsync().ConfigureAwait(false);
         if (duration <= options.ShortVideoDuration)
         {
             Log.Warning(
@@ -464,7 +504,7 @@ internal sealed class ProcessTask(
         return DeleteLiveVideo();
     }
 
-    private async Task<bool> DeleteLiveVideoByCatalogAsync(float duration)
+    private async Task<bool> DeleteLiveVideoByCatalogAsync(double duration)
     {
         // The row of a still whose file is gone still pairs, since the catalog outlives the file
         string? videoContentId = _exifToolJson?.ContentIdentifier;
@@ -545,6 +585,7 @@ internal sealed class ProcessTask(
         // Output to temp file
         string tempFile = Path.ChangeExtension(fileInfo.FullName, ".temp");
         string[] ffmpegArguments;
+        string outputExtension = MediaUtilities.VideoOutputExtension;
         if (s_remuxExtensions.Contains(fileInfo.Extension))
         {
             // Remux audio and video
@@ -564,6 +605,28 @@ internal sealed class ProcessTask(
                 "+faststart",
                 "-f",
                 "mp4",
+                tempFile,
+            ];
+        }
+        else if (await IsStillOrShortGifAsync().ConfigureAwait(false))
+        {
+            Log.Information(
+                "ffmpeg: Converting single-frame or short GIF to a still image: '{FilePath}'",
+                fileInfo.FullName
+            );
+            outputExtension = MediaUtilities.StillOutputExtension;
+            ffmpegArguments =
+            [
+                "-nostdin",
+                "-y",
+                "-i",
+                fileInfo.FullName,
+                "-frames:v",
+                "1",
+                "-c:v",
+                "png",
+                "-f",
+                "image2",
                 tempFile,
             ];
         }
@@ -670,9 +733,8 @@ internal sealed class ProcessTask(
             string? failure;
             try
             {
-                // Rename temp output to MP4; use a unique name if target already exists
                 string target = MediaUtilities.GetUniqueFileName(
-                    Path.ChangeExtension(fileInfo.FullName, MediaUtilities.VideoOutputExtension)
+                    Path.ChangeExtension(fileInfo.FullName, outputExtension)
                 );
                 if (!options.SkipBackup)
                 {

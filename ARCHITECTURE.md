@@ -439,7 +439,7 @@ flowchart TD
   sdry{"--dryrun?"}
   dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
   sskip{"--skipbackup?"}
-  sdel["File.Delete the clip, also an MP4 made from a GIF the round before, S1"]:::suspect
+  sdel["File.Delete the clip"]
   sbak["ProcessTask.BackupFile(): rename the clip to name.bak"]
   delEnd(["Deleted, counted Deleted"])
   hasdb{"--db given?"}
@@ -495,18 +495,22 @@ The short clip rule needs no still and runs before any pairing. A deleted video 
 
 #### Process Video Conversion
 
-The temporary output is the source path with its extension changed to .temp. A finally block deletes that file whenever it still exists at the end.
+The temporary output is the source path with its extension changed to .temp. A finally block deletes that file whenever it still exists at the end. A single-frame or short GIF becomes a PNG rather than an MP4. As an MP4 it would meet the short clip rule in Process Live Photos in the next round. A GIF that ffprobe gives no duration, such as a GIF87a still, counts as a still too.
 
 ```mermaid
 flowchart TD
   v0["ProcessTask.ConvertVideoAsync(): pick the ffmpeg job by extension"]
   v1{"Extension .m2t or .mkv?"}
-  v2{"Extension .asf, .wmv, .avi, .3gp or .gif?"}
+  vg{"Extension .gif?"}
+  gd["ProcessTask.IsStillOrShortGifAsync(): ffprobe frame count and format duration"]
+  gq{"One frame, duration not a number, or at or below --duration, default 1s?"}
+  still["Convert the first frame to a PNG still"]
+  v2{"Extension .asf, .wmv, .avi or .3gp?"}
   v3{"Extension .mov or .mp4?"}
   v4{"ProcessTask.IsPcmAudioAsync(): first audio stream is PCM?"}
   pass(["Step passes, next step runs"])
   remux["Remux the video and audio into MP4"]
-  reenc["Re-encode to H.264 and AAC in MP4, a still GIF included"]
+  reenc["Re-encode to H.264 and AAC in MP4"]
   aac["Re-encode the PCM audio to AAC and copy the video"]
   dry{"--dryrun?"}
   dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
@@ -514,7 +518,7 @@ flowchart TD
   ff["ffmpeg writes stem.temp"]
   ffEnd(["Exception to the per-file catch, stem.temp removed, counted Failed"])
   bak["ProcessTask.BackupFile(): rename the original to name.bak"]
-  outName["MediaUtilities.GetUniqueFileName(): stem.mp4 or stem_N.mp4"]
+  outName["MediaUtilities.GetUniqueFileName(): stem.mp4 or stem.png, or stem_N with it"]
   sb{"--skipbackup?"}
   marker["Write name.bak.out holding the output name"]
   mv["ProcessTask.RenameFile(): move stem.temp to the output name"]
@@ -524,7 +528,11 @@ flowchart TD
 
   v0 --> v1
   v1 -->|"yes"| remux --> dry
-  v1 -->|"no"| v2
+  v1 -->|"no"| vg
+  vg -->|"yes"| gd --> gq
+  gq -->|"yes"| still --> dry
+  gq -->|"no"| reenc
+  vg -->|"no"| v2
   v2 -->|"yes"| reenc --> dry
   v2 -->|"no"| v3
   v3 -->|"no"| pass
@@ -568,7 +576,7 @@ flowchart TD
   rb3["MediaUtilities.TryDeleteFile(): remove name.bak.out, warn on failure"]
   failEnd(["Failure, counted Failed"])
   sb{"--skipbackup?"}
-  delOrig["File.Delete name.bak, the original, also a still GIF, S1"]:::suspect
+  delOrig["File.Delete name.bak, the original"]
   stamp["File.SetLastWriteTimeUtc on the output from the original time"]
   rq["ProcessTask.ReProcess(): queue the output for the next round"]
   rqEnd(["Reprocess, counted Modified"])
@@ -943,7 +951,7 @@ flowchart TD
   P10 --> P11{"--skipbackup?"}
   P11 -->|"no"| P12["ProcessTask.ConvertVideoAsync(): write backup.out holding the absolute output path"]
   P11 -->|"yes"| P13
-  P12 --> P13["ProcessTask.ConvertVideoAsync(): rename temp to name.mp4 or name_N.mp4"]
+  P12 --> P13["ProcessTask.ConvertVideoAsync(): rename temp to name.mp4, name.png for a GIF still, or name_N"]
   P13 --> P14["ProcessTask.WriteConvertedMetadataAsync(): copy tags, set created date"]
   P14 -->|"fails or throws"| P15["ProcessTask.RollBackConversion(): delete output, rename backup back, drop marker"]
   P15 -->|"output delete fails"| P16(["On disk: backup and output, plus the marker without --skipbackup, file fails"])
@@ -1136,7 +1144,6 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
-- **S1.** `process` deletes a still or short GIF and the MP4 made from it under `--skipbackup`, #309.
 - **S2.** `undo` deletes a same-stem video that `process` never touched, and restores any `.bak` it finds over the current file, #310.
 - **S3.** `undo` deletes a second original kept as `.bakN`, and groups names that differ only in case, #311.
 - **S4.** `undo` leaves converted outputs behind, and one bad group stops the run, #312.
@@ -1222,7 +1229,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Optional `--processdb` Flag** (trash only): A Process.db opened read-only through `DatabaseScope`. After the sync, `TrashCommand` reads every `trash_hashes` row with no `image_hash`, including assets the server has purged. It looks each up with `Database.GetImageHashBySha1Async` and stores what it finds. The insert is an upsert that fills a missing `image_hash` and keeps everything else. Without the flag `trash` stores SHA-1 hashes only.
 - **Optional `--skipdb` Flag** (import only): SQLite database of files to skip (read-only SHA-256 check). Files whose SHA-256 matches a record in this DB are skipped without being recorded. Use this to skip files already present in another collection.
 - **Optional `--rehash` Flag** (process, import, index): Forces SHA-256 recomputation for every file, ignoring the size/mtime cache. SHA-1 is also recomputed when `--trashdb` is in use. Useful after filesystem operations that preserve mtime but change content.
-- **Optional `--duration` Flag** (process only): Overrides `ShortVideoDuration` (default `1.0`s). Videos in a live-photo-compatible format whose duration is <= this value are always deleted. Must be `> 0`. Stored in `CommandLine.Options.ShortVideoDuration` and read by `DeleteLivePhotosAsync`.
+- **Optional `--duration` Flag** (process only): Overrides `ShortVideoDuration` (default `1.0`s). Videos in a live-photo-compatible format whose duration is <= this value are always deleted, and a GIF at or under it becomes a PNG. Must be `> 0`. Stored in `CommandLine.Options.ShortVideoDuration` and read by `DeleteLivePhotosAsync` and `IsStillOrShortGifAsync`.
 - **Optional `--reprocess` Flag** (process only): When set, ignores `is_processed` in the DB and forces every file to be processed again. Stored in `CommandLine.Options.Reprocess`, it disables the `IndexStatus.Unchanged && wasProcessed` early-return in `ExecuteAsync`.
 - **Command Construction**: `CommandLine.SetAction` handlers create the appropriate command class (e.g., `ProcessCommand`, `ImportCommand`) with `CommandLine.Options` and `CancellationToken`
 - **Built-in Help System**: Automatic help generation and validation
@@ -1252,6 +1259,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 ### Video Conversion Logic
 
 - **Three-tier approach**: Remux (.m2t, .mkv) -> Re-encode (.asf, .wmv, .avi, .3gp, .gif) -> Audio-only re-encode (.mov/.mp4 with PCM audio)
+- **Still GIF**: A GIF with one frame, no duration at all, or one no longer than `--duration` skips the re-encode tier. Its first frame becomes a PNG. As an MP4 it would meet the short clip rule in the next round and be deleted, the original with it under `--skipbackup`.
 - **Even Dimensions**: The re-encode tier pads with `pad=ceil(iw/2)*2:ceil(ih/2)*2`, because libx264 at `yuv420p` rejects an odd width or height. Nothing is scaled. A GIF keeps every pixel and gains one edge row or column. An odd-sized subsampled source, such as a `yuv420p` AVI, loses its last odd row or column to the pad color instead.
 - **Rename Collisions**: The mixed-case and MIME extension renames go through `RenameToFreeName`. A file already holding the target name is never deleted or backed up. The renamed file takes the next free `_N` name from `MediaUtilities.GetUniqueFileName`, and a warning names both files. This holds with and without `--skipbackup`. A case-only rename on a case-insensitive filesystem is not a collision with itself. `ProcessCommand`'s extension-conflict deferral only keeps same-stem files out of one parallel pass, and it reserves no name on disk.
 - **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path. It is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was taken. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.

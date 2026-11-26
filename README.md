@@ -70,10 +70,11 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   whatever its name or folder. Without `--db` it is the same-folder file with the same basename,
   or the basename with the `_hevc` suffix stripped.
   Longer videos with a matching image trigger a warning but are kept.
-- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, re-encodes WMV, AVI, 3GP, and
-  GIF to MP4 (H.264/AAC), and re-encodes PCM audio to AAC in MOV and MP4 files while preserving
-  the video stream. All source metadata (including `ContentIdentifier` and other QuickTime tags)
-  is copied to the converted file using `exiftool -TagsFromFile`.
+- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, and re-encodes WMV, AVI, 3GP,
+  and GIF to MP4 (H.264/AAC). It re-encodes PCM audio to AAC in MOV and MP4 files while
+  preserving the video stream. A GIF with one frame, no duration, or one no longer than
+  `--duration` becomes a PNG instead. All source metadata (including `ContentIdentifier` and other
+  QuickTime tags) is copied to the converted file using `exiftool -TagsFromFile`.
 - **Imports into date folders** (via `import` command): Copies (default) or moves supported
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
   Falls back to a deterministic `0001/01` bucket when no date is found. Supports a custom
@@ -151,7 +152,7 @@ Options:
   --deleteempty                 Delete empty subdirectories under the target directory after the command completes
   --db <db>                     SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
-  --duration <duration>         Maximum duration in seconds below which a video is considered a short clip and deleted [default: 1]
+  --duration <duration>         Duration in seconds at or below which a video is deleted as a short clip and a GIF becomes a still image [default: 1]
   --reprocess                   Re-run every file even if the database marks it done
   --trashdb <trashdb>           SQLite database with Immich trash hashes (read-only)
   --imagehash                   Also match files by image data hash, so a copy differing only in metadata counts as already imported or trashed
@@ -340,7 +341,8 @@ Options:
   updated.
 - `--duration`: optional (`process` only). Overrides the short-video deletion threshold
   (default `1.0` seconds). Videos in a live-photo-compatible format whose duration is <= this
-  value are always deleted. Must be `> 0`.
+  value are always deleted. A GIF at or under it becomes a PNG of its first frame, so raising it
+  also turns longer animated GIFs into stills. Must be `> 0`.
 - `--reprocess`: optional (`process`, `verify`). When set, ignores the `is_processed` flag in
   the database and processes every file regardless of prior run history. Useful after changing
   pipeline settings (e.g. `--duration`) without wiping the database.
@@ -479,6 +481,8 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
       - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
+      - Still image: a GIF with one frame, no duration, or no longer than `--duration` takes its
+        first frame to PNG. As an MP4 the short clip rule would delete it
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.

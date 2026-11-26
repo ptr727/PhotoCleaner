@@ -808,6 +808,214 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Theory]
+    [InlineData("color=c=red:s=32x32", "-frames:v", "1", false)]
+    [InlineData("color=c=red:s=32x32", "-frames:v", "1", true)]
+    [InlineData("color=c=red:s=32x32:r=0.5", "-frames:v", "1", false)]
+    [InlineData("color=c=red:s=32x32:r=0.5", "-frames:v", "1", true)]
+    [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", false)]
+    [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", true)]
+    public async Task ExecuteAsync_StillOrShortGif_ConvertsToStillImageThatSurvives(
+        string source,
+        string lengthOption,
+        string lengthValue,
+        bool skipBackup
+    )
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "clip.gif");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    source,
+                    lengthOption,
+                    lengthValue,
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+            string stillPath = Path.ChangeExtension(filePath, ".png");
+            ProcessTask.ProcessResult reprocessResult = await CreateContext(
+                stillPath,
+                skipBackup: skipBackup
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            reprocessResult.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(stillPath).Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeFalse();
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(filePath + ".bak").Should().Be(!skipBackup);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_VideoExactlyAtDuration_DeletesShortClip()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "boundary.mp4");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=s=32x32:r=10",
+                    "-t",
+                    "1.1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(skipBackup: true, shortVideoDuration: 1.1),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_GifExactlyAtDuration_ConvertsToStillImage()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "boundary.gif");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=s=32x32:r=10",
+                    "-t",
+                    "1.1",
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(skipBackup: true, shortVideoDuration: 1.1),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.ChangeExtension(filePath, ".png")).Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Gif87aStill_ConvertsToStillImage()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "still.gif");
+            await File.WriteAllBytesAsync(
+                filePath,
+                [
+                    .. "GIF87a"u8,
+                    0x01,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x80,
+                    0x00,
+                    0x00,
+                    0xFF,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x2C,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x00,
+                    0x02,
+                    0x02,
+                    0x44,
+                    0x01,
+                    0x00,
+                    0x3B,
+                ],
+                TestContext.Current.CancellationToken
+            );
+            BufferedCommandResult probe = await Cli.Wrap("ffprobe")
+                .WithArguments([
+                    "-loglevel",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=nw=1:nk=1",
+                    filePath,
+                ])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            probe.StandardOutput.Trim().Should().Be("N/A");
+
+            ProcessTask.ProcessResult result = await CreateContext(filePath, skipBackup: true);
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.ChangeExtension(filePath, ".png")).Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
     [InlineData("-TagsFromFile", false)]
     [InlineData("-TagsFromFile", true)]
     [InlineData("CreateDate=", false)]
@@ -966,7 +1174,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                     "-i",
                     $"testsrc=s={width}x{height}:r=5",
                     "-t",
-                    "1",
+                    "2",
                     filePath,
                 ])
                 .ExecuteAsync(TestContext.Current.CancellationToken);
@@ -1804,7 +2012,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         bool dryRun = false,
         bool skipBackup = false,
         bool rehash = false,
-        bool imageHash = false
+        bool imageHash = false,
+        double shortVideoDuration = MediaUtilities.ShortVideoDuration
     ) =>
         new()
         {
@@ -1821,7 +2030,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             Tags = null,
             DbFile = null,
             Rehash = rehash,
-            ShortVideoDuration = MediaUtilities.ShortVideoDuration,
+            ShortVideoDuration = shortVideoDuration,
             Reprocess = false,
             MarkProcessed = false,
             ImmichUrl = null,

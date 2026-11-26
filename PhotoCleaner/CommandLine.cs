@@ -464,7 +464,7 @@ internal sealed class CommandLine
         Option<double> option = new("--duration")
         {
             Description =
-                "Maximum duration in seconds below which a video is considered a short clip and deleted",
+                "Duration in seconds at or below which a video is deleted as a short clip and a GIF becomes a still image",
             DefaultValueFactory = _ => MediaUtilities.ShortVideoDuration,
         };
         option.Validators.Add(result =>
