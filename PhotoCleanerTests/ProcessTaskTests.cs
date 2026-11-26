@@ -808,6 +808,59 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     [Theory]
+    [InlineData("color=c=red:s=32x32", "-frames:v", "1", false)]
+    [InlineData("color=c=red:s=32x32", "-frames:v", "1", true)]
+    [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", false)]
+    [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", true)]
+    public async Task ExecuteAsync_StillOrShortGif_ConvertsToStillImageThatSurvives(
+        string source,
+        string lengthOption,
+        string lengthValue,
+        bool skipBackup
+    )
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "clip.gif");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    source,
+                    lengthOption,
+                    lengthValue,
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+            string stillPath = Path.ChangeExtension(filePath, ".png");
+            ProcessTask.ProcessResult reprocessResult = await CreateContext(
+                stillPath,
+                skipBackup: skipBackup
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            reprocessResult.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(stillPath).Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeFalse();
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(filePath + ".bak").Should().Be(!skipBackup);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
     [InlineData("-TagsFromFile", false)]
     [InlineData("-TagsFromFile", true)]
     [InlineData("CreateDate=", false)]
@@ -966,7 +1019,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                     "-i",
                     $"testsrc=s={width}x{height}:r=5",
                     "-t",
-                    "1",
+                    "2",
                     filePath,
                 ])
                 .ExecuteAsync(TestContext.Current.CancellationToken);

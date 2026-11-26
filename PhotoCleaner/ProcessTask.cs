@@ -545,6 +545,7 @@ internal sealed class ProcessTask(
         // Output to temp file
         string tempFile = Path.ChangeExtension(fileInfo.FullName, ".temp");
         string[] ffmpegArguments;
+        string outputExtension = MediaUtilities.VideoOutputExtension;
         if (s_remuxExtensions.Contains(fileInfo.Extension))
         {
             // Remux audio and video
@@ -564,6 +565,31 @@ internal sealed class ProcessTask(
                 "+faststart",
                 "-f",
                 "mp4",
+                tempFile,
+            ];
+        }
+        else if (
+            fileInfo.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
+            && await GetDurationAsync().ConfigureAwait(false) <= options.ShortVideoDuration
+        )
+        {
+            Log.Information(
+                "ffmpeg: Converting still or short GIF to a still image: '{FilePath}'",
+                fileInfo.FullName
+            );
+            outputExtension = MediaUtilities.StillOutputExtension;
+            ffmpegArguments =
+            [
+                "-nostdin",
+                "-y",
+                "-i",
+                fileInfo.FullName,
+                "-frames:v",
+                "1",
+                "-c:v",
+                "png",
+                "-f",
+                "image2",
                 tempFile,
             ];
         }
@@ -670,9 +696,8 @@ internal sealed class ProcessTask(
             string? failure;
             try
             {
-                // Rename temp output to MP4; use a unique name if target already exists
                 string target = MediaUtilities.GetUniqueFileName(
-                    Path.ChangeExtension(fileInfo.FullName, MediaUtilities.VideoOutputExtension)
+                    Path.ChangeExtension(fileInfo.FullName, outputExtension)
                 );
                 if (!options.SkipBackup)
                 {

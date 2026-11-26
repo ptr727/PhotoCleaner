@@ -37,6 +37,7 @@ internal static class MediaUtilities
         }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     internal const string VideoOutputExtension = ".mp4";
+    internal const string StillOutputExtension = ".png";
 
     internal const double LiveVideoDuration = 4.0;
     internal const double ShortVideoDuration = 1.0;
