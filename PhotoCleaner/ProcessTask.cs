@@ -340,7 +340,25 @@ internal sealed class ProcessTask(
             .StartsWith("pcm", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<float> GetDurationAsync()
+    private async Task<float> GetDurationAsync() =>
+        float.Parse(
+            await GetDurationTextAsync().ConfigureAwait(false),
+            CultureInfo.InvariantCulture
+        );
+
+    private async Task<bool> IsStillOrShortGifAsync() =>
+        fileInfo.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
+        && (
+            !float.TryParse(
+                await GetDurationTextAsync().ConfigureAwait(false),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out float duration
+            )
+            || duration <= options.ShortVideoDuration
+        );
+
+    private async Task<string> GetDurationTextAsync()
     {
         Log.Debug("ffprobe: Getting play duration for '{FilePath}'", fileInfo.FullName);
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
@@ -356,7 +374,7 @@ internal sealed class ProcessTask(
                 fileInfo.FullName,
             ])
             .ExecuteBufferedAsync(cancellationToken);
-        return float.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
+        return result.StandardOutput.Trim();
     }
 
     private async Task<bool> DeleteLivePhotosAsync()
@@ -568,13 +586,10 @@ internal sealed class ProcessTask(
                 tempFile,
             ];
         }
-        else if (
-            fileInfo.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
-            && await GetDurationAsync().ConfigureAwait(false) <= options.ShortVideoDuration
-        )
+        else if (await IsStillOrShortGifAsync().ConfigureAwait(false))
         {
             Log.Information(
-                "ffmpeg: Converting still or short GIF to a still image: '{FilePath}'",
+                "ffmpeg: Converting single-frame or short GIF to a still image: '{FilePath}'",
                 fileInfo.FullName
             );
             outputExtension = MediaUtilities.StillOutputExtension;

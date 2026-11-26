@@ -860,6 +860,62 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_Gif87aWithNoDuration_ConvertsToStillImage()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "still.gif");
+            await File.WriteAllBytesAsync(
+                filePath,
+                [
+                    .. "GIF87a"u8,
+                    0x01,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x80,
+                    0x00,
+                    0x00,
+                    0xFF,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x2C,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x00,
+                    0x02,
+                    0x02,
+                    0x44,
+                    0x01,
+                    0x00,
+                    0x3B,
+                ],
+                TestContext.Current.CancellationToken
+            );
+
+            ProcessTask.ProcessResult result = await CreateContext(filePath, skipBackup: true);
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.ChangeExtension(filePath, ".png")).Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     [Theory]
     [InlineData("-TagsFromFile", false)]
     [InlineData("-TagsFromFile", true)]
