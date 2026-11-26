@@ -166,11 +166,11 @@ flowchart TD
   code -->|"2"| failed
   code -->|"anything else"| other
   signal -->|"the work throws OperationCanceledException"| how
-  signal -->|"a second signal"| killed
+  signal -->|"a second signal, unless the process is PID 1"| killed
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main registers its own SIGINT and SIGTERM handler and sets ProcessTerminationTimeout to null. System.CommandLine's handler returns 130 or 143 once its timeout passes, which would end the run while its cancel path still runs. The first signal cancels the token the command runs with, so CliWrap kills the child tool and the command's cleanup runs before the exit. A second signal ends the process at once, for a cancel path that hangs.
+An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main registers its own SIGINT and SIGTERM handler and sets ProcessTerminationTimeout to null. System.CommandLine's handler returns 130 or 143 once its timeout passes, which would end the run while its cancel path still runs. The first signal cancels the token the command runs with, so CliWrap kills the child tool and the command's cleanup runs before the exit. A second signal takes the default action and ends the process at once, for a cancel path that hangs. Run as PID 1, as the container image's exec-form entrypoint runs it, the kernel drops that default action. There only the SIGKILL that `docker stop` sends after its timeout ends a hung cancel path.
 
 ### Process
 
