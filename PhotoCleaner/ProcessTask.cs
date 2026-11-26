@@ -664,6 +664,7 @@ internal sealed class ProcessTask(
             string sourceForMetadata = BackupFile(fileInfo.FullName, false);
 
             // A failure before the metadata writes land returns the original to its own name.
+            // An output that cannot be removed keeps both files, and the error names them.
             // The original is deleted only after every metadata write to the output has landed.
             string? placedOutput = null;
             string? failure;

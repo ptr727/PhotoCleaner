@@ -544,7 +544,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-The original is renamed aside in both modes before the output takes a name. Under `--skipbackup` no marker records the pairing. From that rename until the metadata writes land, a failure puts the original back under its own name.
+The original is renamed aside in both modes before the output takes a name. Under `--skipbackup` no marker records the pairing. From that rename until the metadata writes land, a failure puts the original back under its own name. An output that cannot be removed leaves both files in place.
 
 #### Process Video Commit
 
@@ -704,7 +704,7 @@ flowchart TD
   inferWarn --> getDate
   getDate -->|"yes"| build
   getDate -->|"no date string"| minDate["Folder date is DateTime.MinValue, so 0001/01/01"]
-  getDate -->|"string with a time zone or suffix"| tzDate["Dated file goes to 0001/01/01, --datepath skipped, S10"]:::suspect
+  getDate -->|"any other form, such as a time zone or a zero date"| tzDate["Dated file goes to 0001/01/01, --datepath skipped, S10"]:::suspect
   minDate --> build
   tzDate --> build
   inferred --> build["ImportTask.BuildDestinationPath(): --outpath, date by --format, file name"]
@@ -757,7 +757,7 @@ flowchart TD
   copyLeft --> failed
   tagQ -->|"no"| mtime["Restore the source mtime on the destination"]
   tagOk -->|"yes"| mtime
-  mtime -->|"IOException or access denied"| mtimeFail["Destination kept, no row, logged as a failed copy, S12"]:::suspect
+  mtime -->|"IOException or access denied"| mtimeFail["Destination kept, no row, logged as a failed copy or move, S12"]:::suspect
   mtimeFail --> failed
   mtime --> rowQ{"--db given?"}
   rowQ -->|"no"| imported(["Counted Imported"])
@@ -768,6 +768,8 @@ flowchart TD
   update --> imported
   insert -->|"SqliteException"| rowFail["Escapes to the per-file catch, destination kept, no row, S12"]:::suspect
   update -->|"SqliteException"| rowFail
+  insert -->|"cancel"| cancelQ
+  update -->|"cancel"| cancelQ
   rowFail --> failed
   dateW -->|"cancel"| cancelQ{"--move?"}
   tagW -->|"cancel"| cancelQ
@@ -778,7 +780,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Only `IOException` and `UnauthorizedAccessException` are caught inside this stage. Any other exception, a `SqliteException` included, reaches the per-file catch in `ImportTask.ExecuteAsync()` with the destination left in place.
+Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. An `IOException` or `UnauthorizedAccessException` counts the file Failed. Any other exception, a `SqliteException` included, reaches the per-file catch in `ImportTask.ExecuteAsync()` with the destination left in place.
 
 ### Index
 
@@ -816,12 +818,12 @@ flowchart TD
 
 #### Index Per-File
 
-Metadata is read only for a new row, new content, or a row whose metadata was never read. Exceptions from every step here go to the per-file catch in `IndexTask.ExecuteAsync()`, which counts the file Failed.
+Metadata is read only for a new row, new content, or a row whose metadata was never read. Exceptions from every step here go to the per-file catch in `IndexTask.ExecuteAsync()`, which counts the file Failed. A cancel is rethrown instead, and the run exits 1.
 
 ```mermaid
 flowchart TD
   start["IndexTask.IndexFileAsync(): index one file"] --> cache["Database.GetByPathAsync(): read the row for this path"]
-  cache --> hash["Database.ResolveHashesAsync(): reuse hashes if size and mtime match, else hash"]
+  cache --> hash["Database.ResolveHashesAsync(): reuse hashes if size and mtime match without --rehash, else hash"]
   hash -->|"exception, e.g. file gone"| failed(["Counted Failed"])
   hash --> needQ{"No row, new SHA-256, or row metadata unread?"}
   needQ -->|"yes"| read["IndexTask.ReadMetadataAsync(): catalog read, an exiftool error leaves it unread"]
@@ -1007,8 +1009,8 @@ The first non-empty backup in .bak, .bak1, .bak2 order is the one restored. Only
 ```mermaid
 flowchart TD
   R1["UndoTask.GetBackupSortKey(): order backups, .bak first, then .bak1, .bak2"]
-  R1 -->|"a backup vanished, its length throws"| RX(["Exit 1, Error, run stops mid-way, S4"]):::suspect
   R1 --> R2{"first non-empty backup found?"}
+  R2 -->|"a backup vanished, its length throws"| RX(["Exit 1, Error, run stops mid-way, S4"]):::suspect
   R2 -->|"no"| R3(["Counted Failed, files left as they are"])
   R2 -->|"yes"| R4{"base file exists?"}
   R4 -->|"yes"| R5["UndoTask.TryDelete(): delete the current file, not counted, S2"]:::suspect
@@ -1048,7 +1050,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Restored counts groups, while Deleted and Failed count files. The deletion of the current file before a restore is never counted.
+Restored counts groups and Deleted counts files. Failed counts each failed delete, and one per group with no non-empty backup. A successful delete of the current file before a restore is not counted.
 
 ### Verify
 
@@ -1253,7 +1255,7 @@ See [`CODESTYLE.md`](./CODESTYLE.md) for build requirements, formatting commands
 - **Even Dimensions**: The re-encode tier pads with `pad=ceil(iw/2)*2:ceil(ih/2)*2`, because libx264 at `yuv420p` rejects an odd width or height. Nothing is scaled. A GIF keeps every pixel and gains one edge row or column. An odd-sized subsampled source, such as a `yuv420p` AVI, loses its last odd row or column to the pad color instead.
 - **Rename Collisions**: The mixed-case and MIME extension renames go through `RenameToFreeName`. A file already holding the target name is never deleted or backed up. The renamed file takes the next free `_N` name from `MediaUtilities.GetUniqueFileName`, and a warning names both files. This holds with and without `--skipbackup`. A case-only rename on a case-insensitive filesystem is not a collision with itself. `ProcessCommand`'s extension-conflict deferral only keeps same-stem files out of one parallel pass, and it reserves no name on disk.
 - **Backup Strategy**: Original files renamed to `.bak` extension after successful conversion, and `BackupFile()` returns the backup path. A `{backup}.out` companion file (e.g. `img.gif.bak.out`) beside the backup holds the full output path. It is needed when `GetUniqueFileName` appended a counter suffix (e.g. `img_1.mp4`) because the canonical name was taken. When `options.SkipBackup` is true, the original still moves to its `.bak` name first, so a same-name output such as a PCM `.mp4` keeps its name. No `.bak.out` is written, and the `.bak` is deleted once the metadata copy and the created-date write have both landed.
-- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source> <output> -all:all -overwrite_original` copies all source metadata to the output file. The source is the `.bak` file in both modes. A failed copy or date write removes the output, returns the `.bak` to the original name, and fails the file. So `--skipbackup` never deletes an original whose metadata missed the output. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` does not reliably set the output's create date across every format pairing. So a separate `TrySetCreateDateAsync` call follows it, writing the date from the already-parsed `ExifToolJson` to the output.
+- **Metadata Preservation**: After every ffmpeg conversion, `exiftool -TagsFromFile <source> <output> -all:all -overwrite_original` copies all source metadata to the output file. The source is the `.bak` file in both modes. A failed copy or date write removes the output, returns the `.bak` to the original name, and fails the file. When the output cannot be removed, both stay and an error names them. So `--skipbackup` never deletes an original whose metadata missed the output. `ffmpeg -map_metadata` is not used, it is unreliable for Apple QuickTime-specific tags (e.g. `ContentIdentifier` in the `mdta`/`keys` atom). `TagsFromFile` does not reliably set the output's create date across every format pairing. So a separate `TrySetCreateDateAsync` call follows it, writing the date from the already-parsed `ExifToolJson` to the output.
 - **Re-queue Pattern**: Converted files are added back to processing queue for validation
 
 ### Live Photo Detection
