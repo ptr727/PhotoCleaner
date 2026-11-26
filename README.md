@@ -479,13 +479,13 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
       the image is found in the database by that tag. Without it, a direct name match or
       `_hevc`-suffix match in the same folder is used.
    4. Convert legacy or incompatible video formats to MP4:
-      - A short clip in the remux and re-encode formats above, GIF excepted, is deleted by the next
-        round, after its conversion. Under `--skipbackup` nothing of it is kept
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
-      - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
+      - Re-encode: WMV, ASF, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
       - Still image: a GIF with one frame, no duration, or no longer than `--duration` takes its
         first frame to PNG. As an MP4 the short clip rule would delete it
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
+      - A short clip converted from MTS, M2TS, MKV, WMV, ASF, AVI, or 3GP is deleted by the next
+        round. Under `--skipbackup` nothing of it is kept
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
 5. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
@@ -837,8 +837,9 @@ docker run --rm \
 `process` removes a Live Photo video when all of these hold. The video is a `.mov` or `.mp4`. The
 process database knows a HEIC, HEIF, JPG, or JPEG still with the same Apple `ContentIdentifier`. The video
 is under the Live Photo length bound. File names and date folders do not matter. It also removes a
-video at or under the `--duration` threshold. That covers a clip in any supported video format,
-after `process` converts it to MP4. `import` keeps the original and the
+video at or under the `--duration` threshold. That covers a clip in any supported video format
+except GIF, which becomes a PNG. A clip that needs conversion is deleted after `process` converts
+it to MP4. `import` keeps the original and the
 edited rendition. The `-edited` name tells them apart.
 
 The Immich trash database keeps removed photos out at import and at process.

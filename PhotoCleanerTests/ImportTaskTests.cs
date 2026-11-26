@@ -1640,6 +1640,10 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
                 cancellationToken: TestContext.Current.CancellationToken
             );
             meta!.XMPCreateDate.Should().Be("2021:05:02 00:00:00");
+            BufferedCommandResult original = await Cli.Wrap("exiftool")
+                .WithArguments(["-s3", "-XMP:DateTimeOriginal", dest])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            original.StandardOutput.Trim().Should().Be("2021:05:02 00:00:00");
         }
         finally
         {
