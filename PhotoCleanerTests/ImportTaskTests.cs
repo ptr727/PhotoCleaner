@@ -1570,6 +1570,52 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     }
 
     [Fact]
+    public async Task ExecuteAsync_DatePath_ThreeGp_SetsQuickTimeDate()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            string datedDir = Path.Combine(srcDir, "2021", "05", "02");
+            Directory.CreateDirectory(datedDir);
+            string clip = Path.Combine(datedDir, "clip.3gp");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ThreeGpFile), clip);
+            ExifToolJson? source = await MediaUtilities.GetExifToolJsonAsync(
+                clip,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            source!.IsDateSet().Should().BeFalse();
+
+            ImportTask task = new(
+                CreateOptions(outDir, datePath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [clip],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            failed.Should().Be(0);
+            string dest = Path.Combine(outDir, "2021-05", "clip.3gp");
+            ExifToolJson? meta = await MediaUtilities.GetExifToolJsonAsync(
+                dest,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            meta!.QuickTimeCreateDate.Should().Be("2021:05:02 00:00:00");
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_DatePath_FileAlreadyHasDate_DateNotOverwritten()
     {
         string srcDir = TempDir();

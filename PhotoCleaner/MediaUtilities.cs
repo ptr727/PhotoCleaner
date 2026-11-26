@@ -41,10 +41,14 @@ internal static class MediaUtilities
     internal const double LiveVideoDuration = 4.0;
     internal const double ShortVideoDuration = 1.0;
 
+    // A QuickTime container takes no EXIF, and exiftool reports such a file unchanged with exit 0.
     private static readonly FrozenSet<string> s_quicktimeExtensions = new[]
     {
-        ".mp4",
+        ".3g2",
+        ".3gp",
+        ".m4v",
         ".mov",
+        ".mp4",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     internal static string GetUniqueFileName(string filePath)
@@ -179,27 +183,6 @@ internal static class MediaUtilities
     internal static void EnsureReadable(string filePath)
     {
         using FileStream probe = File.OpenRead(filePath);
-    }
-
-    internal static async Task SetCreateDateAsync(
-        string createdDate,
-        string outputFile,
-        CancellationToken cancellationToken = default
-    )
-    {
-        string? failure = await TrySetCreateDateAsync(
-                createdDate,
-                outputFile,
-                "exiftool",
-                cancellationToken
-            )
-            .ConfigureAwait(false);
-        if (failure is not null)
-        {
-            throw new InvalidOperationException(
-                $"Failed to set created date on '{outputFile}' ({failure})"
-            );
-        }
     }
 
     internal static Task<string?> TrySetCreateDateAsync(

@@ -807,6 +807,83 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData("-TagsFromFile", false)]
+    [InlineData("-TagsFromFile", true)]
+    [InlineData("CreateDate=", false)]
+    [InlineData("CreateDate=", true)]
+    public async Task ExecuteAsync_ConvertedMetadataWriteFails_KeepsOriginal(
+        string failOn,
+        bool skipBackup
+    )
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
+            _ = await Cli.Wrap("exiftool")
+                .WithArguments([
+                    "-overwrite_original",
+                    "-QuickTime:CreateDate=2021:05:02 00:00:00",
+                    filePath,
+                ])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            byte[] original = await File.ReadAllBytesAsync(
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+            string stub = ExifToolWriteStub(Path.Combine(workDir, "stub"), failOn);
+
+            // Act
+            ProcessTask task = new(
+                CreateOptions(skipBackup: skipBackup),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            ProcessTask.ProcessResult result = await task.ExecuteAsync();
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Failure);
+            (await File.ReadAllBytesAsync(filePath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(original);
+            Directory.GetFiles(workDir).Should().Equal([filePath]);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    private static string ExifToolWriteStub(string dir, string failOn)
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The exiftool stub is a shell script");
+        _ = Directory.CreateDirectory(dir);
+        string stub = Path.Combine(dir, "exiftool-stub.sh");
+        File.WriteAllText(
+            stub,
+            $"#!/bin/sh\ncase \"$*\" in *{failOn}*) echo 'Error: stub write failure' >&2; exit 1;; esac\nexit 0\n"
+        );
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                stub,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            );
+        }
+
+        return stub;
+    }
+
     // -- Video conversion - odd dimensions ------------------------------------
 
     [Theory]
