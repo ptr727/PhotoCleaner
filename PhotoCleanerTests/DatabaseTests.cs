@@ -916,7 +916,7 @@ public sealed class DatabaseTests
     }
 
     [Fact]
-    public async Task InitializeAsync_InMemoryCopyOfFileThatCannotBeWritten_SkipsTheWriteCheck()
+    public async Task InitializeAsync_InMemoryCopyOfFileThatCannotBeWritten_DoesNotThrow()
     {
         if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
         {
