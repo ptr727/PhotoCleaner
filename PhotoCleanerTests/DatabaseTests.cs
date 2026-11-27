@@ -770,8 +770,7 @@ public sealed class DatabaseTests
         }
         else
         {
-            string dir = Path.Combine(Path.GetTempPath(), $"db_{Path.GetRandomFileName()}");
-            _ = Directory.CreateDirectory(dir);
+            string dir = TempDirectoryFixture.CreateWorkDir();
             string dbPath = Path.Combine(dir, "files.db");
             try
             {
@@ -795,7 +794,7 @@ public sealed class DatabaseTests
                     dir,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
                 );
-                Directory.Delete(dir, recursive: true);
+                TempDirectoryFixture.DeleteWorkDir(dir);
             }
         }
     }
