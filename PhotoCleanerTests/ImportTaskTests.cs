@@ -2692,19 +2692,12 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private sealed class ConcurrentSink : ILogEventSink
-    {
-        internal ConcurrentQueue<LogEvent> Events { get; } = new();
-
-        public void Emit(LogEvent logEvent) => Events.Enqueue(logEvent);
-    }
-
     [Fact]
     public async Task ExecuteAsync_SourceTimeRestoreFailsOnCopy_TakesTheCopyRollback()
     {
         string srcDir = ImportTaskTests.TempDir();
         string outDir = ImportTaskTests.TempDir();
-        ConcurrentSink sink = new();
+        CapturingSink sink = new();
         ILogger savedLogger = Log.Logger;
         try
         {
@@ -2769,7 +2762,7 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
     {
         string srcDir = ImportTaskTests.TempDir();
         string outDir = ImportTaskTests.TempDir();
-        ConcurrentSink sink = new();
+        CapturingSink sink = new();
         ILogger savedLogger = Log.Logger;
         try
         {
@@ -2818,4 +2811,12 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
 public sealed class GlobalLoggerDefinition
 {
     internal const string Name = "GlobalLogger";
+}
+
+// Collects every event a test logs, from any thread.
+internal sealed class CapturingSink : ILogEventSink
+{
+    internal ConcurrentQueue<LogEvent> Events { get; } = new();
+
+    public void Emit(LogEvent logEvent) => Events.Enqueue(logEvent);
 }
