@@ -105,8 +105,12 @@ public sealed class UndoTaskTests
 
     // -- Execute -------------------------------------------------------------
 
-    private static (int restored, int deleted, int failed) Run(string dir, bool dryRun = false) =>
-        new UndoTask(CreateOptions(dryRun)).Execute(
+    private static (int restored, int deleted, int failed) Run(
+        string dir,
+        bool dryRun = false,
+        StringComparer? pathComparer = null
+    ) =>
+        new UndoTask(CreateOptions(dryRun), pathComparer ?? MediaUtilities.PathComparer).Execute(
             Directory.GetFiles(dir),
             cancellationToken: TestContext.Current.CancellationToken
         );
@@ -619,6 +623,70 @@ public sealed class UndoTaskTests
             Run(dir).Should().Be((1, 0, 1));
             File.ReadAllBytes(Path.Combine(dir, "clip_2.mov")).Should().Equal(1);
             File.Exists(Path.Combine(dir, "clip_1.mov")).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_MarkersNamingOneOutputInDifferentCase_LeavesTheGroupAndFails()
+    {
+        string dir = TempDir();
+        try
+        {
+            WriteContent(Path.Combine(dir, "clip.mp4"));
+            WriteContent(Path.Combine(dir, "clip.avi.bak"));
+            File.WriteAllText(Path.Combine(dir, "clip.avi.bak.out"), Path.Combine(dir, "clip.mp4"));
+            WriteContent(Path.Combine(dir, "clip.wmv.bak"));
+            File.WriteAllText(Path.Combine(dir, "clip.wmv.bak.out"), Path.Combine(dir, "CLIP.mp4"));
+            string[] before = Names(dir);
+
+            Run(dir, pathComparer: StringComparer.OrdinalIgnoreCase).Should().Be((0, 0, 1));
+            Names(dir).Should().Equal(before);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_BackupNamedLikeOutputInDifferentCase_LeavesTheGroupAndFails()
+    {
+        string dir = TempDir();
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir, "CLIP.mp4.bak"), [1]);
+            string aviBak = Path.Combine(dir, "clip.avi.bak");
+            File.WriteAllBytes(aviBak, [2]);
+            File.WriteAllText(aviBak + ".out", Path.Combine(dir, "clip.mp4"));
+            File.WriteAllBytes(Path.Combine(dir, "clip.mp4"), [3]);
+            string[] before = Names(dir);
+
+            Run(dir, pathComparer: StringComparer.OrdinalIgnoreCase).Should().Be((0, 0, 1));
+            Names(dir).Should().Equal(before);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Execute_NumberedBackupDifferingInCase_RestoresTheUnnumberedBackupToTheName()
+    {
+        string dir = TempDir();
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir, "IMG.mov.bak1"), [2]);
+            File.WriteAllBytes(Path.Combine(dir, "img.mov.bak"), [1]);
+
+            Run(dir, pathComparer: StringComparer.OrdinalIgnoreCase).Should().Be((2, 0, 0));
+            Names(dir).Should().Equal("IMG_1.mov", "img.mov");
+            File.ReadAllBytes(Path.Combine(dir, "img.mov")).Should().Equal(1);
+            File.ReadAllBytes(Path.Combine(dir, "IMG_1.mov")).Should().Equal(2);
         }
         finally
         {
