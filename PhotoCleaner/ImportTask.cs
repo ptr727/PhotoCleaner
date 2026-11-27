@@ -10,7 +10,11 @@ internal sealed class ImportTask(
     SkippedExtensionTracker skippedExtensions
 )
 {
+    private const string DestinationPrefix = "dest:";
     private readonly ConcurrentDictionary<string, Claim> _claims = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Claim> _destinations = new(
+        MediaUtilities.PathComparer
+    );
 
     internal string ExifToolCommand { get; init; } = "exiftool";
 
@@ -161,13 +165,17 @@ internal sealed class ImportTask(
 
     internal void ReleaseClaims(List<(string Key, Claim Claim)> claimed, bool imported)
     {
-        foreach ((string key, Claim claim) in claimed)
+        // Every claim is freed before any waiter wakes, so a waiter retrying finds the name free too.
+        if (!imported)
         {
-            if (!imported)
+            foreach ((string key, Claim claim) in claimed)
             {
-                _ = _claims.TryRemove(new KeyValuePair<string, Claim>(key, claim));
+                _ = ClaimsFor(key).TryRemove(new KeyValuePair<string, Claim>(key, claim));
             }
+        }
 
+        foreach ((_, Claim claim) in claimed)
+        {
             _ = claim.Imported.TrySetResult(imported);
         }
     }
@@ -363,7 +371,7 @@ internal sealed class ImportTask(
         }
 
         string requestedDest = BuildDestinationPath(file, meta, inferredDate);
-        string finalDest = MediaUtilities.GetUniqueFileName(requestedDest);
+        string finalDest = ReserveDestination(requestedDest, file, claimed);
 
         bool canWriteTags = s_exiftoolWriteExtensions.Contains(
             "." + (meta?.FileTypeExtension ?? string.Empty)
@@ -389,6 +397,15 @@ internal sealed class ImportTask(
             );
         }
 
+        if (finalDest != requestedDest)
+        {
+            Log.Warning(
+                "Destination '{RequestedPath}' exists or another file in this run holds it, using '{FinalPath}'",
+                requestedDest,
+                finalDest
+            );
+        }
+
         Log.Information(
             options.Move
                 ? "Moving '{SourcePath}' to '{DestinationPath}'"
@@ -407,15 +424,6 @@ internal sealed class ImportTask(
         {
             sourceInfo.Refresh();
             _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
-            if (finalDest != requestedDest)
-            {
-                Log.Warning(
-                    "Destination '{RequestedPath}' already exists, using '{FinalPath}'",
-                    requestedDest,
-                    finalDest
-                );
-            }
-
             if (options.Move)
             {
                 File.Move(file, finalDest);
@@ -636,6 +644,34 @@ internal sealed class ImportTask(
                 return owner.File;
             }
         }
+    }
+
+    // Parallel files with the same name and date would otherwise both choose one free name.
+    // The name is a claim, so it is kept or freed with the file's other claims.
+    // A dry run keeps it as well, so a later file picks the name a live run would.
+    internal string ReserveDestination(
+        string requestedDest,
+        string file,
+        List<(string Key, Claim Claim)> claimed
+    ) =>
+        MediaUtilities.GetUniqueFileName(requestedDest, candidate =>
+            File.Exists(candidate) || !TryReserve(candidate, file, claimed)
+        );
+
+    private ConcurrentDictionary<string, Claim> ClaimsFor(string key) =>
+        key.StartsWith(DestinationPrefix, StringComparison.Ordinal) ? _destinations : _claims;
+
+    private bool TryReserve(string path, string file, List<(string Key, Claim Claim)> claimed)
+    {
+        string key = DestinationPrefix + path;
+        Claim mine = new(file);
+        if (!_destinations.TryAdd(key, mine))
+        {
+            return false;
+        }
+
+        claimed.Add((key, mine));
+        return true;
     }
 
     private async Task<ImportResult?> CheckImageHashAsync(

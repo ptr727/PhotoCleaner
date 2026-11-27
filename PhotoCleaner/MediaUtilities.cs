@@ -50,6 +50,12 @@ internal static class MediaUtilities
         ".mp4",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
+    // Follows each platform's default file system, where Windows and macOS ignore case.
+    internal static StringComparer PathComparer { get; } =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+
     internal static string GetUniqueFileName(string filePath, Func<string, bool>? isTaken = null)
     {
         isTaken ??= File.Exists;

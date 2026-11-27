@@ -568,8 +568,9 @@ directories to `outpath/date/filename`:
    tokens and writes each as an `XMP:Subject` tag. `--tags` applies explicit comma-separated
    tags to every file. Both can be combined, and tags are merged and deduplicated. Applied after
    copy/move, before mtime restore. Files at the root of `--path` receive no path tags.
-7. **Collision handling**: if a file with the same name already exists in the destination,
-   `_1`, `_2`, ... suffixes are appended (e.g. `photo_1.jpg`). A warning is logged.
+7. **Collision handling**: a taken name gets a `_1`, `_2`, ... suffix (e.g. `photo_1.jpg`),
+   and a warning is logged. A name is taken when a file in the destination already has it,
+   or when another file in the same run took it first.
 8. **Unsupported files**: non-media files are counted as ignored and left in place.
 9. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are imported,
    iterates `--outpath` and deletes empty child subdirectories deepest-first. The target
