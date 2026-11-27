@@ -90,7 +90,8 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   exits non-zero. So does a failed mtime restore or database write. A copy is removed after any
   such failure, so the next run imports it again. A moved file stays at its destination without
   the failed write. After a failed date, tag, or mtime write it still gets its `--db` row, so a
-  later copy of the same file is skipped.
+  later copy of the same file is skipped. A `--db` that cannot be written stops the run before
+  any file is copied or moved.
   The opt-in `--imagehash` also skips a file whose image data hash is already in the database.
 - **Syncs Immich trash hashes** (via `trash` command): Connects to an Immich server via its
   REST API, fetches all trashed asset checksums (SHA-1), and stores them in a local SQLite

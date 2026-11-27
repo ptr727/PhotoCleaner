@@ -75,7 +75,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         return dir;
     }
 
-    private static string TempDb() =>
+    internal static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"ImportTaskTest_{Path.GetRandomFileName()}.db");
 
     private static void Touch(string path) => File.WriteAllBytes(path, []);
@@ -2939,6 +2939,64 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
             Log.Logger = savedLogger;
             Directory.Delete(srcDir, recursive: true);
             Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RowWriteFailsOnMove_KeepsFileAndLogsDestination()
+    {
+        string srcDir = ImportTaskTests.TempDir();
+        string outDir = ImportTaskTests.TempDir();
+        string dbPath = ImportTaskTests.TempDb();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+            (string jpg, string dest) = await ImportTaskTests.CreateTaggedSourceAsync(
+                media,
+                srcDir
+            );
+            string destPath = Path.Combine(outDir, dest);
+            await using (Database writable = new(dbPath))
+            {
+                await writable.InitializeAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using Database db = new(dbPath, readOnly: true);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                ImportTaskTests.CreateOptions(outDir, move: true),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().BeFalse();
+            File.Exists(destPath).Should().BeTrue();
+            sink.Events.Should()
+                .ContainSingle(e => e.Level == LogEventLevel.Error)
+                .Which.RenderMessage()
+                .Should()
+                .Contain(destPath);
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
         }
     }
 

@@ -636,7 +636,8 @@ flowchart TD
   skipQ -->|"yes"| skipOpen["Database.InitializeAsync(): open the skip database read-only"]
   skipQ -->|"no"| dbQ{"--db given?"}
   skipOpen --> dbQ
-  dbQ -->|"yes"| dbOpen["Database.InitializeAsync(): create or upgrade the catalog, also on --dryrun, S8"]:::suspect
+  dbQ -->|"yes"| dbOpen["Database.InitializeAsync(): check that --db takes a write, create or upgrade the catalog, also on --dryrun, S8"]:::suspect
+  dbOpen -->|"--db cannot be written"| exitError
   dbOpen --> dbVer["MediaUtilities.EnsureImageHashSupportAsync(): require exiftool 12.63 or newer"]
   dbQ -->|"no"| ihQ{"--imagehash?"}
   dbVer --> ihQ
@@ -647,7 +648,7 @@ flowchart TD
   exec -->|"each file"| perFile["ImportTask.ImportFileAsync(): import one file, see the stages below"]
   perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported or a moved file was kept, else free them"]
   release --> counted(["Counted under the returned result"])
-  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims unless a moved file was kept, then log the file"]
+  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims, then log the file"]
   perFileCatch --> countedFailed(["Counted Failed"])
   perFile -->|"cancel"| exitError
   exec -->|"all files done"| deQ{"--deleteempty?"}
@@ -663,7 +664,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Any exception before `ImportTask.ExecuteAsync()` starts, such as a bad schema or an old exiftool, reaches `CommandRunner.RunAsync()` and exits 1. Ignored, Skipped, SkippedBySkipDb, and TrashedInImmich all leave the exit code at 0.
+Any exception before `ImportTask.ExecuteAsync()` starts, such as a bad schema, a `--db` that cannot be written, or an old exiftool, reaches `CommandRunner.RunAsync()` and exits 1. Ignored, Skipped, SkippedBySkipDb, and TrashedInImmich all leave the exit code at 0.
 
 #### Import Per-File Checks
 
@@ -790,7 +791,7 @@ flowchart TD
   insert -->|"other exception"| rowMvQ{"--move?"}
   update -->|"other exception"| rowMvQ
   rowMvQ -->|"no"| rollback
-  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row, claims kept, S16"]:::suspect
+  rowMvQ -->|"yes"| rowFail["Log an error naming the destination, moved file kept, no row, claims kept, S16"]:::suspect
   rowFail --> failed
   insert -->|"cancel"| cancelQ
   update -->|"cancel"| cancelQ
@@ -807,7 +808,7 @@ flowchart TD
 
 Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. A `SqliteException` still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed. A copy that cannot be removed stays with a warning instead, S12.
 
-A moved file has no source left to return to, so a failed write keeps it in `--outpath`. It gets the source mtime unless the mtime restore is the write that failed. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move also keeps the claims, since the moved file is in the library without its row.
+A moved file has no source left to return to, so a failed write keeps it in `--outpath`. It gets the source mtime unless the mtime restore is the write that failed. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move, such as a failed row write, also keeps the file and its claims. The moved file is in the library without its row. The error names the destination, S16.
 
 ### Index
 
@@ -1147,7 +1148,7 @@ Each entry describes a branch the diagrams mark, as the code behaves today, and 
 - **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
 - **S15.** `trash` stops at an empty page without reading `NextPage` or marking the sync partial, #335.
-- **S16.** A moved file whose row write fails stays in `--outpath` with no row, so the next run imports a copy of it again, #340.
+- **S16.** A moved file whose row write fails mid-run, such as on a full disk, stays in `--outpath` with no row. The next run imports a copy of it again, #340.
 
 ## State Management Pattern
 

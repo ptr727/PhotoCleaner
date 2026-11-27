@@ -501,19 +501,23 @@ internal sealed class ImportTask(
 
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Done before the claims are freed, so a file waiting on them cannot import a second copy.
             // The moved file is in the library even without its row, so its claims stay held.
             if (options.Move)
             {
+                Log.Error(
+                    ex,
+                    "Kept '{DestinationPath}' moved from '{SourcePath}' with no database row",
+                    finalDest,
+                    file
+                );
                 KeepClaims(claimed);
-            }
-            else
-            {
-                RemoveCopy(file, finalDest);
+                return ImportResult.Failed;
             }
 
+            RemoveCopy(file, finalDest);
             throw;
         }
     }
