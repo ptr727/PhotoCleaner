@@ -776,7 +776,7 @@ flowchart TD
   timeMvQ -->|"yes, keep the moved file"| rowQ
   rollback --> delQ{"Copy removed?"}
   delQ -->|"yes"| failed
-  delQ -->|"no"| copyLeft["Log an error naming the copy, copy kept with the source mtime, row written under --db unless the row write failed, claims kept, S12"]:::suspect
+  delQ -->|"no"| copyLeft["Log an error naming the copy, copy kept with the source mtime unless that write failed, row written under --db unless the row write failed, claims kept, S12"]:::suspect
   copyLeft --> failed
   mtime --> rowQ{"ImportTask.WriteRowAsync(): --db given?"}
   rowQ -->|"no"| keptQ
@@ -799,7 +799,7 @@ flowchart TD
   tagW -->|"cancel"| cancelQ
   cancelQ -->|"no"| cancelDel["ImportTask.RemoveCopy(): remove the copy"]
   cancelDel --> exitError(["Rethrown, run exits 1 Error"])
-  cancelDel -->|"removal fails"| cancelLeft["Log an error naming the copy, copy kept with the source mtime, row written under --db despite the cancel, claims kept"]
+  cancelDel -->|"removal fails"| cancelLeft["Log an error naming the copy, copy kept with the source mtime, row written under --db despite the cancel unless the row write failed, claims kept, S12"]:::suspect
   cancelLeft --> exitError
   cancelQ -->|"yes"| cancelMoved["Moved file stays, no row"]
   cancelMoved --> exitError
