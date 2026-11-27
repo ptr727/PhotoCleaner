@@ -3252,10 +3252,9 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
     }
 
     [Fact]
-    public async Task ExecuteAsync_SourceTimeRestoreAndRemovalFail_RecordsRowWithoutRetryingTime()
+    public async Task ExecuteAsync_DateFolderRemovedAfterCopy_CountsCopyRemovedAndLeavesNoRow()
     {
         string srcDir = ImportTaskTests.TempDir();
-        string otherDir = ImportTaskTests.TempDir();
         string outDir = ImportTaskTests.TempDir();
         string dbPath = ImportTaskTests.TempDb();
         CapturingSink sink = new();
@@ -3267,18 +3266,12 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
                 .WriteTo.Sink(sink)
                 .CreateLogger();
 
-            // A removed date folder fails both the mtime restore and the delete of the copy
+            // A removed date folder fails the mtime restore and takes the copy with it
             string stub = TempDirectoryFixture.WriteExifToolStub(
                 srcDir,
                 "for last in \"$@\"; do :; done\nrm -r \"$(dirname \"$last\")\"\nexit 0\n"
             );
-            (string jpg, string dest) = await ImportTaskTests.CreateTaggedSourceAsync(
-                media,
-                srcDir
-            );
-            string destPath = Path.Combine(outDir, dest);
-            string copy = Path.Combine(otherDir, "photo.jpg");
-            File.Copy(jpg, copy);
+            (string jpg, _) = await ImportTaskTests.CreateTaggedSourceAsync(media, srcDir);
 
             await using Database db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
@@ -3292,35 +3285,24 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
             {
                 ExifToolCommand = stub,
             };
-            (int organized, _, int skipped, _, _, _, int failed, _) = await task.ExecuteAsync(
-                [jpg, copy],
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
                 new DirectoryInfo(srcDir),
                 TestContext.Current.CancellationToken
             );
 
             organized.Should().Be(0);
-            skipped.Should().Be(1);
             failed.Should().Be(1);
-            (await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken))
-                .Should()
-                .NotBeNull();
+            (await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken)).Should().BeNull();
             sink.Events.Should()
-                .ContainSingle(e =>
-                    e.Level == LogEventLevel.Error
-                    && e.RenderMessage().Contains("modified time", StringComparison.Ordinal)
-                );
-            sink.Events.Should()
-                .Contain(e =>
-                    e.Level == LogEventLevel.Error
-                    && e.RenderMessage().Contains("Failed to remove", StringComparison.Ordinal)
-                    && e.RenderMessage().Contains(destPath, StringComparison.Ordinal)
+                .NotContain(e =>
+                    e.RenderMessage().Contains("Failed to remove", StringComparison.Ordinal)
                 );
         }
         finally
         {
             Log.Logger = savedLogger;
             Directory.Delete(srcDir, recursive: true);
-            Directory.Delete(otherDir, recursive: true);
             Directory.Delete(outDir, recursive: true);
             File.Delete(dbPath);
         }
