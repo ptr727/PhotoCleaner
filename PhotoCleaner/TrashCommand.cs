@@ -253,10 +253,10 @@ internal sealed class TrashCommand(
             return (null, true);
         }
 
-        if (string.IsNullOrWhiteSpace(result.NextCursor) || !seenCursors.Add(result.NextCursor))
+        if (!seenCursors.Add(result.NextCursor))
         {
             Log.Error(
-                "Stopping pagination: invalid or repeated NextCursor value '{NextCursor}' after page {Page}",
+                "Stopping pagination: repeated NextCursor value '{NextCursor}' after page {Page}",
                 result.NextCursor,
                 page
             );

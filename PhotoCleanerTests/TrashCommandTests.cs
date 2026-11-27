@@ -153,21 +153,6 @@ public sealed class TrashCommandTests
 
     // Pagination stopping early leaves the database short of the server.
     // Callers use it to skip files, so a short one silently re-imports trashed assets.
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task ExecuteAsync_BlankNextCursor_ExitsFailed(string nextCursor)
-    {
-        using MockImmichHandler handler = new();
-        handler.EnqueueResponse(MakeResponse([Sha1Base64(0x01)], nextCursor: nextCursor));
-
-        (int exitCode, long count, int requests) = await RunSyncAsync(handler);
-
-        exitCode.Should().Be(2);
-        requests.Should().Be(1);
-        count.Should().Be(1);
-    }
-
     [Fact]
     public async Task ExecuteAsync_RepeatedNextCursor_ExitsFailed()
     {
@@ -199,9 +184,14 @@ public sealed class TrashCommandTests
     internal const string AssetJson =
         """{"id":"asset-0","checksum":"AQAAAAAAAAAAAAAAAAAAAAAAAAA=","originalFileName":"photo_0.jpg","isTrashed":true}""";
 
+    internal const string LiveAssetJson =
+        """{"id":"asset-1","checksum":"AgAAAAAAAAAAAAAAAAAAAAAAAAA=","originalFileName":"photo_1.jpg","isTrashed":false}""";
+
     // An Immich server older than v3.2.0 drops the filter and cursor it does not know.
     // It answers a page-based search of live assets with no nextCursor key.
     [Theory]
+    [InlineData("""{"assets":{"items":[LIVE,LIVE],"nextPage":"2"}}""", 0)]
+    [InlineData("""{"assets":{"items":[LIVE],"nextPage":null}}""", 0)]
     [InlineData("""{"assets":{"items":[ASSET],"nextPage":"2"}}""", 1)]
     [InlineData("""{"assets":{"items":[ASSET],"nextPage":null}}""", 1)]
     [InlineData("""{"assets":{"items":[ASSET]}}""", 1)]
@@ -216,7 +206,11 @@ public sealed class TrashCommandTests
     )
     {
         using MockImmichHandler handler = new();
-        handler.EnqueueJson(answerJson.Replace("ASSET", AssetJson, StringComparison.Ordinal));
+        handler.EnqueueJson(
+            answerJson
+                .Replace("ASSET", AssetJson, StringComparison.Ordinal)
+                .Replace("LIVE", LiveAssetJson, StringComparison.Ordinal)
+        );
 
         (int exitCode, long count, int requests) = await RunSyncAsync(handler);
 
@@ -331,114 +325,43 @@ public sealed class TrashCommandTests
     [Fact]
     public async Task ExecuteAsync_MultiplePages_PaginatesUntilEmpty()
     {
-        string dbPath = TempDb();
-        try
-        {
-            byte[] sha1a = new byte[20];
-            sha1a[0] = 0x10;
-            byte[] sha1b = new byte[20];
-            sha1b[0] = 0x20;
+        using MockImmichHandler handler = new();
+        handler.EnqueueResponse(MakeResponse([Sha1Base64(0x10)], nextCursor: "c1")); // page 1
+        handler.EnqueueResponse(MakeResponse([Sha1Base64(0x20)], nextCursor: "c2")); // page 2
+        handler.EnqueueResponse(EmptyResponse()); // page 3 empty, no cursor -> stop
 
-            using MockImmichHandler handler = new();
-            handler.EnqueueResponse(
-                MakeResponse([Convert.ToBase64String(sha1a)], nextCursor: "c1")
-            ); // page 1
-            handler.EnqueueResponse(
-                MakeResponse([Convert.ToBase64String(sha1b)], nextCursor: "c2")
-            ); // page 2
-            handler.EnqueueResponse(EmptyResponse()); // page 3 empty, no cursor -> stop
+        (int exitCode, long count, int requests) = await RunSyncAsync(handler);
 
-            using HttpClient client = new(handler, disposeHandler: false)
-            {
-                BaseAddress = new Uri("http://localhost:9999"),
-            };
-            TrashCommand command = new(
-                CreateOptions(dbPath),
-                TestContext.Current.CancellationToken,
-                client
-            );
-            await command.ExecuteAsync();
-
-            await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync(TestContext.Current.CancellationToken);
-            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
-            count.Should().Be(2);
-
-            handler.RequestCount.Should().Be(3); // 3 requests: page 1, 2, 3 (empty)
-        }
-        finally
-        {
-            File.Delete(dbPath);
-        }
+        exitCode.Should().Be(0);
+        count.Should().Be(2);
+        requests.Should().Be(3); // 3 requests: page 1, 2, 3 (empty)
     }
 
     [Fact]
     public async Task ExecuteAsync_EmptyTrash_InsertsNothing()
     {
-        string dbPath = TempDb();
-        try
-        {
-            using MockImmichHandler handler = new();
-            handler.EnqueueResponse(EmptyResponse()); // first page empty
+        using MockImmichHandler handler = new();
+        handler.EnqueueResponse(EmptyResponse()); // first page empty
 
-            using HttpClient client = new(handler, disposeHandler: false)
-            {
-                BaseAddress = new Uri("http://localhost:9999"),
-            };
-            TrashCommand command = new(
-                CreateOptions(dbPath),
-                TestContext.Current.CancellationToken,
-                client
-            );
-            int exitCode = await command.ExecuteAsync();
-            exitCode.Should().Be(0); // an empty page naming no cursor is not a short sync
+        (int exitCode, long count, _) = await RunSyncAsync(handler);
 
-            await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync(TestContext.Current.CancellationToken);
-            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
-            count.Should().Be(0);
-        }
-        finally
-        {
-            File.Delete(dbPath);
-        }
+        exitCode.Should().Be(0); // an empty page naming no cursor is not a short sync
+        count.Should().Be(0);
     }
 
     [Fact]
     public async Task ExecuteAsync_DuplicateHashes_Idempotent()
     {
-        string dbPath = TempDb();
-        try
-        {
-            byte[] sha1 = new byte[20];
-            sha1[0] = 0x42;
-            string base64 = Convert.ToBase64String(sha1);
+        string base64 = Sha1Base64(0x42);
+        using MockImmichHandler handler = new();
+        // Same hash appears twice in the same page
+        handler.EnqueueResponse(MakeResponse([base64, base64], nextCursor: "c1"));
+        handler.EnqueueResponse(EmptyResponse());
 
-            using MockImmichHandler handler = new();
-            // Same hash appears twice in the same page
-            handler.EnqueueResponse(MakeResponse([base64, base64], nextCursor: "c1"));
-            handler.EnqueueResponse(EmptyResponse());
+        (int exitCode, long count, _) = await RunSyncAsync(handler);
 
-            using HttpClient client = new(handler, disposeHandler: false)
-            {
-                BaseAddress = new Uri("http://localhost:9999"),
-            };
-            TrashCommand command = new(
-                CreateOptions(dbPath),
-                TestContext.Current.CancellationToken,
-                client
-            );
-            await command.ExecuteAsync();
-
-            await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync(TestContext.Current.CancellationToken);
-            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
-            count.Should().Be(1); // The upsert on sha1 keeps one row per checksum
-        }
-        finally
-        {
-            File.Delete(dbPath);
-        }
+        exitCode.Should().Be(0);
+        count.Should().Be(1); // The upsert on sha1 keeps one row per checksum
     }
 
     [Theory]
@@ -609,14 +532,7 @@ public sealed class TrashCommandLogTests
 
     [Theory]
     [InlineData("""{"assets":{"items":[],"nextCursor":"c2"}}""", "empty page 2 names cursor")]
-    [InlineData(
-        """{"assets":{"items":[ASSET],"nextCursor":""}}""",
-        "invalid or repeated NextCursor"
-    )]
-    [InlineData(
-        """{"assets":{"items":[ASSET],"nextCursor":"c1"}}""",
-        "invalid or repeated NextCursor"
-    )]
+    [InlineData("""{"assets":{"items":[ASSET],"nextCursor":"c1"}}""", "repeated NextCursor")]
     [InlineData("""{"assets":{"items":[ASSET],"nextPage":"2"}}""", "has no nextCursor field")]
     public async Task ExecuteAsync_ShortSync_LogsMatchingError(string secondAnswer, string expected)
     {

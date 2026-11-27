@@ -946,7 +946,7 @@ flowchart TD
   S12 -->|"no nextCursor key"| S13
   S12 -->|"null"| S14
   S12 -->|"set, on an empty page"| S13
-  S12 -->|"blank, or seen before"| S13
+  S12 -->|"seen before"| S13
   S12 -->|"a new cursor"| S3
   S13["Log error, set the partial flag, stop paging"]
   S13 --> S14
@@ -963,7 +963,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-The request uses the structured search shape Immich added in v3.2.0. It sends a `filter` of `trashedAt` not null and a page size. From the second page on it also sends the `cursor` the last answer named. It sends none of the deprecated flat fields, because Immich rejects a request mixing them with `filter` or `cursor`. The structured search does not exclude trashed assets by default, so the filter alone selects the trash. An Immich server older than v3.2.0 drops the `filter` and `cursor` it does not know. It then answers a page-based search of live assets with no nextCursor key. Such an answer stops paging as a short sync rather than a complete one. So does an empty page naming a cursor, or a blank or repeated cursor. Exceptions from every step, including the count and backfill steps, go to CommandRunner.RunAsync() and exit 1. The upsert keeps an existing file name and only fills an image hash that is still null.
+The request uses the structured search shape Immich added in v3.2.0. It sends a `filter` of `trashedAt` not null and a page size. From the second page on it also sends the `cursor` the last answer named. It sends none of the deprecated flat fields, because Immich rejects a request mixing them with `filter` or `cursor`. The structured search does not exclude trashed assets by default, so the filter alone selects the trash. An Immich server older than v3.2.0 drops the `filter` and `cursor` it does not know. It then answers a page-based search of live assets with no nextCursor key. Such an answer stops paging as a short sync rather than a complete one. So does an empty page naming a cursor, or a repeated cursor. Exceptions from every step, including the count and backfill steps, go to CommandRunner.RunAsync() and exit 1. The upsert keeps an existing file name and only fills an image hash that is still null.
 
 ### Undo
 

@@ -597,8 +597,9 @@ were already imported and trashed in Immich.
    `--apikey` or `--apikey-file`.
 2. **Fetch**: paginates through `POST /api/search/metadata` with a `trashedAt` filter to
    retrieve all trashed assets, following the `nextCursor` each answer names. Each page returns up
-   to 1000 assets. This needs Immich v3.2.0 or later. An older server's answer, or any other
-   answer the command cannot page through, stops the sync short with exit code 2.
+   to 1000 assets. This needs Immich v3.2.0 or later. An older server's answer, an empty page
+   naming a cursor, or a repeated cursor stops the sync short with exit code 2. An HTTP error or
+   an answer it cannot parse ends the command with exit code 1.
 3. **Store**: converts each asset's Base64-encoded SHA-1 checksum to lowercase hex and inserts
    it into the `trash_hashes` table, keeping a row that already exists. The operation is
    idempotent, so running `trash` again safely adds any newly trashed assets.
