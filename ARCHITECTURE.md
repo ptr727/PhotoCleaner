@@ -712,20 +712,18 @@ The folder date comes from the inferred path date, else the parsed metadata date
 
 ```mermaid
 flowchart TD
-  start["ExifToolJson.GetDateString(): first date tag set, Matroska date never read, S10"]:::suspect
+  start["ExifToolJson.GetDateString(): first date tag set, Matroska date included"]
   start --> dpQ{"--datepath?"}
   dpQ -->|"no"| getDate
-  dpQ -->|"yes"| setQ{"ExifToolJson.IsDateSet(): metadata has a date string?"}
-  setQ -->|"yes"| getDate{"ExifToolJson.GetDate(): date string parses as yyyy:MM:dd HH:mm:ss?"}
+  dpQ -->|"yes"| setQ{"ExifToolJson.IsDateSet(): metadata has a date that parses?"}
+  setQ -->|"yes"| getDate{"ExifToolJson.GetDate(): date string parses, with or without sub-seconds or a time zone offset?"}
   setQ -->|"no"| infer{"DateFromPath.InferCreatedDate(): date in the file name or directories?"}
   infer -->|"yes"| inferred["Use the inferred date for the folder and the later date write"]
   infer -->|"no"| inferWarn["Log a warning, no inferred date"]
   inferWarn --> getDate
   getDate -->|"yes"| build
-  getDate -->|"no date string"| minDate["Folder date is DateTime.MinValue, so 0001/01/01"]
-  getDate -->|"any other form, such as a time zone or a zero date"| tzDate["Dated file goes to 0001/01/01, --datepath skipped, S10"]:::suspect
+  getDate -->|"no"| minDate["Folder date is DateTime.MinValue, so 0001/01/01"]
   minDate --> build
-  tzDate --> build
   inferred --> build["ImportTask.BuildDestinationPath(): --outpath, date by --format, file name"]
   build --> unique["MediaUtilities.GetUniqueFileName(): add _1, _2 when the name exists now"]
   unique --> writeQ{"Detected file type in the exiftool write list?"}
@@ -739,7 +737,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-`ExifToolJson.IsDateSet()` is true for any non-empty date string, even one that does not parse. That suppresses `--datepath` for such a file.
+`ExifToolJson.IsDateSet()` is true only when `GetDate()` parses the date, so `--datepath` is tried for a zero or malformed date too. A date with a time zone offset files under its recorded wall-clock date, the same reading a date without an offset gets. The Matroska date is read from `Matroska:DateTimeOriginal`.
 
 #### Import Copy and Writes
 
@@ -1146,7 +1144,6 @@ Each entry describes a branch the diagrams mark, as the code behaves today, and 
 - **S7.** A `process` dry run counts every file it would change as Failed and exits 2, #315.
 - **S8.** A dry run with `--db` creates, upgrades and writes the database, #316.
 - **S9.** A trashed file whose delete fails continues through the pipeline, and the run exits 0, #317.
-- **S10.** A created date with a time zone, or one held only in `Matroska:DateTimeOriginal`, reads as no date, #318.
 - **S11.** `import --deleteempty` throws when `--outpath` does not exist, so the run exits 1, #319.
 - **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S13.** Two parallel imports with the same name and date can pick the same destination, #321.

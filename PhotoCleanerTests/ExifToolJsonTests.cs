@@ -66,7 +66,7 @@ public sealed class ExifToolJsonTests
             new ExifToolJson { QuickTimeCreateDate = "2024:01:15 12:30:45" },
             new ExifToolJson { H264DateTimeOriginal = "2024:01:15 12:30:45" },
             new ExifToolJson { ASFCreationDate = "2024:01:15 12:30:45" },
-            new ExifToolJson { RIFFDateTimeOriginal = "2024:01:15 12:30:45" },
+            new ExifToolJson { MatroskaDateTimeOriginal = "2024:01:15 12:30:45" },
         ];
 
     public static TheoryData<ExifToolJson, string> GetDateString_SingleFieldData =>
@@ -97,7 +97,7 @@ public sealed class ExifToolJsonTests
                 "2024:01:20 17:45:00"
             },
             {
-                new ExifToolJson { RIFFDateTimeOriginal = "2024:01:21 18:00:00" },
+                new ExifToolJson { MatroskaDateTimeOriginal = "2024:01:21 18:00:00" },
                 "2024:01:21 18:00:00"
             },
         };
@@ -297,7 +297,7 @@ public sealed class ExifToolJsonTests
         {
             H264DateTimeOriginal = "2024:01:19 16:30:00",
             ASFCreationDate = "2024:01:20 17:45:00",
-            RIFFDateTimeOriginal = "2024:01:21 18:00:00",
+            MatroskaDateTimeOriginal = "2024:01:21 18:00:00",
         };
 
         // Act
@@ -308,13 +308,13 @@ public sealed class ExifToolJsonTests
     }
 
     [Fact]
-    public void GetDateString_PrioritizesASFCreationDateOverRIFF()
+    public void GetDateString_PrioritizesASFCreationDateOverMatroska()
     {
         // Arrange
         ExifToolJson json = new()
         {
             ASFCreationDate = "2024:01:20 17:45:00",
-            RIFFDateTimeOriginal = "2024:01:21 18:00:00",
+            MatroskaDateTimeOriginal = "2024:01:21 18:00:00",
         };
 
         // Act
@@ -373,6 +373,54 @@ public sealed class ExifToolJsonTests
         DateTime? result = json.GetDate();
 
         result.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("2020:01:02 03:04:05+02:00")]
+    [InlineData("2020:01:02 03:04:05-11:30")]
+    [InlineData("2020:01:02 03:04:05Z")]
+    [InlineData("2020:01:02 03:04:05.25")]
+    [InlineData("2020:01:02 03:04:05.123456+02:00")]
+    public void GetDate_WhenOffsetOrSubSeconds_ReturnsRecordedWallClockDate(string value)
+    {
+        ExifToolJson json = new() { XMPCreateDate = value };
+
+        DateTime? result = json.GetDate();
+
+        result.Should().NotBeNull();
+        result!.Value.Date.Should().Be(new DateTime(2020, 1, 2));
+        result.Value.Hour.Should().Be(3);
+        json.IsDateSet().Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("not a date")]
+    [InlineData("0000:00:00 00:00:00")]
+    [InlineData("2020:13:45 03:04:05")]
+    public void IsDateSet_WhenDateDoesNotParse_ReturnsFalse(string value)
+    {
+        ExifToolJson json = new() { EXIFDateTimeOriginal = value };
+
+        json.GetDate().Should().BeNull();
+        json.IsDateSet().Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetDateString_WhenOnlyRiffDateSet_ReturnsNull()
+    {
+        ExifToolJson json = new() { RIFFDateTimeOriginal = "2024:01:21 18:00:00" };
+
+        json.GetDateString().Should().BeNull();
+    }
+
+    [Fact]
+    public void Deserialize_WhenMatroskaDateOnly_ReadsDate()
+    {
+        ExifToolJson result = Deserialize(
+            """{"Matroska:DateTimeOriginal":"2021:03:04 05:06:07"}"""
+        );
+
+        result.GetDate().Should().Be(new DateTime(2021, 3, 4, 5, 6, 7));
     }
 
     // -- IsDngVersionNewer ----------------------------------------------------

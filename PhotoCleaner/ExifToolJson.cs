@@ -174,23 +174,29 @@ public sealed class ExifToolJson
     public string FileDetails =>
         $"type='{FileType}', extension='{FileTypeExtension}', MIME='{MIMEType}'";
 
-    public bool IsDateSet() => GetDateString() is not null;
+    public bool IsDateSet() => GetDate() is not null;
 
-    private const string ExifDateFormat = "yyyy:MM:dd HH:mm:ss";
+    private static readonly string[] s_exifDateFormats =
+    [
+        "yyyy:MM:dd HH:mm:ss",
+        "yyyy:MM:dd HH:mm:ssK",
+        "yyyy:MM:dd HH:mm:ss.FFFFFFF",
+        "yyyy:MM:dd HH:mm:ss.FFFFFFFK",
+    ];
 
     public DateTime? GetDate()
     {
         string? dateStr = GetDateString();
         return
             !string.IsNullOrEmpty(dateStr)
-            && DateTime.TryParseExact(
+            && DateTimeOffset.TryParseExact(
                 dateStr,
-                ExifDateFormat,
+                s_exifDateFormats,
                 CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out DateTime date
+                DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset date
             )
-            ? date
+            ? date.DateTime
             : null;
     }
 
@@ -239,7 +245,7 @@ public sealed class ExifToolJson
         }
 
         // Matroska:DateTimeOriginal
-        return !string.IsNullOrEmpty(RIFFDateTimeOriginal) ? RIFFDateTimeOriginal : null;
+        return !string.IsNullOrEmpty(MatroskaDateTimeOriginal) ? MatroskaDateTimeOriginal : null;
     }
 
     // Verdicts read "OK", "4 Warnings (all minor)", or "2 Errors, 3 Warnings".
