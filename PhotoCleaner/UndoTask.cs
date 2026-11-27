@@ -3,8 +3,11 @@ using System.Text.RegularExpressions;
 
 namespace PhotoCleaner;
 
-internal sealed partial class UndoTask(CommandLine.Options options)
+internal sealed partial class UndoTask(CommandLine.Options options, StringComparer pathComparer)
 {
+    internal UndoTask(CommandLine.Options options)
+        : this(options, MediaUtilities.PathComparer) { }
+
     [GeneratedRegex(@"\.bak\d*$")]
     private static partial Regex BackupPattern();
 
@@ -14,11 +17,13 @@ internal sealed partial class UndoTask(CommandLine.Options options)
     internal const string MarkerExtension = ".out";
 
     // Files removed and names taken so far, so a dry run picks the same free names a live run would.
-    private readonly HashSet<string> _removed = new(MediaUtilities.PathComparer);
-    private readonly HashSet<string> _taken = new(MediaUtilities.PathComparer);
+    private readonly HashSet<string> _removed = new(pathComparer);
+    private readonly HashSet<string> _taken = new(pathComparer);
 
     // Base names of originals still to restore, which a free name for another original never takes.
-    private readonly HashSet<string> _pending = new(MediaUtilities.PathComparer);
+    private readonly HashSet<string> _pending = new(pathComparer);
+
+    private readonly StringComparer _pathComparer = pathComparer;
 
     internal static bool IsBackupFile(string path) => BackupPattern().IsMatch(path);
 
@@ -82,7 +87,7 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         List<Backup> backups = [];
         foreach (
             string path in backupPaths
-                .OrderBy(GetBackupBase, StringComparer.Ordinal)
+                .OrderBy(GetBackupBase, _pathComparer)
                 .ThenBy(GetBackupSortKey)
         )
         {
@@ -128,7 +133,7 @@ internal sealed partial class UndoTask(CommandLine.Options options)
         foreach (
             IGrouping<string, Backup> record in backups
                 .Where(b => b.Output is not null)
-                .GroupBy(b => b.Output!, StringComparer.Ordinal)
+                .GroupBy(b => b.Output!, _pathComparer)
         )
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -136,9 +141,7 @@ internal sealed partial class UndoTask(CommandLine.Options options)
             List<Backup> holders = [.. record];
             List<Backup> outputBackups =
             [
-                .. backups.Where(b =>
-                    string.Equals(b.Base, output, StringComparison.Ordinal) && !holders.Contains(b)
-                ),
+                .. backups.Where(b => _pathComparer.Equals(b.Base, output) && !holders.Contains(b)),
             ];
 
             if (!Exists(output))
@@ -190,7 +193,7 @@ internal sealed partial class UndoTask(CommandLine.Options options)
                     Exists(candidate) || _pending.Contains(candidate)
                 )
                 : backup.Base;
-            if (!string.Equals(target, backup.Base, StringComparison.Ordinal))
+            if (!_pathComparer.Equals(target, backup.Base))
             {
                 Log.Warning(
                     "'{FilePath}' is taken, restoring '{BackupPath}' to '{TargetPath}'",
