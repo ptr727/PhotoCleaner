@@ -729,6 +729,45 @@ public sealed class CommandLineTests
         cli.Result.Errors.Should().NotBeEmpty();
     }
 
+    // -- --failunwritable -------------------------------------------------------
+
+    [Fact]
+    public void FailUnwritableOption_DefaultFalse()
+    {
+        CommandLine cli = new(["import", "--path", ExistingDir, "--outpath", ExistingDir]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        cli.Result.Errors.Should().BeEmpty();
+        options.FailUnwritable.Should().BeFalse();
+    }
+
+    [Fact]
+    public void FailUnwritableOption_Import_ParsedTrue()
+    {
+        CommandLine cli = new([
+            "import",
+            "--path",
+            ExistingDir,
+            "--outpath",
+            ExistingDir,
+            "--failunwritable",
+        ]);
+
+        CommandLine.Options options = cli.CreateOptions(cli.Result);
+
+        cli.Result.Errors.Should().BeEmpty();
+        options.FailUnwritable.Should().BeTrue();
+    }
+
+    [Fact]
+    public void FailUnwritableOption_Process_ParseError()
+    {
+        CommandLine cli = new(["process", "--path", ExistingDir, "--failunwritable"]);
+
+        cli.Result.Errors.Should().NotBeEmpty();
+    }
+
     // -- --imagehash and trash --processdb -------------------------------------
 
     [Fact]

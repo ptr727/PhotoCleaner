@@ -18,6 +18,7 @@ internal sealed class CommandLine
     private readonly Option<bool> _deleteEmptyOption = CreateDeleteEmptyOption();
     private readonly Option<bool> _moveOption = CreateMoveOption();
     private readonly Option<bool> _tagPathOption = CreateTagPathOption();
+    private readonly Option<bool> _failUnwritableOption = CreateFailUnwritableOption();
     private readonly Option<string?> _tagsOption = CreateTagsOption();
     private readonly Option<FileInfo?> _dbFileOption = CreateDbFileOption();
     private readonly Option<bool> _rehashOption = CreateRehashOption();
@@ -136,6 +137,7 @@ internal sealed class CommandLine
             _tagPathOption,
             _tagsOption,
             _datePathOption,
+            _failUnwritableOption,
             _dbFileOption,
             _rehashOption,
             _trashDbFileOption,
@@ -330,6 +332,7 @@ internal sealed class CommandLine
             TrashDbFile = trashDbFile ?? parseResult.GetValue(_trashDbFileOption),
             SkipDbFile = parseResult.GetValue(_skipDbFileOption),
             ImageHash = parseResult.GetValue(_imageHashOption),
+            FailUnwritable = parseResult.GetValue(_failUnwritableOption),
             LogOptions = new LoggerFactory.Options
             {
                 Level = parseResult.GetValue(_logLevelOption),
@@ -395,6 +398,13 @@ internal sealed class CommandLine
         {
             Description =
                 "Apply path sub-directory components as XMP Subject tags to the organized file",
+        };
+
+    private static Option<bool> CreateFailUnwritableOption() =>
+        new("--failunwritable")
+        {
+            Description =
+                "Count a file as failed when its type cannot take a requested --tags, --tagpath or --datepath write (default: warn)",
         };
 
     private static Option<string?> CreateTagsOption() =>
@@ -565,6 +575,9 @@ internal sealed class CommandLine
 
         // Not required, so an Options built without it keeps whole-file matching only.
         public bool ImageHash { get; init; }
+
+        // Not required, so an Options built without it keeps an unwritable type a warning.
+        public bool FailUnwritable { get; init; }
         internal required LoggerFactory.Options LogOptions { get; init; }
     }
 }

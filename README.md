@@ -86,8 +86,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   EXIF (XMP for a GIF) or QuickTime creation dates from filenames or directory path
   structures when metadata is absent. It is opt-in, and it applies before the file is moved
   to a date-based directory so the source path is still available.
-  A failed `--tagpath`, `--tags`, or `--datepath` write counts the file as failed, so `import`
-  exits non-zero. So does a failed mtime restore or database write. A copy is removed after any
+  A failed `--tagpath`, `--tags`, or `--datepath` write, including one exiftool reports as
+  unchanged, counts the file as failed, so `import` exits non-zero. So does a failed mtime
+  restore or database write. A copy is removed after any
   such failure, so the next run imports it again. A copy that cannot be removed stays, and gets
   its `--db` row unless the database write failed, so the next run skips the source.
   A moved file stays at its destination without
@@ -189,6 +190,7 @@ Options:
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
   --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
   --datepath                     Set missing creation date from file path
+  --failunwritable               Count a file as failed when its type cannot take a requested --tags, --tagpath or --datepath write (default: warn)
   --db <db>                      SQLite database file for file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
   --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
@@ -272,6 +274,9 @@ Options:
   the source path context is only available during `import` (before files move to date-based
   directories). A type outside that write list imports without the date, with a warning naming
   the skipped date.
+- `--failunwritable`: optional (`import` only). A type outside that write list counts as
+  failed when given a `--tagpath`, `--tags`, or `--datepath` write it cannot take. It is not
+  copied or moved, where by default it imports with a warning.
 - `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,

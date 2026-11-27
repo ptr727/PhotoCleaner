@@ -38,7 +38,8 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         string? tags = null,
         int threads = 1,
         string? path = null,
-        FileInfo? dbFile = null
+        FileInfo? dbFile = null,
+        bool failUnwritable = false
     ) =>
         new()
         {
@@ -63,6 +64,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             TrashDbFile = null,
             SkipDbFile = null,
             ImageHash = imageHash,
+            FailUnwritable = failUnwritable,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,
@@ -1381,6 +1383,105 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    // A write exiftool could not apply exits 0 and reports the file as unchanged.
+    private static string UnchangedWriteStub(string dir) =>
+        TempDirectoryFixture.WriteExifToolStub(
+            dir,
+            "echo '    0 image files updated'\necho '    1 image files unchanged'\nexit 0\n"
+        );
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_TagWriteUnchanged_CountsFailed(bool move)
+    {
+        string srcDir = TempDir();
+        string stubDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            string stub = UnchangedWriteStub(stubDir);
+            (string jpg, string dest) = await CreateTaggedSourceAsync(fixture, srcDir);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                CreateOptions(outDir, move: move, tags: "extra"),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            // A copy is removed with no row, and a moved file stays with its row.
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().Be(!move);
+            File.Exists(Path.Combine(outDir, dest)).Should().Be(move);
+            FileRecord? row = await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken);
+            (row is not null).Should().Be(move);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(stubDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DateWriteUnchanged_CountsFailedAndRemovesCopy()
+    {
+        string srcDir = TempDir();
+        string stubDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            string stub = UnchangedWriteStub(stubDir);
+            string datedDir = Path.Combine(srcDir, "2021", "05", "02");
+            Directory.CreateDirectory(datedDir);
+            string jpg = Path.Combine(datedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+
+            ImportTask task = new(
+                CreateOptions(outDir, datePath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "2021-05", "photo.jpg")).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(stubDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_TagWriteSucceeds_CountsImported()
     {
@@ -1693,6 +1794,15 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             .IsWriteFailure(exitCode, standardOutput, standardError)
             .Should()
             .Be(expected);
+
+    [Theory]
+    [InlineData("    1 image files updated", false)]
+    [InlineData("    0 image files updated\n    1 image files unchanged", true)]
+    [InlineData("    0 image files updated\r\n    1 image files unchanged\r\n", true)]
+    [InlineData("    1 image files updated\n    0 image files unchanged", false)]
+    [InlineData("", false)]
+    public void IsWriteUnchanged_ReadsUnchangedCount(string standardOutput, bool expected) =>
+        MediaUtilities.IsWriteUnchanged(standardOutput).Should().Be(expected);
 
     // -- datePath: missing EXIF date inferred from path -----------------------
 
@@ -3427,6 +3537,56 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
         finally
         {
             Log.Logger = savedLogger;
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("trip", false, 1)]
+    [InlineData("trip", true, 1)]
+    [InlineData(null, false, 0)]
+    public async Task ExecuteAsync_TypeExifToolCannotWriteWithFailUnwritable_FailsBeforeCopy(
+        string? tags,
+        bool dryRun,
+        int expectedFailed
+    )
+    {
+        string srcDir = ImportTaskTests.TempDir();
+        string outDir = ImportTaskTests.TempDir();
+        try
+        {
+            string avi = Path.Combine(srcDir, "clip.avi");
+            File.Copy(media.SourceFile(TempDirectoryFixture.AviFile), avi);
+
+            ImportTask task = new(
+                ImportTaskTests.CreateOptions(
+                    outDir,
+                    dryRun: dryRun,
+                    tags: tags,
+                    failUnwritable: true
+                ),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [avi],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1 - expectedFailed);
+            failed.Should().Be(expectedFailed);
+            File.Exists(avi).Should().BeTrue();
+            Directory
+                .GetFiles(outDir, "*", SearchOption.AllDirectories)
+                .Should()
+                .HaveCount(expectedFailed == 0 && !dryRun ? 1 : 0);
+        }
+        finally
+        {
             Directory.Delete(srcDir, recursive: true);
             Directory.Delete(outDir, recursive: true);
         }

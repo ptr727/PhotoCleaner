@@ -384,9 +384,19 @@ internal sealed class ImportTask(
             )
             : [];
         string[] allTags = canWriteTags ? [.. pathTags, .. explicitTags] : [];
-        if (!canWriteTags)
+        if (
+            !canWriteTags
+            && ReportSkippedWrites(
+                file,
+                meta,
+                [.. pathTags, .. explicitTags],
+                inferredDateStr,
+                options.FailUnwritable
+            )
+            && options.FailUnwritable
+        )
         {
-            WarnSkippedWrites(file, meta, [.. pathTags, .. explicitTags], inferredDateStr);
+            return ImportResult.Failed;
         }
         if (allTags.Length > 0)
         {
@@ -603,6 +613,7 @@ internal sealed class ImportTask(
                         inferredDate,
                         destFile,
                         ExifToolCommand,
+                        true,
                         cancellationToken
                     )
                     .ConfigureAwait(false),
@@ -859,7 +870,12 @@ internal sealed class ImportTask(
             destFile
         );
         Log.Debug("exiftool: Setting XMP:Subject on '{FilePath}'", destFile);
-        return MediaUtilities.WriteExifToolAsync(ExifToolCommand, [.. args], cancellationToken);
+        return MediaUtilities.WriteExifToolAsync(
+            ExifToolCommand,
+            [.. args],
+            true,
+            cancellationToken
+        );
     }
 
     // A caller may delete the source after an import succeeds, so a failed write fails the file.
@@ -906,11 +922,13 @@ internal sealed class ImportTask(
         return ReportWrite(failure, What, sourceFile, destFile) ? null : What;
     }
 
-    private static void WarnSkippedWrites(
+    // Returns whether a requested write was skipped, which fails the file under --failunwritable.
+    private static bool ReportSkippedWrites(
         string file,
         ExifToolJson? meta,
         string[] tags,
-        string inferredDate
+        string inferredDate,
+        bool fail
     )
     {
         List<string> skipped = [];
@@ -924,18 +942,35 @@ internal sealed class ImportTask(
             skipped.Add($"created date '{inferredDate}'");
         }
 
-        if (skipped.Count > 0)
+        if (skipped.Count == 0)
+        {
+            return false;
+        }
+
+        string reason =
+            meta is null ? "its metadata could not be read"
+            : string.IsNullOrEmpty(meta.FileTypeExtension) ? "exiftool reported no file type"
+            : $"type '{meta.FileTypeExtension}' is not in the exiftool write list";
+        if (fail)
+        {
+            Log.Error(
+                "Failed to import '{FilePath}', which cannot take {Skipped}, since {Reason}",
+                file,
+                string.Join(" and ", skipped),
+                reason
+            );
+        }
+        else
         {
             Log.Warning(
                 "Skipping {Skipped} for '{FilePath}', since {Reason}",
                 string.Join(" and ", skipped),
                 file,
-                meta is null ? "its metadata could not be read"
-                    : string.IsNullOrEmpty(meta.FileTypeExtension)
-                        ? "exiftool reported no file type"
-                    : $"type '{meta.FileTypeExtension}' is not in the exiftool write list"
+                reason
             );
         }
+
+        return true;
     }
 
     // A copy is removed, so the untouched source imports cleanly on the next run.
