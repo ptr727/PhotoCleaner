@@ -367,16 +367,18 @@ internal sealed class ImportTask(
         bool canWriteTags = s_exiftoolWriteExtensions.Contains(
             "." + (meta?.FileTypeExtension ?? string.Empty)
         );
-        string[] pathTags =
-            (options.TagPath && canWriteTags) ? ComputePathTags(file, sourceDir) : [];
-        string[] explicitTags =
-            (!string.IsNullOrEmpty(options.Tags) && canWriteTags)
-                ? options.Tags.Split(
-                    ',',
-                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
-                )
-                : [];
-        string[] allTags = [.. pathTags, .. explicitTags];
+        string[] pathTags = options.TagPath ? ComputePathTags(file, sourceDir) : [];
+        string[] explicitTags = !string.IsNullOrEmpty(options.Tags)
+            ? options.Tags.Split(
+                ',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            )
+            : [];
+        string[] allTags = canWriteTags ? [.. pathTags, .. explicitTags] : [];
+        if (!canWriteTags)
+        {
+            WarnSkippedWrites(file, meta, [.. pathTags, .. explicitTags], inferredDateStr);
+        }
         if (allTags.Length > 0)
         {
             Log.Information(
@@ -398,10 +400,10 @@ internal sealed class ImportTask(
             return ImportResult.Imported;
         }
 
+        // FileInfo reads lazily, and a move leaves nothing at the source path to read.
+        FileInfo sourceInfo = new(file);
         try
         {
-            // FileInfo reads lazily, and a move leaves nothing at the source path to read.
-            FileInfo sourceInfo = new(file);
             sourceInfo.Refresh();
             _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
             if (finalDest != requestedDest)
@@ -421,109 +423,6 @@ internal sealed class ImportTask(
             {
                 File.Copy(file, finalDest);
             }
-
-            // Write inferred date to destination before restoring mtime
-            bool written = true;
-            if (!string.IsNullOrEmpty(inferredDateStr) && canWriteTags)
-            {
-                written = ReportWrite(
-                    await MediaUtilities
-                        .TrySetCreateDateAsync(
-                            inferredDateStr,
-                            finalDest,
-                            ExifToolCommand,
-                            cancellationToken
-                        )
-                        .ConfigureAwait(false),
-                    "created date",
-                    file,
-                    finalDest
-                );
-            }
-
-            // Apply XMP Subject tags before restoring mtime so exiftool does not clobber it
-            if (written && allTags.Length > 0)
-            {
-                written = ReportWrite(
-                    await ApplyTagsAsync(allTags, finalDest, cancellationToken)
-                        .ConfigureAwait(false),
-                    "tags",
-                    file,
-                    finalDest
-                );
-            }
-
-            if (!written)
-            {
-                RollBackDestination(file, finalDest, sourceInfo.LastWriteTimeUtc);
-                return ImportResult.Failed;
-            }
-
-            // Restore source mtime last - after any exiftool writes
-            File.SetLastWriteTimeUtc(finalDest, sourceInfo.LastWriteTimeUtc);
-
-            // The row identifies the source file, not the destination.
-            // Lookups are by source content hash.
-            if (database is not null && sha256 is not null && sha1 is not null)
-            {
-                FileMetadata? metadata = FileMetadata.FromExifTool(meta);
-                if (cached is null)
-                {
-                    Log.Debug(
-                        "Inserting source '{SourcePath}' with SHA-256 '{Sha256}'",
-                        file,
-                        sha256
-                    );
-                    await database
-                        .InsertAsync(
-                            new FileRecord(
-                                file,
-                                sha256,
-                                sha1,
-                                sourceInfo.Length,
-                                sourceInfo.LastWriteTimeUtc.Ticks,
-                                false,
-                                metadata?.ContentIdentifier,
-                                metadata?.ImageHash,
-                                metadata is not null
-                            ),
-                            cancellationToken
-                        )
-                        .ConfigureAwait(false);
-                }
-                else
-                {
-                    Log.Debug(
-                        "Updating source '{SourcePath}' with SHA-256 '{Sha256}'",
-                        file,
-                        sha256
-                    );
-                    await database
-                        .UpdateHashesAsync(
-                            file,
-                            sha256,
-                            sha1,
-                            sourceInfo.Length,
-                            sourceInfo.LastWriteTimeUtc.Ticks,
-                            metadata,
-                            cancellationToken
-                        )
-                        .ConfigureAwait(false);
-                }
-            }
-
-            return ImportResult.Imported;
-        }
-        catch (OperationCanceledException)
-        {
-            // Only a cancelled copy can leave a partial destination.
-            // A move is atomic on one filesystem, and cross-device failure leaves the source intact.
-            if (!options.Move && File.Exists(finalDest))
-            {
-                _ = DeleteCopy(finalDest);
-            }
-
-            throw;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -537,6 +436,167 @@ internal sealed class ImportTask(
             );
             return ImportResult.Failed;
         }
+
+        try
+        {
+            string? failedWrite = await WriteMetadataAsync(
+                    file,
+                    finalDest,
+                    canWriteTags ? inferredDateStr : string.Empty,
+                    allTags,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+
+            // A moved file has no source left to return to, so it stays and keeps the source time.
+            if (failedWrite is null || options.Move)
+            {
+                string? timeFailure = RestoreSourceTime(
+                    file,
+                    finalDest,
+                    sourceInfo.LastWriteTimeUtc
+                );
+                failedWrite ??= timeFailure;
+            }
+
+            if (failedWrite is not null && !options.Move)
+            {
+                RemoveCopy(file, finalDest);
+                return ImportResult.Failed;
+            }
+
+            await WriteRowAsync(file, sha256, sha1, cached, sourceInfo, meta, cancellationToken)
+                .ConfigureAwait(false);
+            if (failedWrite is null)
+            {
+                return ImportResult.Imported;
+            }
+
+            // The row keeps a later copy of this content out of the library, as for an import.
+            Log.Warning(
+                "Kept '{DestinationPath}' moved from '{SourcePath}' after the failed {What} write",
+                finalDest,
+                file,
+                failedWrite
+            );
+            ReleaseClaims(claimed, true);
+            claimed.Clear();
+            return ImportResult.Failed;
+        }
+        catch (OperationCanceledException)
+        {
+            // Only a cancelled copy can leave a partial destination.
+            // A move is atomic on one filesystem, and cross-device failure leaves the source intact.
+            if (!options.Move && File.Exists(finalDest))
+            {
+                _ = DeleteCopy(finalDest);
+            }
+
+            throw;
+        }
+        catch (Exception) when (!options.Move)
+        {
+            // Removed before the claims are freed, so a file waiting on them cannot import a second copy.
+            RemoveCopy(file, finalDest);
+            throw;
+        }
+    }
+
+    // Returns the name of the write that failed, or null when every write landed.
+    private async Task<string?> WriteMetadataAsync(
+        string sourceFile,
+        string destFile,
+        string inferredDate,
+        string[] tags,
+        CancellationToken cancellationToken
+    )
+    {
+        // Write inferred date to destination before restoring mtime
+        if (
+            !string.IsNullOrEmpty(inferredDate)
+            && !ReportWrite(
+                await MediaUtilities
+                    .TrySetCreateDateAsync(
+                        inferredDate,
+                        destFile,
+                        ExifToolCommand,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false),
+                "created date",
+                sourceFile,
+                destFile
+            )
+        )
+        {
+            return "created date";
+        }
+
+        // Apply XMP Subject tags before restoring mtime so exiftool does not clobber it
+        return
+            tags.Length > 0
+            && !ReportWrite(
+                await ApplyTagsAsync(tags, destFile, cancellationToken).ConfigureAwait(false),
+                "tags",
+                sourceFile,
+                destFile
+            )
+            ? "tags"
+            : null;
+    }
+
+    // The row identifies the source file, not the destination.
+    // Lookups are by source content hash.
+    private async Task WriteRowAsync(
+        string file,
+        string? sha256,
+        string? sha1,
+        FileRecord? cached,
+        FileInfo sourceInfo,
+        ExifToolJson? meta,
+        CancellationToken cancellationToken
+    )
+    {
+        if (database is null || sha256 is null || sha1 is null)
+        {
+            return;
+        }
+
+        FileMetadata? metadata = FileMetadata.FromExifTool(meta);
+        if (cached is null)
+        {
+            Log.Debug("Inserting source '{SourcePath}' with SHA-256 '{Sha256}'", file, sha256);
+            await database
+                .InsertAsync(
+                    new FileRecord(
+                        file,
+                        sha256,
+                        sha1,
+                        sourceInfo.Length,
+                        sourceInfo.LastWriteTimeUtc.Ticks,
+                        false,
+                        metadata?.ContentIdentifier,
+                        metadata?.ImageHash,
+                        metadata is not null
+                    ),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            return;
+        }
+
+        Log.Debug("Updating source '{SourcePath}' with SHA-256 '{Sha256}'", file, sha256);
+        await database
+            .UpdateHashesAsync(
+                file,
+                sha256,
+                sha1,
+                sourceInfo.Length,
+                sourceInfo.LastWriteTimeUtc.Ticks,
+                metadata,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
     }
 
     internal async Task<string?> ClaimedByAsync(
@@ -714,21 +774,63 @@ internal sealed class ImportTask(
         return false;
     }
 
-    // A copy is removed, so the untouched source imports cleanly on the next run.
-    // A moved file has no source left to return to, so it stays where it landed.
-    private void RollBackDestination(string sourceFile, string destFile, DateTime lastWriteTimeUtc)
+    // Restore source mtime last - after any exiftool writes
+    private static string? RestoreSourceTime(
+        string sourceFile,
+        string destFile,
+        DateTime lastWriteTimeUtc
+    )
     {
-        if (options.Move)
+        try
         {
             File.SetLastWriteTimeUtc(destFile, lastWriteTimeUtc);
-            Log.Warning(
-                "Kept '{DestinationPath}' moved from '{SourcePath}' after the failed write",
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error(
+                ex,
+                "Failed to write {What} to '{DestinationPath}' imported from '{SourcePath}'",
+                "modified time",
                 destFile,
                 sourceFile
             );
-            return;
+            return "modified time";
+        }
+    }
+
+    private static void WarnSkippedWrites(
+        string file,
+        ExifToolJson? meta,
+        string[] tags,
+        string inferredDate
+    )
+    {
+        List<string> skipped = [];
+        if (tags.Length > 0)
+        {
+            skipped.Add($"tags [{string.Join(", ", tags)}]");
         }
 
+        if (!string.IsNullOrEmpty(inferredDate))
+        {
+            skipped.Add($"created date '{inferredDate}'");
+        }
+
+        if (skipped.Count > 0)
+        {
+            Log.Warning(
+                "Skipping {Skipped} for '{FilePath}', since exiftool cannot write type '{FileType}'",
+                string.Join(" and ", skipped),
+                file,
+                meta?.FileTypeExtension ?? "unknown"
+            );
+        }
+    }
+
+    // A copy is removed, so the untouched source imports cleanly on the next run.
+    private static void RemoveCopy(string sourceFile, string destFile)
+    {
         if (DeleteCopy(destFile))
         {
             Log.Warning(

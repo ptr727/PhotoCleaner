@@ -87,8 +87,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   structures when metadata is absent. It is opt-in, and it applies before the file is moved
   to a date-based directory so the source path is still available.
   A failed `--tagpath`, `--tags`, or `--datepath` write counts the file as failed, so `import`
-  exits non-zero. A failed copy is removed so the next run imports it again. A moved file stays
-  at its destination without the failed write.
+  exits non-zero. So does a failed mtime restore or database write. A copy is removed after any
+  such failure, so the next run imports it again. A moved file stays at its destination without
+  the failed write. With `--db` it still gets its row, so a later copy of the same file is skipped.
   The opt-in `--imagehash` also skips a file whose image data hash is already in the database.
 - **Syncs Immich trash hashes** (via `trash` command): Connects to an Immich server via its
   REST API, fetches all trashed asset checksums (SHA-1), and stores them in a local SQLite
@@ -255,16 +256,17 @@ Options:
   `--path` into tokens and writes each token as an `XMP:Subject` tag on the destination file
   using exiftool. Files at the root of `--path` receive no tags. Tags are applied with a
   remove-then-add pattern (`-XMP:Subject-= / -XMP:Subject+=`) so existing tags are preserved
-  and duplicates are not created. Only file types that support XMP writes are tagged.
+  and duplicates are not created. Only file types exiftool can write are tagged, and any other
+  type imports with a warning naming the tags it skipped.
 - `--tags`: optional (`import` only). A comma-separated list of `XMP:Subject` tags applied to
   every organized file (e.g. `--tags "vacation,family trip,2018"`). Tags are applied using the
   same remove-then-add pattern as `--tagpath`. Can be combined with `--tagpath`, and both sets of
-  tags are merged. Only file types that support XMP writes are tagged.
+  tags are merged. Only file types exiftool can write are tagged, as with `--tagpath`.
 - `--datepath`: optional (`import` only). When a file has no embedded creation date, infers
   one from the filename or directory path structure (via `DateFromPath`) and writes it to the
   destination file before restoring mtime. Opt-in because writing to files is destructive and
   the source path context is only available during `import` (before files move to date-based
-  directories).
+  directories). A type exiftool cannot write imports without the date, with a warning naming the skipped date.
 - `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,

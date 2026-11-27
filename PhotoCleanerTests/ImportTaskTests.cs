@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
 using PhotoCleaner;
+using Serilog;
+using Serilog.Core;
 using Serilog.Events;
 
 namespace PhotoCleanerTests;
@@ -1440,6 +1443,246 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
         finally
         {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TagWriteFailsOnMoveWithDatabase_RecordsKeptFileSoACopySkips()
+    {
+        string srcDir = TempDir();
+        string otherDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            string stub = ExifToolStub(otherDir, "Error: stub write failure", 1);
+            (string jpg, string dest) = await CreateTaggedSourceAsync(srcDir);
+            string copy = Path.Combine(otherDir, "photo.jpg");
+            File.Copy(jpg, copy);
+            (string sha256, _) = await Database.ComputeHashesAsync(
+                jpg,
+                TestContext.Current.CancellationToken
+            );
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask moveTask = new(
+                CreateOptions(outDir, move: true, tags: "extra"),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int moved, _, _, _, _, _, int moveFailed, _) = await moveTask.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            moved.Should().Be(0);
+            moveFailed.Should().Be(1);
+            File.Exists(Path.Combine(outDir, dest)).Should().BeTrue();
+            FileRecord? row = await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken);
+            row.Should().NotBeNull();
+            row!.Sha256.Should().Be(sha256);
+
+            ImportTask copyTask = new(
+                CreateOptions(outDir),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int copied, _, int skipped, _, _, _, int copyFailed, _) = await copyTask.ExecuteAsync(
+                [copy],
+                new DirectoryInfo(otherDir),
+                TestContext.Current.CancellationToken
+            );
+
+            copied.Should().Be(0);
+            skipped.Should().Be(1);
+            copyFailed.Should().Be(0);
+            Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().HaveCount(1);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(otherDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_RowWriteFailsOnCopy_RemovesCopy(bool cachedRow)
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            (string jpg, string dest) = await CreateTaggedSourceAsync(srcDir);
+            await using (Database writable = new(dbPath))
+            {
+                await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                if (cachedRow)
+                {
+                    await writable.InsertAsync(
+                        new FileRecord(jpg, "stale", "stale", 1, 1, false),
+                        TestContext.Current.CancellationToken
+                    );
+                }
+            }
+
+            // A read-only open makes the row write throw a SqliteException, not an IOException
+            await using Database db = new(dbPath, readOnly: true);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                CreateOptions(outDir),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, dest)).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    private sealed class ConcurrentSink : ILogEventSink
+    {
+        internal ConcurrentQueue<LogEvent> Events { get; } = new();
+
+        public void Emit(LogEvent logEvent) => Events.Enqueue(logEvent);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SourceTimeRestoreFailsOnCopy_TakesTheCopyRollback()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        ConcurrentSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            // .NET sets the time on a link itself, so only a missing destination makes the restore throw
+            string stub = TempDirectoryFixture.WriteExifToolStub(
+                srcDir,
+                "for last in \"$@\"; do :; done\nrm \"$last\"\nexit 0\n"
+            );
+            (string jpg, string dest) = await CreateTaggedSourceAsync(srcDir);
+            string destPath = Path.Combine(outDir, dest);
+
+            ImportTask task = new(
+                CreateOptions(outDir, tags: "extra"),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().BeTrue();
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Error
+                    && e.RenderMessage().Contains("modified time", StringComparison.Ordinal)
+                    && e.RenderMessage().Contains(destPath, StringComparison.Ordinal)
+                );
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains("Removed", StringComparison.Ordinal)
+                    && e.RenderMessage().Contains(destPath, StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TypeExifToolCannotWrite_WarnsSkippedTagsAndDate()
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        ConcurrentSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+            string datedDir = Path.Combine(srcDir, "2021", "05", "02");
+            Directory.CreateDirectory(datedDir);
+            string avi = Path.Combine(datedDir, "clip.avi");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.AviFile), avi);
+
+            ImportTask task = new(
+                CreateOptions(outDir, datePath: true, tags: "trip"),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [avi],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            failed.Should().Be(0);
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains(avi, StringComparison.Ordinal)
+                    && e.RenderMessage().Contains("tags [trip]", StringComparison.Ordinal)
+                    && e.RenderMessage().Contains("created date", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
             Directory.Delete(srcDir, recursive: true);
             Directory.Delete(outDir, recursive: true);
         }

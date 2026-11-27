@@ -643,7 +643,7 @@ flowchart TD
   ihQ -->|"no"| exec["ImportTask.ExecuteAsync(): run files in parallel, up to --threads"]
   ihVer --> exec
   exec -->|"each file"| perFile["ImportTask.ImportFileAsync(): import one file, see the stages below"]
-  perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported, else free them"]
+  perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported or kept with its row, else free them"]
   release --> counted(["Counted under the returned result"])
   perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims, then log the file"]
   perFileCatch --> countedFailed(["Counted Failed"])
@@ -729,7 +729,7 @@ flowchart TD
   inferred --> build["ImportTask.BuildDestinationPath(): --outpath, date by --format, file name"]
   build --> unique["MediaUtilities.GetUniqueFileName(): add _1, _2 when the name exists now"]
   unique --> writeQ{"Detected file type in the exiftool write list?"}
-  writeQ -->|"no"| dropped["--tags, --tagpath, and the inferred date dropped, no log line, S14"]:::suspect
+  writeQ -->|"no"| dropped["ImportTask.WarnSkippedWrites(): warn naming the file and the tags or date it skips, S14"]:::suspect
   writeQ -->|"yes"| tags["ImportTask.ComputePathTags(): directory names under --path, with --tagpath"]
   tags --> addTags["Add the --tags values"]
   dropped --> dryQ{"--dryrun?"}
@@ -763,33 +763,38 @@ flowchart TD
   dateW --> dateOk{"ImportTask.ReportWrite(): created-date write succeeded?"}
   dateQ -->|"no"| tagQ{"Any tags to apply?"}
   dateOk -->|"yes"| tagQ
-  dateOk -->|"no"| rollback["ImportTask.RollBackDestination(): undo the destination"]
+  dateOk -->|"no"| writeMvQ{"--move?"}
   tagQ -->|"yes"| tagW["ImportTask.ApplyTagsAsync(): write XMP Subject tags"]
   tagW --> tagOk{"ImportTask.ReportWrite(): tag write succeeded?"}
-  tagOk -->|"no"| rollback
-  rollback --> rbQ{"--move?"}
-  rbQ -->|"yes"| keepMoved["Moved file kept in --outpath, writes missing, no row"]
-  keepMoved --> failed
-  rbQ -->|"no"| delQ{"ImportTask.DeleteCopy(): copy removed?"}
+  tagOk -->|"no"| writeMvQ
+  writeMvQ -->|"no"| rollback["ImportTask.RemoveCopy(): undo the copy"]
+  writeMvQ -->|"yes, keep the moved file"| mtime
+  tagQ -->|"no"| mtime["ImportTask.RestoreSourceTime(): restore the source mtime on the destination"]
+  tagOk -->|"yes"| mtime
+  mtime -->|"IOException or access denied"| timeMvQ{"--move?"}
+  timeMvQ -->|"no"| rollback
+  timeMvQ -->|"yes, keep the moved file"| rowQ
+  rollback --> delQ{"ImportTask.DeleteCopy(): copy removed?"}
   delQ -->|"yes"| failed
   delQ -->|"no"| copyLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
   copyLeft --> failed
-  tagQ -->|"no"| mtime["Restore the source mtime on the destination"]
-  tagOk -->|"yes"| mtime
-  mtime -->|"IOException or access denied"| mtimeFail["Destination kept, no row, logged as a failed copy or move, S12"]:::suspect
-  mtimeFail --> failed
-  mtime --> rowQ{"--db given?"}
-  rowQ -->|"no"| imported(["Counted Imported"])
+  mtime --> rowQ{"ImportTask.WriteRowAsync(): --db given?"}
+  rowQ -->|"no"| keptQ
   rowQ -->|"yes"| cachedQ{"Cached row for the source path?"}
   cachedQ -->|"no"| insert["Database.InsertAsync(): insert or ignore the source row"]
   cachedQ -->|"yes"| update["Database.UpdateHashesAsync(): new hashes, metadata, reset is_processed"]
-  insert --> imported
-  update --> imported
-  insert -->|"SqliteException"| rowFail["Escapes to the per-file catch, destination kept, no row, S12"]:::suspect
-  update -->|"SqliteException"| rowFail
+  insert --> keptQ{"Moved file kept after a failed write?"}
+  update --> keptQ
+  keptQ -->|"no"| imported(["Counted Imported"])
+  keptQ -->|"yes"| keepMoved["Moved file kept in --outpath with its row, writes missing, claims kept"]
+  keepMoved --> failed
+  insert -->|"other exception"| rowMvQ{"--move?"}
+  update -->|"other exception"| rowMvQ
+  rowMvQ -->|"no"| rollback
+  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row"]
+  rowFail --> failed
   insert -->|"cancel"| cancelQ
   update -->|"cancel"| cancelQ
-  rowFail --> failed
   dateW -->|"cancel"| cancelQ{"--move?"}
   tagW -->|"cancel"| cancelQ
   cancelQ -->|"no"| cancelDel["ImportTask.DeleteCopy(): remove the copy"]
@@ -799,7 +804,9 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. An `IOException` or `UnauthorizedAccessException` counts the file Failed. Any other exception, a `SqliteException` included, reaches the per-file catch in `ImportTask.ExecuteAsync()` with the destination left in place.
+Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. That exception still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed.
+
+A moved file has no source left to return to, so a failed write keeps it in `--outpath` with the source mtime. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too.
 
 ### Index
 
@@ -1139,9 +1146,9 @@ Each entry describes a branch the diagrams mark, as the code behaves today, and 
 - **S9.** A trashed file whose delete fails continues through the pipeline, and the run exits 0, #317.
 - **S10.** A created date with a time zone, or one held only in `Matroska:DateTimeOriginal`, reads as no date, #318.
 - **S11.** `import --deleteempty` throws when `--outpath` does not exist, so the run exits 1, #319.
-- **S12.** A copy-mode import that fails after the copy leaves the copy, and the next run imports it again as `_1`, #320.
+- **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S13.** Two parallel imports with the same name and date can pick the same destination, #321.
-- **S14.** `import` drops `--tags`, `--tagpath` and the inferred date silently for a type exiftool cannot write, #322.
+- **S14.** For a type exiftool cannot write, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
 - **S15.** `trash` stops at an empty page without marking the sync partial, and logs a timeout as a cancel, #323.
 
 ## State Management Pattern
