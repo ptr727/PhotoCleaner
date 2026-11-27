@@ -57,7 +57,7 @@ internal sealed class Database(string dbPath, bool readOnly = false, bool inMemo
         {
             _connection = new SqliteConnection("Data Source=:memory:;Pooling=False");
             await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            if (File.Exists(dbPath))
+            if (Exists(dbPath))
             {
                 SqliteConnection source = new($"Data Source={dbPath};Mode=ReadOnly;Pooling=False");
                 await using (source.ConfigureAwait(false))
@@ -116,6 +116,19 @@ internal sealed class Database(string dbPath, bool readOnly = false, bool inMemo
                 CREATE INDEX IF NOT EXISTS idx_files_image_hash ON files (image_hash)
                 """;
             _ = await indexCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static bool Exists(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
         }
     }
 

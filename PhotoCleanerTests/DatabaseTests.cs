@@ -945,4 +945,39 @@ public sealed class DatabaseTests
             }
         }
     }
+
+    [Fact]
+    public async Task InitializeAsync_InMemoryCopyBehindDirectoryThatCannotBeSearched_Throws()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
+        }
+        else
+        {
+            string dir = TempDirectoryFixture.CreateWorkDir();
+            string dbPath = Path.Combine(dir, "files.db");
+            try
+            {
+                await using (Database writable = new(dbPath))
+                {
+                    await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                }
+
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                await using Database copy = new(dbPath, inMemory: true);
+                Func<Task> act = () => copy.InitializeAsync(TestContext.Current.CancellationToken);
+
+                _ = await act.Should().ThrowAsync<UnauthorizedAccessException>();
+            }
+            finally
+            {
+                File.SetUnixFileMode(
+                    dir,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+                TempDirectoryFixture.DeleteWorkDir(dir);
+            }
+        }
+    }
 }
