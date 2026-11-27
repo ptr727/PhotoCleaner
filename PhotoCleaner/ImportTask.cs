@@ -845,24 +845,17 @@ internal sealed class ImportTask(
     // A copy is removed, so the untouched source imports cleanly on the next run.
     private static void RemoveCopy(string sourceFile, string destFile)
     {
-        if (DeleteCopy(destFile))
-        {
-            Log.Warning(
-                "Removed '{DestinationPath}' so '{SourcePath}' can be imported again",
-                destFile,
-                sourceFile
-            );
-        }
-    }
-
-    private static bool DeleteCopy(string destFile)
-    {
         Exception? failure = MediaUtilities.TryDeleteFile(destFile);
         if (failure is not null)
         {
             Log.Warning(failure, "Failed to remove '{DestinationPath}'", destFile);
+            return;
         }
 
-        return failure is null;
+        Log.Warning(
+            "Removed '{DestinationPath}' so '{SourcePath}' can be imported again",
+            destFile,
+            sourceFile
+        );
     }
 }
