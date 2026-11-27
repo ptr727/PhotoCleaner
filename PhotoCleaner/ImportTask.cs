@@ -414,7 +414,7 @@ internal sealed class ImportTask(
             if (finalDest != requestedDest)
             {
                 Log.Warning(
-                    "Destination '{RequestedPath}' already exists, using '{FinalPath}'",
+                    "Destination '{RequestedPath}' exists or another file in this run holds it, using '{FinalPath}'",
                     requestedDest,
                     finalDest
                 );
