@@ -13,6 +13,7 @@ internal static class DatabaseScope
         bool readOnly = false,
         string label = "database",
         bool catalogsMetadata = true,
+        bool dryRun = false,
         CancellationToken cancellationToken = default
     )
     {
@@ -21,15 +22,22 @@ internal static class DatabaseScope
             return await work(null).ConfigureAwait(false);
         }
 
-        if (!readOnly)
+        bool inMemory = dryRun && !readOnly;
+        if (!readOnly && !dryRun)
         {
             _ = Directory.CreateDirectory(dbFile.DirectoryName!);
         }
 
-        Database database = new(dbFile.FullName, readOnly);
+        Database database = new(dbFile.FullName, readOnly, inMemory);
         try
         {
-            Log.Information("Using {Label} '{DbFile}'", label, dbFile.FullName);
+            Log.Information(
+                inMemory
+                    ? "Using an in-memory copy of {Label} '{DbFile}'"
+                    : "Using {Label} '{DbFile}'",
+                label,
+                dbFile.FullName
+            );
             await database.InitializeAsync(cancellationToken).ConfigureAwait(false);
             if (!readOnly && catalogsMetadata)
             {
@@ -51,6 +59,7 @@ internal static class DatabaseScope
         bool readOnly = false,
         string label = "database",
         bool catalogsMetadata = true,
+        bool dryRun = false,
         CancellationToken cancellationToken = default
     ) =>
         await RunAsync<object?>(
@@ -63,6 +72,7 @@ internal static class DatabaseScope
                 readOnly,
                 label,
                 catalogsMetadata,
+                dryRun,
                 cancellationToken
             )
             .ConfigureAwait(false);

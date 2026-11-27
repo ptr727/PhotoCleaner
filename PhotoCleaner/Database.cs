@@ -33,7 +33,9 @@ internal sealed record FileMetadata(string? ContentIdentifier, string? ImageHash
             );
 }
 
-internal sealed class Database(string dbPath, bool readOnly = false) : IDisposable, IAsyncDisposable
+internal sealed class Database(string dbPath, bool readOnly = false, bool inMemory = false)
+    : IDisposable,
+        IAsyncDisposable
 {
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private SqliteConnection? _connection;
@@ -45,10 +47,32 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
 
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        Log.Debug("Initializing database at '{DbPath}' (readOnly={ReadOnly})", dbPath, readOnly);
-        string mode = readOnly ? "Mode=ReadOnly;" : "";
-        _connection = new SqliteConnection($"Data Source={dbPath};{mode}Pooling=False");
-        await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        Log.Debug(
+            "Initializing database at '{DbPath}' (readOnly={ReadOnly}, inMemory={InMemory})",
+            dbPath,
+            readOnly,
+            inMemory
+        );
+        if (inMemory)
+        {
+            _connection = new SqliteConnection("Data Source=:memory:;Pooling=False");
+            await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            if (File.Exists(dbPath))
+            {
+                SqliteConnection source = new($"Data Source={dbPath};Mode=ReadOnly;Pooling=False");
+                await using (source.ConfigureAwait(false))
+                {
+                    await source.OpenAsync(cancellationToken).ConfigureAwait(false);
+                    source.BackupDatabase(_connection);
+                }
+            }
+        }
+        else
+        {
+            string mode = readOnly ? "Mode=ReadOnly;" : "";
+            _connection = new SqliteConnection($"Data Source={dbPath};{mode}Pooling=False");
+            await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         if (readOnly)
         {
@@ -60,7 +84,11 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         }
         else
         {
-            await CheckWritableAsync(cancellationToken).ConfigureAwait(false);
+            if (!inMemory)
+            {
+                await CheckWritableAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             HasImageHash = true;
             using SqliteCommand createCmd = _connection.CreateCommand();
             createCmd.CommandText = """
