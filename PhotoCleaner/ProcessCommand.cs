@@ -50,7 +50,7 @@ internal sealed class ProcessCommand(
                                                     cancellationToken
                                                 );
                                             _fileNames = [.. files];
-                                            foundConflicts = FixCaseConflicts();
+                                            foundConflicts = FixCaseConflicts() && !options.DryRun;
                                         }
 
                                         // Phase one catalogs every file, so phase two can pair by the database.

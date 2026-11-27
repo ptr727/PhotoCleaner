@@ -34,6 +34,7 @@ internal sealed class ProcessTask(
     private bool _modified;
     private bool _reprocess;
     private bool _deleted;
+    private bool _wouldModify;
 
     private static readonly FrozenSet<string> s_remuxExtensions = new[]
     {
@@ -156,9 +157,12 @@ internal sealed class ProcessTask(
                             .ConfigureAwait(false)
                     )?.ImageHash
                     : null;
-                if (await TryDeleteIfTrashedAsync(sha1, imageHash).ConfigureAwait(false))
+                if (
+                    await TryDeleteIfTrashedAsync(sha1, imageHash).ConfigureAwait(false) is
+                    { } trashResult
+                )
                 {
-                    return ProcessResult.Deleted;
+                    return trashResult;
                 }
             }
 
@@ -184,23 +188,26 @@ internal sealed class ProcessTask(
         }
 
         // Process files
-        ProcessResult result =
-            !RenameMismatchedMimeExtensions()
-            || !RenameMixedCaseExtensions()
-            || !await DeleteLivePhotosAsync().ConfigureAwait(false)
-            || !await ConvertVideoAsync().ConfigureAwait(false)
-            || !WarnDngVersion()
-                ? _reprocess
-                    ? ProcessResult.Reprocess
-                    : _deleted
-                        ? ProcessResult.Deleted
-                        : ProcessResult.Failure
-                : _modified
-                    ? ProcessResult.Modified
-                    : ProcessResult.Success;
+        bool completed =
+            RenameMismatchedMimeExtensions()
+            && RenameMixedCaseExtensions()
+            && await DeleteLivePhotosAsync().ConfigureAwait(false)
+            && await ConvertVideoAsync().ConfigureAwait(false)
+            && WarnDngVersion();
+        ProcessResult result = completed
+            ? _modified
+                ? ProcessResult.Modified
+                : ProcessResult.Success
+            : _reprocess
+                ? ProcessResult.Reprocess
+                : _deleted
+                    ? ProcessResult.Deleted
+                    : _wouldModify
+                        ? ProcessResult.Modified
+                        : ProcessResult.Failure;
 
         // Record terminal results in DB so re-runs skip already processed files
-        if (preProcessHash is not null && result is ProcessResult.Success or ProcessResult.Modified)
+        if (preProcessHash is not null && completed)
         {
             Log.Debug(
                 "Recording processed file in database: '{FilePath}' with SHA-256 '{Sha256}'",
@@ -215,7 +222,7 @@ internal sealed class ProcessTask(
         return result;
     }
 
-    private async Task<bool> TryDeleteIfTrashedAsync(string sha1, string? imageHash)
+    private async Task<ProcessResult?> TryDeleteIfTrashedAsync(string sha1, string? imageHash)
     {
         if (await trashDatabase!.Sha1ExistsAsync(sha1, cancellationToken).ConfigureAwait(false))
         {
@@ -239,25 +246,25 @@ internal sealed class ProcessTask(
         }
         else
         {
-            return false;
+            return null;
         }
 
         if (options.DryRun)
         {
-            return true;
+            return ProcessResult.Deleted;
         }
 
         if (MediaUtilities.TryDeleteFile(fileInfo.FullName) is { } failure)
         {
             Log.Error(failure, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
-            return false;
+            return ProcessResult.Failure;
         }
 
         // A later file taking this name must not read as this run's converted output.
         _ = convertedOutputs.TryRemove(fileInfo.FullName, out _);
 
         // The row stays, since a Live video pairs against the cataloged ContentIdentifier of a deleted still.
-        return true;
+        return ProcessResult.Deleted;
     }
 
     private bool RenameMixedCaseExtensions()
@@ -274,6 +281,7 @@ internal sealed class ProcessTask(
         );
         if (options.DryRun)
         {
+            _wouldModify = true;
             return false;
         }
 
@@ -333,6 +341,7 @@ internal sealed class ProcessTask(
         );
         if (options.DryRun)
         {
+            _wouldModify = true;
             return false;
         }
 
@@ -445,6 +454,7 @@ internal sealed class ProcessTask(
             );
             if (options.DryRun)
             {
+                _deleted = true;
                 return false;
             }
 
@@ -584,6 +594,7 @@ internal sealed class ProcessTask(
     {
         if (options.DryRun)
         {
+            _deleted = true;
             return false;
         }
 
@@ -744,6 +755,7 @@ internal sealed class ProcessTask(
         }
         if (options.DryRun)
         {
+            _wouldModify = true;
             return false;
         }
 

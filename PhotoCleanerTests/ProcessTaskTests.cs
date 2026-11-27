@@ -2000,6 +2000,226 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_MatchingFileDeleteFails_FailsAndStaysUnmarked()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
+            return;
+        }
+
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        string lockedDir = Path.Combine(workDir, "locked");
+        try
+        {
+            _ = Directory.CreateDirectory(lockedDir);
+            string filePath = Path.Combine(lockedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            (string _, string sha1) = await Database.ComputeHashesAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await using Database db = new(Path.Combine(workDir, "Process.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await using TrashDatabase trashDb = new(Path.Combine(workDir, "Trash.db"));
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                sha1,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(),
+                new FileInfo(filePath),
+                db,
+                trashDb,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Failure);
+            File.Exists(filePath).Should().BeTrue();
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            row.Should().NotBeNull();
+            row!.IsProcessed.Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(lockedDir))
+            {
+                File.SetUnixFileMode(
+                    lockedDir,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DryRunWithDatabaseWouldRename_CountsModifiedAndLeavesRowUnmarked()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.png");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            await using Database db = new(Path.Combine(workDir, "Process.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(dryRun: true),
+                new FileInfo(filePath),
+                db,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Modified);
+            File.Exists(filePath).Should().BeTrue();
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            (row?.IsProcessed ?? false).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData(TempDirectoryFixture.SmallJpegFile, "photo.png", false)]
+    [InlineData(TempDirectoryFixture.SmallJpegFile, "photo.Jpg", false)]
+    [InlineData(TempDirectoryFixture.ShortVideoFile, "short.mp4", true)]
+    [InlineData(TempDirectoryFixture.MkvFile, "remux.mkv", false)]
+    public async Task ExecuteAsync_DryRun_CountsTheChangeAndLeavesTheFile(
+        string sourceFile,
+        string fileName,
+        bool deleted
+    )
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, fileName);
+            File.Copy(fixture.SourceFile(sourceFile), filePath);
+
+            ProcessTask.ProcessResult result = await CreateContext(filePath, dryRun: true);
+
+            result
+                .Should()
+                .Be(
+                    deleted ? ProcessTask.ProcessResult.Deleted : ProcessTask.ProcessResult.Modified
+                );
+            Directory.GetFiles(workDir).Select(Path.GetFileName).Should().Equal(fileName);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DryRunLivePhotoVideo_CountsDeletedAndKeepsVideo()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "livephoto.mp4");
+            string imagePath = Path.Combine(workDir, "livephoto.heic");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), imagePath);
+            await SetContentIdentifierAsync(videoPath, "test-uuid-dryrun");
+            await SetContentIdentifierAsync(imagePath, "test-uuid-dryrun");
+
+            ProcessTask.ProcessResult result = await CreateContext(videoPath, dryRun: true);
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(videoPath).Should().BeTrue();
+            File.Exists(videoPath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommand_DryRunWouldRename_ExitsSuccessAndLeavesTheFile()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.png");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            int exitCode = await new ProcessCommand(
+                CreateOptions(dryRun: true, path: workDir),
+                TestContext.Current.CancellationToken
+            ).ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            Directory.GetFiles(workDir).Select(Path.GetFileName).Should().Equal("photo.png");
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommand_DryRunCaseConflict_EndsAndLeavesBothFiles()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            if (!TempDirectoryFixture.IsFileSystemCaseSensitive(workDir))
+            {
+                Assert.Skip(
+                    "Filesystem is case-insensitive; a case-variant name cannot hold a second file"
+                );
+            }
+            File.Copy(
+                fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                Path.Combine(workDir, "a.jpg")
+            );
+            File.Copy(
+                fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                Path.Combine(workDir, "A.jpg")
+            );
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
+                TestContext.Current.CancellationToken
+            );
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+
+            int exitCode = await new ProcessCommand(
+                CreateOptions(dryRun: true, path: workDir),
+                timeout.Token
+            ).ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            Directory
+                .GetFiles(workDir)
+                .Select(Path.GetFileName)
+                .Should()
+                .BeEquivalentTo("a.jpg", "A.jpg");
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- Helpers ---------------------------------------------------------------
 
     private static async Task SetContentIdentifierAsync(string filePath, string contentId) =>
@@ -2018,11 +2238,12 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         bool skipBackup = false,
         bool rehash = false,
         bool imageHash = false,
-        double shortVideoDuration = MediaUtilities.ShortVideoDuration
+        double shortVideoDuration = MediaUtilities.ShortVideoDuration,
+        string? path = null
     ) =>
         new()
         {
-            Path = new DirectoryInfo(Path.GetTempPath()),
+            Path = new DirectoryInfo(path ?? Path.GetTempPath()),
             Threads = 1,
             DryRun = dryRun,
             DatePath = false,
