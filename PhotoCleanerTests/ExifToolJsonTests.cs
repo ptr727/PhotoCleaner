@@ -428,6 +428,18 @@ public sealed class ExifToolJsonTests
     }
 
     [Fact]
+    public void GetDateString_WhenFirstDateIsZero_ReturnsNextDateThatParses()
+    {
+        ExifToolJson json = new()
+        {
+            EXIFDateTimeOriginal = "0000:00:00 00:00:00",
+            XMPCreateDate = "2020:01:02 03:04:05+02:00",
+        };
+
+        json.GetDateString().Should().Be("2020:01:02 03:04:05+02:00");
+    }
+
+    [Fact]
     public void GetDate_WhenFirstDateIsZero_UsesNextDateThatParses()
     {
         ExifToolJson json = new()

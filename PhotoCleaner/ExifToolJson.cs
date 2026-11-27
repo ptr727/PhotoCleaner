@@ -187,7 +187,9 @@ public sealed class ExifToolJson
         "yyyy:MM:dd HH:mm:ss.FFFFFFFK",
     ];
 
-    public DateTime? GetDate()
+    public DateTime? GetDate() => FindDate()?.Date;
+
+    private (string Raw, DateTime Date)? FindDate()
     {
         foreach (string dateStr in GetDateStrings())
         {
@@ -201,7 +203,7 @@ public sealed class ExifToolJson
                 )
             )
             {
-                return date.DateTime;
+                return (dateStr, date.DateTime);
             }
         }
         return null;
@@ -225,7 +227,7 @@ public sealed class ExifToolJson
             : string.Concat(dateStr.AsSpan(0, fractionStart + maxDigits), dateStr.AsSpan(end));
     }
 
-    public string? GetDateString() => GetDateStrings().FirstOrDefault();
+    public string? GetDateString() => FindDate()?.Raw;
 
     private IEnumerable<string> GetDateStrings()
     {
