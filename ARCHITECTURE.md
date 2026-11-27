@@ -351,7 +351,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-The trash check runs only with `--db`, before the already-processed skip. A file is marked processed only when every step passes, so a deleted or renamed file keeps its old row unmarked. So does a trashed file whose delete failed, and a file a dry run would change.
+The trash check runs only with `--db`, before the already-processed skip. A file is marked processed only when every step passes, so a deleted or renamed file keeps its old row unmarked. This run marks neither a trashed file whose delete failed nor a file a dry run would change.
 
 #### Process Trash Check
 
@@ -367,7 +367,7 @@ flowchart TD
   dryDel(["Returns Deleted, counted Deleted, nothing removed"])
   del["MediaUtilities.TryDeleteFile(): delete with no backup, even without --skipbackup"]
   delOk(["Returns Deleted, row kept, counted Deleted"])
-  delFail(["Log an error, return Failure, counted Failed, the row stays unmarked"])
+  delFail(["Log an error, return Failure, counted Failed, this run does not mark the row"])
 
   start --> sha
   sha -->|"yes"| dry

@@ -2003,9 +2003,9 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     [Fact]
     public async Task ExecuteAsync_TrashDb_MatchingFileDeleteFails_FailsAndStaysUnmarked()
     {
-        if (!OperatingSystem.IsLinux())
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
         {
-            Assert.Skip("File mode permissions are only enforced on Linux");
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
             return;
         }
 
@@ -2029,11 +2029,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 cancellationToken: TestContext.Current.CancellationToken
             );
             File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
-            if (CanCreateFile(lockedDir))
-            {
-                Assert.Skip("Running with permission to write anywhere");
-                return;
-            }
 
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
                 CreateOptions(),
@@ -2067,18 +2062,39 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    private static bool CanCreateFile(string directory)
+    [Fact]
+    public async Task ExecuteAsync_DryRunWithDatabaseWouldRename_CountsModifiedAndLeavesRowUnmarked()
     {
-        string probe = Path.Combine(directory, "probe.tmp");
+        string workDir = TempDirectoryFixture.CreateWorkDir();
         try
         {
-            File.WriteAllBytes(probe, []);
-            File.Delete(probe);
-            return true;
+            string filePath = Path.Combine(workDir, "photo.png");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            await using Database db = new(Path.Combine(workDir, "Process.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(dryRun: true),
+                new FileInfo(filePath),
+                db,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Modified);
+            File.Exists(filePath).Should().BeTrue();
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            row.Should().NotBeNull();
+            row!.IsProcessed.Should().BeFalse();
         }
-        catch (UnauthorizedAccessException)
+        finally
         {
-            return false;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
 
