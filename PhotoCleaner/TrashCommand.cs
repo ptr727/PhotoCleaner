@@ -78,6 +78,17 @@ internal sealed class TrashCommand(
 
             if (assets.Count == 0)
             {
+                // An empty page that still names a later page leaves the database short of the server
+                if (int.TryParse(result.NextPage, out int laterPage) && laterPage > page)
+                {
+                    Log.Error(
+                        "Stopping pagination: empty page {Page} names later page '{NextPage}'",
+                        page,
+                        result.NextPage
+                    );
+                    partialSync = true;
+                }
+
                 hasMore = false;
                 continue;
             }

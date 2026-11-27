@@ -157,6 +157,47 @@ public sealed class TrashCommandTests
         }
     }
 
+    // An empty page that names a later page is a short sync, the same as an unusable NextPage.
+    [Fact]
+    public async Task ExecuteAsync_EmptyPageNamingLaterPage_ExitsFailed()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            // Arrange - page 1 has an asset, page 2 is empty yet names page 3
+            byte[] sha1 = new byte[20];
+            sha1[0] = 0x01;
+            using MockImmichHandler handler = new();
+            handler.EnqueueResponse(MakeResponse([Convert.ToBase64String(sha1)], nextPage: "2"));
+            handler.EnqueueResponse(MakeResponse([], nextPage: "3"));
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath),
+                TestContext.Current.CancellationToken,
+                client
+            );
+
+            // Act
+            int exitCode = await command.ExecuteAsync();
+
+            // Assert - the page it did read is kept, and the run reports the shortfall
+            exitCode.Should().Be(2);
+            handler.RequestCount.Should().Be(2);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
+            count.Should().Be(1);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_SinglePage_InsertsHashes()
     {
@@ -269,7 +310,8 @@ public sealed class TrashCommandTests
                 TestContext.Current.CancellationToken,
                 client
             );
-            await command.ExecuteAsync();
+            int exitCode = await command.ExecuteAsync();
+            exitCode.Should().Be(0); // an empty page naming no later page is not a short sync
 
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);

@@ -932,7 +932,9 @@ flowchart TD
   S2 --> S3["TrashCommand.FetchTrashedAssetsAsync(): POST api/search/metadata, 1000 per page"]
   S3 -->|"HTTP error, timeout, or bad JSON"| SE
   S3 --> S4{"page has items?"}
-  S4 -->|"no"| S5["TrashCommand.SyncAsync(): stop paging without reading NextPage, S15"]:::suspect
+  S4 -->|"no"| S5{"NextPage names a later page?"}
+  S5 -->|"yes"| S13
+  S5 -->|"no"| S14
   S4 -->|"yes"| S6{"for each asset: isTrashed?"}
   S6 -->|"no"| S7["Log warning, skip the asset"]
   S6 -->|"yes"| S8["TrashCommand.ConvertChecksum(): base64 checksum to hex SHA-1"]
@@ -947,7 +949,7 @@ flowchart TD
   S12 -->|"null"| S14
   S12 -->|"any other value"| S13["Log error, set the partial flag, stop paging"]
   S13 --> S14
-  S5 --> S14["TrashDatabase.GetCountAsync(): log fetched and newly inserted counts"]
+  S14["TrashDatabase.GetCountAsync(): log fetched and newly inserted counts"]
   S14 --> S15{"--processdb given?"}
   S15 -->|"yes"| S16["TrashDatabase.GetSha1sWithoutImageHashAsync(): rows lacking an image hash"]
   S16 --> S17["Database.GetImageHashBySha1Async(): look up each SHA-1, null without the column"]
@@ -1156,7 +1158,6 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
 - **S12.** A copy that cannot be removed after its row write fails mid-run, such as on a full disk, stays with no row. The next run imports it again as `_1`, #340.
-- **S15.** `trash` stops at an empty page without reading `NextPage` or marking the sync partial, #335.
 - **S16.** A moved file whose row write fails mid-run, such as on a full disk, stays in `--outpath` with no row. The next run imports a copy of it again, #340.
 
 ## State Management Pattern
