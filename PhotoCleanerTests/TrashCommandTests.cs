@@ -310,7 +310,8 @@ public sealed class TrashCommandTests
                 TestContext.Current.CancellationToken,
                 client
             );
-            await command.ExecuteAsync();
+            int exitCode = await command.ExecuteAsync();
+            exitCode.Should().Be(0); // an empty page naming no later page is not a short sync
 
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
