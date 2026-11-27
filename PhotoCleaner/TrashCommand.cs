@@ -79,7 +79,11 @@ internal sealed class TrashCommand(
             if (assets.Count == 0)
             {
                 // An empty page that names any page at all leaves the database short of the server
-                if (result.NextPage is not null)
+                if (IsUnfollowedShape(result, page))
+                {
+                    partialSync = true;
+                }
+                else if (result.NextPage is not null)
                 {
                     if (int.TryParse(result.NextPage, out int laterPage) && laterPage > page)
                     {
@@ -148,7 +152,12 @@ internal sealed class TrashCommand(
 
             Log.Information("Fetched {Count} trashed assets on page {Page}", assets.Count, page);
 
-            if (result.NextPage is null)
+            if (IsUnfollowedShape(result, page))
+            {
+                partialSync = true;
+                hasMore = false;
+            }
+            else if (result.NextPage is null)
             {
                 hasMore = false;
             }
@@ -242,6 +251,27 @@ internal sealed class TrashCommand(
         );
         client.DefaultRequestHeaders.Add("x-api-key", options.ImmichApiKey);
         return client;
+    }
+
+    private static bool IsUnfollowedShape(ImmichSearchAssets result, int page)
+    {
+        if (result.NextCursor is not null)
+        {
+            Log.Error(
+                "Stopping pagination: page {Page} names cursor '{NextCursor}', which a paged request cannot follow",
+                page,
+                result.NextCursor
+            );
+            return true;
+        }
+
+        if (!result.HasNextPageKey)
+        {
+            Log.Error("Stopping pagination: page {Page} answer has no nextPage field", page);
+            return true;
+        }
+
+        return false;
     }
 
     private async Task<ImmichSearchAssets> FetchTrashedAssetsAsync(

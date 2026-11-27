@@ -26,7 +26,21 @@ internal sealed class ImmichSearchAssets
     public List<ImmichAssetDto> Items { get; set; } = [];
 
     [JsonPropertyName("nextPage")]
-    public string? NextPage { get; set; }
+    public string? NextPage
+    {
+        get;
+        set
+        {
+            field = value;
+            HasNextPageKey = true;
+        }
+    }
+
+    [JsonIgnore]
+    public bool HasNextPageKey { get; private set; }
+
+    [JsonPropertyName("nextCursor")]
+    public string? NextCursor { get; set; }
 }
 
 internal sealed class ImmichAssetDto
