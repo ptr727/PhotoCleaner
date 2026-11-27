@@ -363,7 +363,7 @@ internal sealed class ImportTask(
         }
 
         string requestedDest = BuildDestinationPath(file, meta, inferredDate);
-        string finalDest = MediaUtilities.GetUniqueFileName(requestedDest);
+        string finalDest = ReserveDestination(requestedDest, file, claimed);
 
         bool canWriteTags = s_exiftoolWriteExtensions.Contains(
             "." + (meta?.FileTypeExtension ?? string.Empty)
@@ -636,6 +636,38 @@ internal sealed class ImportTask(
                 return owner.File;
             }
         }
+    }
+
+    // Parallel files with the same name and date would otherwise both choose one free name.
+    // The name is a claim, so it is kept or freed with the file's other claims.
+    // A dry run keeps it as well, so a later file picks the name a live run would.
+    internal string ReserveDestination(
+        string requestedDest,
+        string file,
+        List<(string Key, Claim Claim)> claimed
+    ) =>
+        MediaUtilities.GetUniqueFileName(requestedDest, candidate =>
+            File.Exists(candidate) || !TryClaim(DestinationKey(candidate), file, claimed)
+        );
+
+    private static string DestinationKey(string path) =>
+        "dest:"
+        + (
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? path.ToUpperInvariant()
+                : path
+        );
+
+    private bool TryClaim(string key, string file, List<(string Key, Claim Claim)> claimed)
+    {
+        Claim mine = new(file);
+        if (!_claims.TryAdd(key, mine))
+        {
+            return false;
+        }
+
+        claimed.Add((key, mine));
+        return true;
     }
 
     private async Task<ImportResult?> CheckImageHashAsync(

@@ -2718,6 +2718,146 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         await act.Should().ThrowAsync<OperationCanceledException>();
         waiterClaims.Should().BeEmpty();
     }
+
+    [Fact]
+    public void ReserveDestination_SameNameBeforeEitherLands_TakesNextNameUntilFreed()
+    {
+        string dateDir = Path.Combine(
+            Path.GetTempPath(),
+            $"ImportTaskTest_{Path.GetRandomFileName()}",
+            "0001-01"
+        );
+        string requested = Path.Combine(dateDir, "IMG_0001.jpg");
+        ImportTask task = new(CreateOptions(Path.GetTempPath()), null, null, null, new());
+
+        List<(string Key, ImportTask.Claim Claim)> first = [];
+        task.ReserveDestination(requested, "/src/a/IMG_0001.jpg", first).Should().Be(requested);
+        List<(string Key, ImportTask.Claim Claim)> second = [];
+        task.ReserveDestination(requested, "/src/b/IMG_0001.jpg", second)
+            .Should()
+            .Be(Path.Combine(dateDir, "IMG_0001_1.jpg"));
+
+        task.ReleaseClaims(first, imported: false);
+        task.ReserveDestination(requested, "/src/c/IMG_0001.jpg", []).Should().Be(requested);
+
+        task.ReleaseClaims(second, imported: true);
+        task.ReserveDestination(requested, "/src/d/IMG_0001.jpg", [])
+            .Should()
+            .Be(Path.Combine(dateDir, "IMG_0001_2.jpg"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_DeleteEmptyIntoMissingOutPath_DoesNothingAndReturnsCounters(
+        bool dryRun
+    )
+    {
+        string srcDir = TempDir();
+        string outDir = Path.Combine(
+            Path.GetTempPath(),
+            $"ImportTaskTest_{Path.GetRandomFileName()}"
+        );
+        try
+        {
+            string file = Path.Combine(srcDir, dryRun ? "photo.jpg" : "notes.txt");
+            if (dryRun)
+            {
+                File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), file);
+            }
+            else
+            {
+                Touch(file);
+            }
+
+            ImportTask task = new(
+                CreateOptions(outDir, dryRun: dryRun, deleteEmpty: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, int ignored, _, _, _, _, int failed, int deletedDirs) =
+                await task.ExecuteAsync(
+                    [file],
+                    new DirectoryInfo(srcDir),
+                    TestContext.Current.CancellationToken
+                );
+
+            organized.Should().Be(dryRun ? 1 : 0);
+            ignored.Should().Be(dryRun ? 0 : 1);
+            failed.Should().Be(0);
+            deletedDirs.Should().Be(0);
+            Directory.Exists(outDir).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DeleteEmptyWithUnreadableSubdirectory_KeepsItAndReturnsCounters()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("File mode permissions are only enforced on Linux");
+            return;
+        }
+
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string locked = Path.Combine(outDir, "locked");
+        string empty = Path.Combine(outDir, "empty");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(locked, "inner"));
+            Directory.CreateDirectory(empty);
+            File.SetUnixFileMode(locked, UnixFileMode.None);
+            try
+            {
+                _ = Directory.EnumerateFileSystemEntries(locked).Any();
+                Assert.Skip(
+                    "Running with permission to read anything, so no directory is unreadable"
+                );
+            }
+            catch (UnauthorizedAccessException) { }
+
+            string jpg = Path.Combine(srcDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+            ImportTask task = new(
+                CreateOptions(outDir, deleteEmpty: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, int deletedDirs) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            failed.Should().Be(0);
+            deletedDirs.Should().Be(1);
+            Directory.Exists(empty).Should().BeFalse();
+            Directory.Exists(locked).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(locked))
+            {
+                File.SetUnixFileMode(
+                    locked,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+            }
+
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
 }
 
 // Swapping the global logger is safe only while no other test class runs.
@@ -2841,6 +2981,67 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
                     && e.RenderMessage().Contains(avi, StringComparison.Ordinal)
                     && e.RenderMessage().Contains("tags [trip]", StringComparison.Ordinal)
                     && e.RenderMessage().Contains("created date", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DryRunSameNameAndDate_SecondReportsNextName()
+    {
+        string srcDir = ImportTaskTests.TempDir();
+        string outDir = ImportTaskTests.TempDir();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Information()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+            List<string> files = [];
+            foreach (string sub in new[] { "a", "b" })
+            {
+                string dir = Path.Combine(srcDir, sub);
+                Directory.CreateDirectory(dir);
+                string jpg = Path.Combine(dir, "IMG_0001.jpg");
+                File.Copy(media.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+                files.Add(jpg);
+            }
+
+            ImportTask task = new(
+                ImportTaskTests.CreateOptions(outDir, dryRun: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                files,
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(2);
+            failed.Should().Be(0);
+            string[] destinations =
+            [
+                .. sink
+                    .Events.Where(e =>
+                        e.MessageTemplate.Text.StartsWith("Copying", StringComparison.Ordinal)
+                    )
+                    .Select(e => e.Properties["DestinationPath"].ToString().Trim('"')),
+            ];
+            destinations
+                .Should()
+                .BeEquivalentTo(
+                    Path.Combine(outDir, "0001-01", "IMG_0001.jpg"),
+                    Path.Combine(outDir, "0001-01", "IMG_0001_1.jpg")
                 );
         }
         finally
