@@ -14,16 +14,11 @@ internal sealed partial class UndoTask(CommandLine.Options options)
     internal const string MarkerExtension = ".out";
 
     // Files removed and names taken so far, so a dry run picks the same free names a live run would.
-    private readonly HashSet<string> _removed = new(s_pathComparer);
-    private readonly HashSet<string> _taken = new(s_pathComparer);
+    private readonly HashSet<string> _removed = new(MediaUtilities.PathComparer);
+    private readonly HashSet<string> _taken = new(MediaUtilities.PathComparer);
 
     // Base names of originals still to restore, which a free name for another original never takes.
-    private readonly HashSet<string> _pending = new(s_pathComparer);
-
-    private static readonly StringComparer s_pathComparer =
-        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
+    private readonly HashSet<string> _pending = new(MediaUtilities.PathComparer);
 
     internal static bool IsBackupFile(string path) => BackupPattern().IsMatch(path);
 

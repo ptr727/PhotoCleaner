@@ -10,7 +10,11 @@ internal sealed class ImportTask(
     SkippedExtensionTracker skippedExtensions
 )
 {
+    private const string DestinationPrefix = "dest:";
     private readonly ConcurrentDictionary<string, Claim> _claims = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Claim> _destinations = new(
+        MediaUtilities.PathComparer
+    );
 
     internal string ExifToolCommand { get; init; } = "exiftool";
 
@@ -165,7 +169,7 @@ internal sealed class ImportTask(
         {
             if (!imported)
             {
-                _ = _claims.TryRemove(new KeyValuePair<string, Claim>(key, claim));
+                _ = ClaimsFor(key).TryRemove(new KeyValuePair<string, Claim>(key, claim));
             }
 
             _ = claim.Imported.TrySetResult(imported);
@@ -647,21 +651,17 @@ internal sealed class ImportTask(
         List<(string Key, Claim Claim)> claimed
     ) =>
         MediaUtilities.GetUniqueFileName(requestedDest, candidate =>
-            File.Exists(candidate) || !TryClaim(DestinationKey(candidate), file, claimed)
+            File.Exists(candidate) || !TryReserve(candidate, file, claimed)
         );
 
-    private static string DestinationKey(string path) =>
-        "dest:"
-        + (
-            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-                ? path.ToUpperInvariant()
-                : path
-        );
+    private ConcurrentDictionary<string, Claim> ClaimsFor(string key) =>
+        key.StartsWith(DestinationPrefix, StringComparison.Ordinal) ? _destinations : _claims;
 
-    private bool TryClaim(string key, string file, List<(string Key, Claim Claim)> claimed)
+    private bool TryReserve(string path, string file, List<(string Key, Claim Claim)> claimed)
     {
+        string key = DestinationPrefix + path;
         Claim mine = new(file);
-        if (!_claims.TryAdd(key, mine))
+        if (!_destinations.TryAdd(key, mine))
         {
             return false;
         }
