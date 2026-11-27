@@ -137,8 +137,8 @@ internal sealed class ImportTask(
         );
     }
 
-    // A file that does not import releases its claims, unless it moved into the library.
-    // A file waiting on a released claim tries again.
+    // A file that does not import releases its claims, and a file waiting on one of them tries again.
+    // A moved file kept after a failure other than a cancel holds its claims instead.
     private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
@@ -834,8 +834,9 @@ internal sealed class ImportTask(
                 "Skipping {Skipped} for '{FilePath}', since {Reason}",
                 string.Join(" and ", skipped),
                 file,
-                meta is null
-                    ? "its metadata could not be read"
+                meta is null ? "its metadata could not be read"
+                    : string.IsNullOrEmpty(meta.FileTypeExtension)
+                        ? "exiftool reported no file type"
                     : $"exiftool cannot write type '{meta.FileTypeExtension}'"
             );
         }
