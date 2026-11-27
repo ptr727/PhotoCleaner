@@ -419,7 +419,6 @@ public sealed class ExifToolJsonTests
     [InlineData("2021:03:04 23:30:00")]
     [InlineData("2021:03:04 23:30")]
     [InlineData("2021:03:04 23:30+02:00")]
-    [InlineData("2021:03:04")]
     public void GetDate_WhenMatroskaOrLessPreciseDate_Parses(string value)
     {
         ExifToolJson json = new() { MatroskaDateTimeOriginal = value };

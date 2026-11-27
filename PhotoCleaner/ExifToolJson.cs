@@ -178,7 +178,6 @@ public sealed class ExifToolJson
 
     private static readonly string[] s_exifDateFormats =
     [
-        "yyyy:MM:dd",
         "yyyy:MM:dd HH:mm",
         "yyyy:MM:dd HH:mmK",
         "yyyy:MM:dd HH:mm:ss",
