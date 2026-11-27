@@ -45,7 +45,7 @@ public sealed class TrashCommandTests
             },
         };
 
-    private static ImmichSearchResponse MakeResponse(
+    internal static ImmichSearchResponse MakeResponse(
         string[] base64Checksums,
         string? nextPage = null
     )
@@ -146,6 +146,91 @@ public sealed class TrashCommandTests
 
             // Assert - the page it did read is kept, and the run reports the shortfall
             exitCode.Should().Be(2);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
+            count.Should().Be(1);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    // An empty page that names a later page is a short sync, the same as an unusable NextPage.
+    [Fact]
+    public async Task ExecuteAsync_EmptyPageNamingLaterPage_ExitsFailed()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            // Arrange - page 1 has an asset, page 2 is empty yet names page 3
+            byte[] sha1 = new byte[20];
+            sha1[0] = 0x01;
+            using MockImmichHandler handler = new();
+            handler.EnqueueResponse(MakeResponse([Convert.ToBase64String(sha1)], nextPage: "2"));
+            handler.EnqueueResponse(MakeResponse([], nextPage: "3"));
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath),
+                TestContext.Current.CancellationToken,
+                client
+            );
+
+            // Act
+            int exitCode = await command.ExecuteAsync();
+
+            // Assert - the page it did read is kept, and the run reports the shortfall
+            exitCode.Should().Be(2);
+            handler.RequestCount.Should().Be(2);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
+            count.Should().Be(1);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    // An empty page with a non-null NextPage that is not a forward page is a short sync.
+    [Theory]
+    [InlineData("not-a-page")]
+    [InlineData("2")]
+    [InlineData("1")]
+    public async Task ExecuteAsync_EmptyPageInvalidNextPage_ExitsFailed(string emptyNextPage)
+    {
+        string dbPath = TempDb();
+        try
+        {
+            // Arrange - page 1 has an asset, page 2 is empty yet names a malformed, repeated, or earlier page
+            byte[] sha1 = new byte[20];
+            sha1[0] = 0x01;
+            using MockImmichHandler handler = new();
+            handler.EnqueueResponse(MakeResponse([Convert.ToBase64String(sha1)], nextPage: "2"));
+            handler.EnqueueResponse(MakeResponse([], nextPage: emptyNextPage));
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath),
+                TestContext.Current.CancellationToken,
+                client
+            );
+
+            // Act
+            int exitCode = await command.ExecuteAsync();
+
+            // Assert - the page it did read is kept, and the run reports the shortfall
+            exitCode.Should().Be(2);
+            handler.RequestCount.Should().Be(2);
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
             long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
@@ -269,7 +354,8 @@ public sealed class TrashCommandTests
                 TestContext.Current.CancellationToken,
                 client
             );
-            await command.ExecuteAsync();
+            int exitCode = await command.ExecuteAsync();
+            exitCode.Should().Be(0); // an empty page naming no later page is not a short sync
 
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
@@ -478,6 +564,35 @@ public sealed class TrashCommandLogTests
             Log.Logger = savedLogger;
             File.Delete(dbPath);
         }
+    }
+
+    [Theory]
+    [InlineData("3", "names later page")]
+    [InlineData("not-a-page", "invalid NextPage value")]
+    [InlineData("2", "invalid NextPage value")]
+    [InlineData("1", "invalid NextPage value")]
+    public async Task ExecuteAsync_EmptyPageWithNextPage_LogsMatchingError(
+        string emptyNextPage,
+        string expected
+    )
+    {
+        using TrashCommandTests.MockImmichHandler handler = new();
+        handler.EnqueueResponse(
+            TrashCommandTests.MakeResponse([Convert.ToBase64String(new byte[20])], nextPage: "2")
+        );
+        handler.EnqueueResponse(TrashCommandTests.MakeResponse([], nextPage: emptyNextPage));
+
+        (int exitCode, CapturingSink sink) = await RunAsync(
+            handler,
+            TestContext.Current.CancellationToken
+        );
+
+        exitCode.Should().Be(2);
+        sink.Events.Should()
+            .ContainSingle(e =>
+                e.Level == LogEventLevel.Error
+                && e.RenderMessage().Contains(expected, StringComparison.Ordinal)
+            );
     }
 
     [Fact]

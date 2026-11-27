@@ -7,11 +7,11 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
 - **Docker/**: Docker configuration
   - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final) that installs `exiftool` and `ffmpeg` in the final stage
 - **PhotoCleaner/**: Main console application
-  - `Program.cs`: Entry point with logger setup (Main only)
+  - `Program.cs`: Entry point with logger setup, signal handling, and the exit by signal
   - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `import`, `index`, `trash`, and `verify` subcommands)
   - `MediaUtilities.cs`: Shared static utilities, `SupportedExtensions` (FrozenSet), `GetUniqueFileName`, `GetExifToolJsonAsync`, `TrySetCreateDateAsync`, `WriteExifToolAsync`, video/duration constants
   - `CommandRunner.cs`: Thin wrapper for command start/complete/error logging, taking `Func<Task<int>>` and returning the command's exit code
-  - `ExitCode.cs`: The shared exit-code contract, being `Success` (0), `Error` (1, command could not run), and `Failed` (2, ran to completion with per-file failures)
+  - `ExitCode.cs`: The shared exit-code contract, being `Success` (0), `Error` (1, command could not run), and `Failed` (2, ran to completion with per-file failures). `Interrupted` (130) and `Terminated` (143) report a signal that could not end the process
   - `DatabaseScope.cs`: Generic async DB lifecycle helper (create, init, dispose)
   - `TrashDatabaseScope.cs`: Same lifecycle helper pattern for `TrashDatabase`
   - `FileEnumerator.cs`: Parallel file enumeration returning `(IReadOnlyList<string>, int)`
@@ -131,15 +131,18 @@ flowchart TD
   verify["VerifyCommand.ExecuteAsync(): verify"]
   runner["CommandRunner.RunAsync(): log start and run the command work"]
   how{"How did the work end?"}
-  cancelled(["ExitCode.Error 1, logged as cancelled"])
+  cancelled["ExitCode.Error 1, logged as cancelled"]
   thrown(["ExitCode.Error 1, exception logged"])
   code{"Returned code?"}
   ok(["ExitCode.Success 0, logged complete"])
   failed(["ExitCode.Failed 2, logged complete with failures"])
   other(["Other code returned as is, logged as not complete"])
   mainCatch(["Exit 1 from the catch in Program.Main, not logged since Log.Logger is not set yet"])
-  signal["Program.OnTerminationSignal(): the first SIGINT or SIGTERM at any point cancels the token"]
+  signal["Program.OnTerminationSignal(): the first SIGINT or SIGTERM at any point records it and cancels the token"]
   killed(["Process ends at once by the signal's default action, no cleanup"])
+  reraise["Program.ExitBySignal(): after the log is flushed and the handlers are disposed, re-send the recorded signal with its default action"]
+  died(["Process dies by the signal, so a calling shell loop stops"])
+  signalCode(["Exit 130 for SIGINT or 143 for SIGTERM"])
 
   main --> bypass
   bypass -->|"yes"| scl --> sclEnd
@@ -167,22 +170,26 @@ flowchart TD
   code -->|"anything else"| other
   signal -->|"the work throws OperationCanceledException"| how
   signal -->|"a second signal, unless the process is PID 1"| killed
+  cancelled --> reraise
+  signal -->|"whatever the run returned"| reraise
+  reraise --> died
+  reraise -->|"PID 1, or Windows"| signalCode
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main registers its own SIGINT and SIGTERM handler and sets ProcessTerminationTimeout to null. That keeps System.CommandLine's own handler off. With a timeout set, that handler returns 130 or 143 once it expires, even while the cancel path still runs. The first signal cancels the token the command runs with, so CliWrap kills the child tool and the command's cleanup runs before the exit. A second signal takes the default action and ends the process at once, for a cancel path that hangs. Run as PID 1, as the container image's exec-form entrypoint runs it, the kernel drops that default action. There only a SIGKILL ends a hung cancel path, such as the one `docker kill` sends or the one `docker stop` sends after its timeout.
+An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main registers its own SIGINT and SIGTERM handler and sets ProcessTerminationTimeout to null. That keeps System.CommandLine's own handler off. With a timeout set, that handler returns 130 or 143 once it expires, even while the cancel path still runs. The first signal cancels the token the command runs with, so CliWrap kills the child tool and the command's cleanup runs before the exit. Program.Main then re-sends that signal, so the process dies by it and a calling shell's loop stops. Where it cannot die by it, as PID 1 or on Windows, it exits 128 plus the signal number. A second signal takes the default action and ends the process at once, for a cancel path that hangs. Run as PID 1, as the container image's exec-form entrypoint runs it, the kernel drops that default action. There only a SIGKILL ends a hung cancel path, such as the one `docker kill` sends or the one `docker stop` sends after its timeout.
 
 ### Process
 
 #### Process Run
 
-The trash database opens read-only and the process database opens read-write. Both stay open for the whole run. Any exception that escapes this diagram reaches CommandRunner.RunAsync and exits 1.
+The trash database opens read-only and the process database opens read-write, or under `--dryrun` as an in-memory copy. Both stay open for the whole run. Any exception that escapes this diagram reaches CommandRunner.RunAsync and exits 1.
 
 ```mermaid
 flowchart TD
   run["ProcessCommand.ExecuteAsync(): wrapped by CommandRunner.RunAsync"]
   tscope["TrashDatabaseScope.RunAsync(): open --trashdb read-only when given"]
-  dscope["DatabaseScope.RunAsync(): open --db read-write, also under --dryrun, S8"]:::suspect
+  dscope["DatabaseScope.RunAsync(): open --db read-write, or under --dryrun an in-memory copy"]
   hashver["MediaUtilities.EnsureImageHashSupportAsync(): with --db, need exiftool 12.63 or newer"]
   warn["TrashDatabase.WarnIfImageHashMissing(): under --imagehash only"]
   enum["FileEnumerator.Enumerate(): list every file under --path"]
@@ -249,7 +256,7 @@ flowchart TD
   cNone(["Not counted"])
   gone["Log at Information that the file no longer exists"]
   goneEnd(["Not counted, the run is not failed"])
-  cancel(["Rethrown, the run ends ExitCode.Error 1"])
+  cancel(["Rethrown, continues in Run Flow"])
   logFail["Log the exception with the path"]
   merge["Add the held files to the queue that ReProcess filled"]
   empty{"Queue empty?"}
@@ -288,7 +295,7 @@ flowchart TD
   track["SkippedExtensionTracker.Track(): record the extension"]
   unknown(["UnknownExtension, not counted"])
   hasdb{"--db given?"}
-  index["IndexTask.IndexFileAsync(): hash, insert or update the row, also under --dryrun, S8"]:::suspect
+  index["IndexTask.IndexFileAsync(): hash, insert or update the row"]
   hastrash{"--trashdb given?"}
   trashed{"ProcessTask.TryDeleteIfTrashedAsync(): trashed?"}
   del(["Deleted, counted Deleted"])
@@ -309,7 +316,7 @@ flowchart TD
   dryMod(["Modified, counted Modified, nothing changed, this run does not mark the row"])
   failStep(["Failure, counted Failed"])
   setdb{"--db given?"}
-  mark["Database.SetProcessedAsync(): mark the row processed, also under --dryrun, S8"]:::suspect
+  mark["Database.SetProcessedAsync(): mark the row processed"]
   mod{"Modified flag set?"}
   modEnd(["Modified, counted Modified"])
   okEnd(["Success, not counted"])
@@ -636,7 +643,8 @@ flowchart TD
   skipQ -->|"yes"| skipOpen["Database.InitializeAsync(): open the skip database read-only"]
   skipQ -->|"no"| dbQ{"--db given?"}
   skipOpen --> dbQ
-  dbQ -->|"yes"| dbOpen["Database.InitializeAsync(): create or upgrade the catalog, also on --dryrun, S8"]:::suspect
+  dbQ -->|"yes"| dbOpen["Database.InitializeAsync(): check that --db takes a write, create or upgrade the catalog, under --dryrun an in-memory copy with no write check"]
+  dbOpen -->|"--db cannot be written"| exitError
   dbOpen --> dbVer["MediaUtilities.EnsureImageHashSupportAsync(): require exiftool 12.63 or newer"]
   dbQ -->|"no"| ihQ{"--imagehash?"}
   dbVer --> ihQ
@@ -647,9 +655,9 @@ flowchart TD
   exec -->|"each file"| perFile["ImportTask.ImportFileAsync(): import one file, see the stages below"]
   perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported or a moved file was kept, else free them"]
   release --> counted(["Counted under the returned result"])
-  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims unless a moved file was kept, then log the file"]
+  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims, then log the file"]
   perFileCatch --> countedFailed(["Counted Failed"])
-  perFile -->|"cancel"| exitError
+  perFile -->|"cancel"| cancelled(["Rethrown, continues in Run Flow"])
   exec -->|"all files done"| deQ{"--deleteempty?"}
   deQ -->|"no"| summary["ImportCommand.ExecuteAsync(): log every counter"]
   deQ -->|"yes"| outQ{"--outpath exists?"}
@@ -663,7 +671,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Any exception before `ImportTask.ExecuteAsync()` starts, such as a bad schema or an old exiftool, reaches `CommandRunner.RunAsync()` and exits 1. Ignored, Skipped, SkippedBySkipDb, and TrashedInImmich all leave the exit code at 0.
+Any exception before `ImportTask.ExecuteAsync()` starts, such as a bad schema, a `--db` that cannot be written, or an old exiftool, reaches `CommandRunner.RunAsync()` and exits 1. Ignored, Skipped, SkippedBySkipDb, and TrashedInImmich all leave the exit code at 0.
 
 #### Import Per-File Checks
 
@@ -710,7 +718,7 @@ A claim waiter blocks until the owner finishes, then loops if the owner freed th
 
 #### Import Destination
 
-The folder date comes from the inferred path date, else the parsed metadata date, else `DateTime.MinValue`. A dry run ends here, before any file or database write.
+The folder date comes from the inferred path date, else the parsed metadata date, else `DateTime.MinValue`. A dry run ends here, before any file or database write. A file failed by `--failunwritable` ends here too, in a dry run as in a live one.
 
 ```mermaid
 flowchart TD
@@ -729,7 +737,11 @@ flowchart TD
   inferred --> build["ImportTask.BuildDestinationPath(): --outpath, date by --format, file name"]
   build --> unique["ImportTask.ReserveDestination(): add _1, _2 when the name exists or a file in this run holds it"]
   unique --> writeQ{"Detected file type in the exiftool write list?"}
-  writeQ -->|"no"| dropped["ImportTask.WarnSkippedWrites(): warn naming the file and the tags or date it skips, S14"]:::suspect
+  writeQ -->|"no"| skipQ{"ImportTask.ReportSkippedWrites(): tags or an inferred date requested?"}
+  skipQ -->|"no"| dryQ
+  skipQ -->|"yes"| failQ{"--failunwritable?"}
+  failQ -->|"yes"| unwritable(["Log an error naming the file and the tags or date it cannot take, Counted Failed, nothing written"])
+  failQ -->|"no"| dropped["Warn naming the file and the tags or date it skips"]
   writeQ -->|"yes"| tags["ImportTask.ComputePathTags(): directory names under --path, with --tagpath"]
   tags --> addTags["Add the --tags values"]
   dropped --> dryQ{"--dryrun?"}
@@ -759,12 +771,12 @@ flowchart TD
   move --> dateQ{"Inferred date and writable type?"}
   copy --> dateQ
   dateQ -->|"yes"| dateW["MediaUtilities.TrySetCreateDateAsync(): write the created date"]
-  dateW --> dateOk{"ImportTask.ReportWrite(): created-date write succeeded?"}
+  dateW --> dateOk{"ImportTask.ReportWrite(): created-date write succeeded, not reported unchanged?"}
   dateQ -->|"no"| tagQ{"Any tags to apply?"}
   dateOk -->|"yes"| tagQ
   dateOk -->|"no"| writeMvQ{"--move?"}
   tagQ -->|"yes"| tagW["ImportTask.ApplyTagsAsync(): write XMP Subject tags"]
-  tagW --> tagOk{"ImportTask.ReportWrite(): tag write succeeded?"}
+  tagW --> tagOk{"ImportTask.ReportWrite(): tag write succeeded, not reported unchanged?"}
   tagOk -->|"no"| writeMvQ
   writeMvQ -->|"no"| rollback["ImportTask.RemoveCopy(): undo the copy"]
   writeMvQ -->|"yes, keep the moved file"| mtime
@@ -775,7 +787,7 @@ flowchart TD
   timeMvQ -->|"yes, keep the moved file"| rowQ
   rollback --> delQ{"Copy removed?"}
   delQ -->|"yes"| failed
-  delQ -->|"no"| copyLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
+  delQ -->|"no"| copyLeft["Log an error naming the copy, copy kept with the source mtime unless that write failed, row written under --db unless the row write failed, claims kept, S12"]:::suspect
   copyLeft --> failed
   mtime --> rowQ{"ImportTask.WriteRowAsync(): --db given?"}
   rowQ -->|"no"| keptQ
@@ -790,24 +802,24 @@ flowchart TD
   insert -->|"other exception"| rowMvQ{"--move?"}
   update -->|"other exception"| rowMvQ
   rowMvQ -->|"no"| rollback
-  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row, claims kept, S16"]:::suspect
+  rowMvQ -->|"yes"| rowFail["Log an error naming the destination, moved file kept, no row, claims kept, S16"]:::suspect
   rowFail --> failed
   insert -->|"cancel"| cancelQ
   update -->|"cancel"| cancelQ
   dateW -->|"cancel"| cancelQ{"--move?"}
   tagW -->|"cancel"| cancelQ
   cancelQ -->|"no"| cancelDel["ImportTask.RemoveCopy(): remove the copy"]
-  cancelDel --> exitError(["Rethrown, run exits 1 Error"])
-  cancelDel -->|"removal fails"| cancelLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
+  cancelDel --> exitError(["Rethrown, continues in Run Flow"])
+  cancelDel -->|"removal fails"| cancelLeft["Log an error naming the copy, copy kept with the source mtime, row written under --db despite the cancel unless the row write failed, claims kept, S12"]:::suspect
   cancelLeft --> exitError
   cancelQ -->|"yes"| cancelMoved["Moved file stays, no row"]
   cancelMoved --> exitError
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. A `SqliteException` still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed. A copy that cannot be removed stays with a warning instead, S12.
+Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. A `SqliteException` still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed. A copy that cannot be removed stays instead, and the error names it. Like a kept moved file, it gets the source mtime unless that write failed. It also gets its row and keeps its claims, even after a cancel. So a matching file is skipped in this run and the next. Where the row write is itself the failure, the copy stays with no row, S12.
 
-A moved file has no source left to return to, so a failed write keeps it in `--outpath`. It gets the source mtime unless the mtime restore is the write that failed. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move also keeps the claims, since the moved file is in the library without its row.
+A moved file has no source left to return to, so a failed write keeps it in `--outpath`. It gets the source mtime unless the mtime restore is the write that failed. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move, such as a failed row write, also keeps the file and its claims. The moved file is in the library without its row. The error names the destination, S16.
 
 ### Index
 
@@ -834,7 +846,7 @@ flowchart TD
   file -->|"Updated"| updated(["Counted Updated"])
   file -->|"Unchanged"| unchanged(["Counted Unchanged"])
   file -->|"exception other than cancel"| failed(["Counted Failed"])
-  file -->|"cancel"| exitError
+  file -->|"cancel"| cancelled(["Rethrown, continues in Run Flow"])
   exec -->|"all files done"| stale["Rows for files gone from --path stay in --db"]
   stale --> summary["IndexCommand.ExecuteAsync(): log every counter"]
   summary --> exitQ{"Failed above 0?"}
@@ -845,7 +857,7 @@ flowchart TD
 
 #### Index Per-File
 
-Metadata is read only for a new row, new content, or a row whose metadata was never read. Exceptions from every step here go to the per-file catch in `IndexTask.ExecuteAsync()`, which counts the file Failed. A cancel is rethrown instead, and the run exits 1.
+Metadata is read only for a new row, new content, or a row whose metadata was never read. Exceptions from every step here go to the per-file catch in `IndexTask.ExecuteAsync()`, which counts the file Failed. A cancel is rethrown instead.
 
 ```mermaid
 flowchart TD
@@ -899,7 +911,7 @@ flowchart TD
   T8 -->|"cancel"| T9["CommandRunner.RunAsync(): log Trash cancelled at Information"]
   T8 -->|"request timeout"| TT["TrashCommand.FetchTrashedAssetsAsync(): throw a TimeoutException naming the request"]
   TT --> TE
-  T9 --> T10(["Exit 1, Error"])
+  T9 --> T10(["Continues in Run Flow"])
   T8 --> T11{"partial flag set?"}
   T11 -->|"yes"| T12(["Exit 2, Failed"])
   T11 -->|"no"| T13(["Exit 0, Success"])
@@ -920,7 +932,9 @@ flowchart TD
   S2 --> S3["TrashCommand.FetchTrashedAssetsAsync(): POST api/search/metadata, 1000 per page"]
   S3 -->|"HTTP error, timeout, or bad JSON"| SE
   S3 --> S4{"page has items?"}
-  S4 -->|"no"| S5["TrashCommand.SyncAsync(): stop paging without reading NextPage, S15"]:::suspect
+  S4 -->|"no"| S5{"NextPage value?"}
+  S5 -->|"null"| S14
+  S5 -->|"any other value"| S13
   S4 -->|"yes"| S6{"for each asset: isTrashed?"}
   S6 -->|"no"| S7["Log warning, skip the asset"]
   S6 -->|"yes"| S8["TrashCommand.ConvertChecksum(): base64 checksum to hex SHA-1"]
@@ -935,7 +949,7 @@ flowchart TD
   S12 -->|"null"| S14
   S12 -->|"any other value"| S13["Log error, set the partial flag, stop paging"]
   S13 --> S14
-  S5 --> S14["TrashDatabase.GetCountAsync(): log fetched and newly inserted counts"]
+  S14["TrashDatabase.GetCountAsync(): log fetched and newly inserted counts"]
   S14 --> S15{"--processdb given?"}
   S15 -->|"yes"| S16["TrashDatabase.GetSha1sWithoutImageHashAsync(): rows lacking an image hash"]
   S16 --> S17["Database.GetImageHashBySha1Async(): look up each SHA-1, null without the column"]
@@ -1011,7 +1025,7 @@ flowchart TD
   U10 -->|"yes"| U11["UndoTask.ResolveMarkerOutput(): take the output's file name, beside the backup"]
   U11 -->|"marker unreadable"| U9
   U11 --> U13["UndoTask.Execute(): reverse each recorded output, then restore each original, see the next two diagrams"]
-  U13 -->|"cancelled"| U14(["Exit 1, Error"])
+  U13 -->|"cancelled"| U14(["Continues in Run Flow"])
   U13 --> U15{"failed count above zero?"}
   U15 -->|"yes"| U16(["Exit 2, Failed"])
   U15 -->|"no"| U17(["Exit 0, Success"])
@@ -1143,11 +1157,8 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
-- **S8.** A dry run with `--db` creates, upgrades and writes the database, #316.
-- **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
-- **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
-- **S15.** `trash` stops at an empty page without reading `NextPage` or marking the sync partial, #335.
-- **S16.** A moved file whose row write fails stays in `--outpath` with no row, so the next run imports a copy of it again, #340.
+- **S12.** A copy that cannot be removed after its row write fails mid-run, such as on a full disk, stays with no row. The next run imports it again as `_1`, #340.
+- **S16.** A moved file whose row write fails mid-run, such as on a full disk, stays in `--outpath` with no row. The next run imports a copy of it again, #340.
 
 ## State Management Pattern
 
@@ -1211,7 +1222,7 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Optional `--threads` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()` (process, import, index)
 - **Optional `--skipbackup` Flag** (process only): Leaves no `.bak` file behind, so a converted original or a deleted video is removed rather than backed up. No file is deleted to free its name for a rename, which takes a free name instead (see "Rename Collisions" below). Logs a warning at startup. Disables undo.
 - **Optional `--deleteempty` Flag** (process, import): After the command completes, deletes empty child subdirectories from the target directory, deepest first, and never the target root. For `process` the target is `--path` (operated on in-place), and for `import` it is `--outpath`. A missing target has nothing to clean, and an unreadable directory is kept. Implemented by `DirectoryCleaner.DeleteEmptyDirectories(root, dryRun)`.
-- **`import` subcommand** (formerly `organize`): Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). `ReserveDestination` holds each chosen name as a claim, so no two parallel files pick one name. Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from `--outpath` after all files are imported. `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool. It applies only to `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) via `meta.FileTypeExtension`. A file of any other type imports with a warning naming the tags or date it skips. It uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every imported file. `--datepath` (default `false`) infers the creation date from the source file path when no date is already embedded. It applies that date to the destination file before restoring mtime. A destination write that exits non-zero or prints an `Error` line fails the file. A failed copy is removed with no `--db` row. A moved file stays at its destination, and under `--db` it still gets its row unless the row write itself fails. **`--db <sqlite-file>` (Import.db) is the source-side dedup DB**: rows are keyed by `path = source_path` (NOT dest path) and hold the source file's hash/size/mtime. On each source file, import calls `GetByPathAsync(source_path)` for source-side hash caching, then `Sha256ExistsAsync(source_hash)` to skip already-imported sources. New imports insert a row at the source path. **No command outside `import` writes to source-keyed rows**, so dedup cannot be clobbered by later runs of `process`/`index`. `--trashdb <sqlite-file>` skips files whose **source-file** SHA-1 is in Trash.db. When import rewrites the destination via `--tags`/`--tagpath`/`--datepath`, its SHA-1 differs from the source SHA-1. Immich stored the destination SHA-1 from a prior upload, so the trash match is missed here and caught later by `process --trashdb`. `--skipdb <sqlite-file>` skips files whose SHA-256 matches a reference DB (read-only). Cross-collection dedup is typically implemented by pointing `--skipdb` at another collection's Import.db. `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
+- **`import` subcommand** (formerly `organize`): Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). `ReserveDestination` holds each chosen name as a claim, so no two parallel files pick one name. Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from `--outpath` after all files are imported. `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool. It applies only to `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) via `meta.FileTypeExtension`. A file of any other type imports with a warning naming the tags or date it skips. Under `--failunwritable` (default `false`) it is counted Failed before the copy or move instead. It uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every imported file. `--datepath` (default `false`) infers the creation date from the source file path when no date is already embedded. It applies that date to the destination file before restoring mtime. A destination write that exits non-zero, prints an `Error` line, or that exiftool reports unchanged fails the file. A moved file stays at its destination, and under `--db` it still gets its row unless the row write itself fails. **`--db <sqlite-file>` (Import.db) is the source-side dedup DB**: rows are keyed by `path = source_path` (NOT dest path) and hold the source file's hash/size/mtime. On each source file, import calls `GetByPathAsync(source_path)` for source-side hash caching, then `Sha256ExistsAsync(source_hash)` to skip already-imported sources. New imports insert a row at the source path. **No command outside `import` writes to source-keyed rows**, so dedup cannot be clobbered by later runs of `process`/`index`. `--trashdb <sqlite-file>` skips files whose **source-file** SHA-1 is in Trash.db. When import rewrites the destination via `--tags`/`--tagpath`/`--datepath`, its SHA-1 differs from the source SHA-1. Immich stored the destination SHA-1 from a prior upload, so the trash match is missed here and caught later by `process --trashdb`. `--skipdb <sqlite-file>` skips files whose SHA-256 matches a reference DB (read-only). Cross-collection dedup is typically implemented by pointing `--skipdb` at another collection's Import.db. `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
 - **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. `--processed` (optional) marks newly-INSERTED rows with `is_processed = 1`, which is useful when seeding a Process.db from existing files so `process` treats them as already-done. The flag does not flip the flag on existing rows. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
 - **`trash` subcommand**: Syncs trashed asset checksums from an Immich server into a local SQLite trash database. It takes `--url` (Immich server URL, required) and `--trashdb <sqlite-file>` (trash database, required). The API key comes from exactly one of `--apikey` (inline) or `--apikey-file`, a file whose trimmed contents are the key. The two API-key options are mutually exclusive, and exactly one must be provided. `--apikey-file` must reference an existing, non-empty, readable file. An option validator enforces existence, and a command-level validator enforces non-empty and readable. Read failures are translated to validation errors, never thrown. The key is resolved at parse time by `CommandLine.ResolveApiKey`/`ReadApiKeyFile` (file contents preferred and `.Trim()`-med) and flows into `Options.ImmichApiKey`. Uses `POST /api/search/metadata` with `trashedAfter` to fetch all trashed assets, converts Base64 SHA-1 checksums to hex, and inserts them, keeping an existing row. Full sync (idempotent, append-only). No `--dryrun`.
 - **`--trashdb` Flag** (import, process): SQLite database file with Immich trash hashes (synced by `trash`). In `import`, files matching the trash DB are skipped, preventing re-import of photos the user trashed in Immich. The check is against the **source-file** SHA-1. Files whose destination SHA-1 `import` mutated (`--tags`/`--tagpath`/`--datepath`) do not match here, although Immich stored the mutated SHA-1. The `process --trashdb` command catches those on the next pass. In `process`, matching files are **deleted from disk** before the per-file pipeline runs. This cleans up files trashed in Immich after upload and catches the import source-vs-dest SHA-1 drift. Their Process.db rows stay, so a Live Photo video still pairs with a trashed still. The Trash.db check is the durable safety net beyond Immich's ~30-day trash retention.

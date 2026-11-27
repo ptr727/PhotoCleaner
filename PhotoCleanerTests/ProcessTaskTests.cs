@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using CliWrap;
 using CliWrap.Buffered;
+using Microsoft.Data.Sqlite;
 using PhotoCleaner;
 using Serilog;
 using Serilog.Events;
@@ -2220,6 +2221,76 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProcessCommand_DryRunWithDatabase_LeavesTheDatabaseUntouched(bool dbExists)
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        string dbDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.png");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            string dbPath = Path.Combine(dbDir, "new", "Process.db");
+            byte[]? before = null;
+            if (dbExists)
+            {
+                _ = Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+                await using (
+                    SqliteConnection connection = new($"Data Source={dbPath};Pooling=False")
+                )
+                {
+                    await connection.OpenAsync(TestContext.Current.CancellationToken);
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = """
+                        CREATE TABLE files (
+                            path         TEXT NOT NULL PRIMARY KEY,
+                            sha256       TEXT NOT NULL,
+                            sha1         TEXT NOT NULL,
+                            file_size    INTEGER NOT NULL,
+                            mtime_ticks  INTEGER NOT NULL,
+                            is_processed INTEGER NOT NULL DEFAULT 0
+                        )
+                        """;
+                    _ = await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+                }
+                before = await File.ReadAllBytesAsync(
+                    dbPath,
+                    TestContext.Current.CancellationToken
+                );
+            }
+
+            int exitCode = await new ProcessCommand(
+                CreateOptions(dryRun: true, path: workDir, dbFile: new FileInfo(dbPath)),
+                TestContext.Current.CancellationToken
+            ).ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            Directory.GetFiles(workDir).Select(Path.GetFileName).Should().Equal("photo.png");
+            if (before is null)
+            {
+                Directory.Exists(Path.GetDirectoryName(dbPath)).Should().BeFalse();
+            }
+            else
+            {
+                Directory
+                    .GetFiles(Path.GetDirectoryName(dbPath)!)
+                    .Select(Path.GetFileName)
+                    .Should()
+                    .Equal("Process.db");
+                (await File.ReadAllBytesAsync(dbPath, TestContext.Current.CancellationToken))
+                    .Should()
+                    .Equal(before);
+            }
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+            TempDirectoryFixture.DeleteWorkDir(dbDir);
+        }
+    }
+
     // -- Helpers ---------------------------------------------------------------
 
     private static async Task SetContentIdentifierAsync(string filePath, string contentId) =>
@@ -2239,7 +2310,8 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         bool rehash = false,
         bool imageHash = false,
         double shortVideoDuration = MediaUtilities.ShortVideoDuration,
-        string? path = null
+        string? path = null,
+        FileInfo? dbFile = null
     ) =>
         new()
         {
@@ -2254,7 +2326,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             Move = false,
             TagPath = false,
             Tags = null,
-            DbFile = null,
+            DbFile = dbFile,
             Rehash = rehash,
             ShortVideoDuration = shortVideoDuration,
             Reprocess = false,

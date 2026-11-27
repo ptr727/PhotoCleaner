@@ -81,9 +81,9 @@ Workflow runs are the CI log. `gh run list --branch [branch]` and `gh run view [
 
 The application logs to the console and to the file named by `--logfile`. Raise the level with `--loglevel debug` when a file is rejected and the reason is not obvious.
 
-A calling script branches on the exit code rather than on output. Every command uses the same three codes, and [Exit Codes](./README.md#exit-codes) is the contract for what each one means.
+A calling script branches on the exit code rather than on output. Every command uses the same codes, and [Exit Codes](./README.md#exit-codes) is the contract for what each one means.
 
-The operational point is that `0` and `2` both mean the command ran to completion, and they differ only in whether every file succeeded. A pipeline that reads any non-zero code as "nothing happened" is therefore wrong: `1` is the only code that says the command reported nothing about the files, and a command-line parse error short-circuits before any work starts, so nothing was touched.
+The operational point is that `0` and `2` both mean the command ran to completion, and they differ only in whether every file succeeded. A pipeline that reads any non-zero code as "nothing happened" is therefore wrong. `1` says the command reported nothing about the files. A command-line parse error short-circuits before any work starts, so nothing was touched.
 
 ## Tool Usage
 

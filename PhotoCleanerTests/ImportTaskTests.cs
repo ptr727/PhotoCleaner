@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
+using Microsoft.Data.Sqlite;
 using PhotoCleaner;
 using Serilog;
 using Serilog.Core;
@@ -35,11 +36,14 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         bool datePath = false,
         bool imageHash = false,
         string? tags = null,
-        int threads = 1
+        int threads = 1,
+        string? path = null,
+        FileInfo? dbFile = null,
+        bool failUnwritable = false
     ) =>
         new()
         {
-            Path = new DirectoryInfo(Path.GetTempPath()),
+            Path = new DirectoryInfo(path ?? Path.GetTempPath()),
             Threads = threads,
             DryRun = dryRun,
             DatePath = datePath,
@@ -50,7 +54,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             Move = move,
             TagPath = tagPath,
             Tags = tags,
-            DbFile = null,
+            DbFile = dbFile,
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
@@ -60,6 +64,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             TrashDbFile = null,
             SkipDbFile = null,
             ImageHash = imageHash,
+            FailUnwritable = failUnwritable,
             LogOptions = new LoggerFactory.Options
             {
                 Level = LogEventLevel.Information,
@@ -75,7 +80,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         return dir;
     }
 
-    private static string TempDb() =>
+    internal static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"ImportTaskTest_{Path.GetRandomFileName()}.db");
 
     private static void Touch(string path) => File.WriteAllBytes(path, []);
@@ -1378,6 +1383,105 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    // A write exiftool could not apply exits 0 and reports the file as unchanged.
+    private static string UnchangedWriteStub(string dir) =>
+        TempDirectoryFixture.WriteExifToolStub(
+            dir,
+            "echo '    0 image files updated'\necho '    1 image files unchanged'\nexit 0\n"
+        );
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_TagWriteUnchanged_CountsFailed(bool move)
+    {
+        string srcDir = TempDir();
+        string stubDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            string stub = UnchangedWriteStub(stubDir);
+            (string jpg, string dest) = await CreateTaggedSourceAsync(fixture, srcDir);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                CreateOptions(outDir, move: move, tags: "extra"),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            // A copy is removed with no row, and a moved file stays with its row.
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().Be(!move);
+            File.Exists(Path.Combine(outDir, dest)).Should().Be(move);
+            FileRecord? row = await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken);
+            (row is not null).Should().Be(move);
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(stubDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DateWriteUnchanged_CountsFailedAndRemovesCopy()
+    {
+        string srcDir = TempDir();
+        string stubDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            string stub = UnchangedWriteStub(stubDir);
+            string datedDir = Path.Combine(srcDir, "2021", "05", "02");
+            Directory.CreateDirectory(datedDir);
+            string jpg = Path.Combine(datedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+
+            ImportTask task = new(
+                CreateOptions(outDir, datePath: true),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "2021-05", "photo.jpg")).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(stubDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_TagWriteSucceeds_CountsImported()
     {
@@ -1690,6 +1794,51 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             .IsWriteFailure(exitCode, standardOutput, standardError)
             .Should()
             .Be(expected);
+
+    [Theory]
+    [InlineData("    1 image files updated", false)]
+    [InlineData("    0 image files updated\n    1 image files unchanged", true)]
+    [InlineData("    0 image files updated\r\n    1 image files unchanged\r\n", true)]
+    [InlineData("    1 image files updated\n    0 image files unchanged", false)]
+    [InlineData("", false)]
+    public void IsWriteUnchanged_ReadsUnchangedCount(string standardOutput, bool expected) =>
+        MediaUtilities.IsWriteUnchanged(standardOutput).Should().Be(expected);
+
+    [Fact]
+    public async Task WriteExifToolAsync_UnchangedWrite_FailsOnlyWhenAsked()
+    {
+        string stubDir = TempDir();
+        try
+        {
+            string stub = UnchangedWriteStub(stubDir);
+            string file = Path.Combine(stubDir, "photo.jpg");
+            CancellationToken ct = TestContext.Current.CancellationToken;
+
+            // Process takes the overloads without the flag, so an unchanged write succeeds there.
+            (await MediaUtilities.WriteExifToolAsync(stub, [file], ct)).Should().BeNull();
+            (await MediaUtilities.TrySetCreateDateAsync("2021:05:02 00:00:00", file, stub, ct))
+                .Should()
+                .BeNull();
+            (await MediaUtilities.WriteExifToolAsync(stub, [file], true, ct))
+                .Should()
+                .Contain("1 image files unchanged");
+            (
+                await MediaUtilities.TrySetCreateDateAsync(
+                    "2021:05:02 00:00:00",
+                    file,
+                    stub,
+                    true,
+                    ct
+                )
+            )
+                .Should()
+                .Contain("1 image files unchanged");
+        }
+        finally
+        {
+            Directory.Delete(stubDir, recursive: true);
+        }
+    }
 
     // -- datePath: missing EXIF date inferred from path -----------------------
 
@@ -2557,6 +2706,80 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ImportCommand_DryRunWithDatabase_LeavesTheDatabaseUntouched(bool dbExists)
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbDir = TempDir();
+        try
+        {
+            File.Copy(
+                fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                Path.Combine(srcDir, "photo.jpg")
+            );
+            string dbPath = Path.Combine(dbDir, "new", "Import.db");
+            byte[]? before = null;
+            if (dbExists)
+            {
+                _ = Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+                await using (
+                    SqliteConnection connection = new($"Data Source={dbPath};Pooling=False")
+                )
+                {
+                    await connection.OpenAsync(TestContext.Current.CancellationToken);
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = """
+                        CREATE TABLE files (
+                            path         TEXT NOT NULL PRIMARY KEY,
+                            sha256       TEXT NOT NULL,
+                            sha1         TEXT NOT NULL,
+                            file_size    INTEGER NOT NULL,
+                            mtime_ticks  INTEGER NOT NULL,
+                            is_processed INTEGER NOT NULL DEFAULT 0
+                        )
+                        """;
+                    _ = await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+                }
+                before = await File.ReadAllBytesAsync(
+                    dbPath,
+                    TestContext.Current.CancellationToken
+                );
+            }
+
+            int exitCode = await new ImportCommand(
+                CreateOptions(outDir, dryRun: true, path: srcDir, dbFile: new FileInfo(dbPath)),
+                TestContext.Current.CancellationToken
+            ).ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
+            if (before is null)
+            {
+                Directory.Exists(Path.GetDirectoryName(dbPath)).Should().BeFalse();
+            }
+            else
+            {
+                Directory
+                    .GetFiles(Path.GetDirectoryName(dbPath)!)
+                    .Select(Path.GetFileName)
+                    .Should()
+                    .Equal("Import.db");
+                (await File.ReadAllBytesAsync(dbPath, TestContext.Current.CancellationToken))
+                    .Should()
+                    .Equal(before);
+            }
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            Directory.Delete(dbDir, recursive: true);
+        }
+    }
+
     // -- Claims: files of one run that match each other import once ------------
 
     [Theory]
@@ -2858,6 +3081,180 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             Directory.Delete(outDir, recursive: true);
         }
     }
+
+    // A privileged user removes a file from a read-only folder, so no copy would stay.
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    internal static void SkipUnlessReadOnlyFolderKeepsFiles()
+    {
+        string dir = TempDir();
+        try
+        {
+            string probe = Path.Combine(dir, "probe");
+            File.WriteAllText(probe, string.Empty);
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            try
+            {
+                File.Delete(probe);
+                Assert.Skip("Running with permission to remove any file, so no copy stays");
+            }
+            catch (UnauthorizedAccessException) { }
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                dir,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            );
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // The stub makes the date folder read-only, so the copy in it cannot be removed.
+    internal static string ReadOnlyFolderStub(string dir, string tail) =>
+        TempDirectoryFixture.WriteExifToolStub(
+            dir,
+            $"for last in \"$@\"; do :; done\nchmod 555 \"$(dirname \"$last\")\"\n{tail}"
+        );
+
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    internal static void RestoreFolder(string dir)
+    {
+        if (Directory.Exists(dir))
+        {
+            File.SetUnixFileMode(
+                dir,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            );
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TagWriteFailsAndCopyStays_RecordsCopySoAMatchSkips()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows has no Unix file modes");
+            return;
+        }
+
+        SkipUnlessReadOnlyFolderKeepsFiles();
+        string srcDir = TempDir();
+        string otherDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        try
+        {
+            string stub = ReadOnlyFolderStub(
+                srcDir,
+                "touch \"$last\"\necho 'Error: stub write failure' >&2\nexit 1\n"
+            );
+            (string jpg, string dest) = await CreateTaggedSourceAsync(fixture, srcDir);
+            DateTime sourceTime = new(2020, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(jpg, sourceTime);
+            string copy = Path.Combine(otherDir, "photo.jpg");
+            File.Copy(jpg, copy);
+            (string sha256, _) = await Database.ComputeHashesAsync(
+                jpg,
+                TestContext.Current.CancellationToken
+            );
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                CreateOptions(outDir, tags: "extra"),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, int skipped, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg, copy],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            skipped.Should().Be(1);
+            failed.Should().Be(1);
+            File.GetLastWriteTimeUtc(Path.Combine(outDir, dest)).Should().Be(sourceTime);
+            FileRecord? row = await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken);
+            row.Should().NotBeNull();
+            row!.Sha256.Should().Be(sha256);
+        }
+        finally
+        {
+            RestoreFolder(Path.Combine(outDir, "2024-06"));
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(otherDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CancelAndCopyStays_RecordsCopyAndRethrows()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows has no Unix file modes");
+            return;
+        }
+
+        SkipUnlessReadOnlyFolderKeepsFiles();
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbPath = TempDb();
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken
+        );
+        try
+        {
+            string marker = Path.Combine(srcDir, "write-started");
+            string stub = ReadOnlyFolderStub(srcDir, $"touch '{marker}'\nexec sleep 30\n");
+            (string jpg, string dest) = await CreateTaggedSourceAsync(fixture, srcDir);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                CreateOptions(outDir, tags: "extra"),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            Task run = task.ExecuteAsync([jpg], new DirectoryInfo(srcDir), cts.Token);
+            using (CancellationTokenSource bound = new(TimeSpan.FromSeconds(30)))
+            {
+                while (!File.Exists(marker))
+                {
+                    await Task.Delay(50, bound.Token);
+                }
+            }
+
+            await cts.CancelAsync();
+            Func<Task> act = () => run;
+            _ = await act.Should().ThrowAsync<OperationCanceledException>();
+
+            File.Exists(Path.Combine(outDir, dest)).Should().BeTrue();
+            (await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken))
+                .Should()
+                .NotBeNull();
+        }
+        finally
+        {
+            await cts.CancelAsync();
+            RestoreFolder(Path.Combine(outDir, "2024-06"));
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
 }
 
 // Swapping the global logger is safe only while no other test class runs.
@@ -2943,6 +3340,196 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
     }
 
     [Fact]
+    public async Task ExecuteAsync_RowWriteFailsOnMove_KeepsFileAndLogsDestination()
+    {
+        string srcDir = ImportTaskTests.TempDir();
+        string outDir = ImportTaskTests.TempDir();
+        string dbPath = ImportTaskTests.TempDb();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+            (string jpg, string dest) = await ImportTaskTests.CreateTaggedSourceAsync(
+                media,
+                srcDir
+            );
+            string destPath = Path.Combine(outDir, dest);
+            await using (Database writable = new(dbPath))
+            {
+                await writable.InitializeAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using Database db = new(dbPath, readOnly: true);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                ImportTaskTests.CreateOptions(outDir, move: true),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            File.Exists(jpg).Should().BeFalse();
+            File.Exists(destPath).Should().BeTrue();
+            sink.Events.Should()
+                .ContainSingle(e => e.Level == LogEventLevel.Error)
+                .Which.RenderMessage()
+                .Should()
+                .Contain(destPath);
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DateFolderRemovedAfterCopy_CountsCopyRemovedAndLeavesNoRow()
+    {
+        string srcDir = ImportTaskTests.TempDir();
+        string outDir = ImportTaskTests.TempDir();
+        string dbPath = ImportTaskTests.TempDb();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            // A removed date folder fails the mtime restore and takes the copy with it
+            string stub = TempDirectoryFixture.WriteExifToolStub(
+                srcDir,
+                "for last in \"$@\"; do :; done\nrm -r \"$(dirname \"$last\")\"\nexit 0\n"
+            );
+            (string jpg, _) = await ImportTaskTests.CreateTaggedSourceAsync(media, srcDir);
+
+            await using Database db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                ImportTaskTests.CreateOptions(outDir, tags: "extra"),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            failed.Should().Be(1);
+            (await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken)).Should().BeNull();
+            sink.Events.Should()
+                .NotContain(e =>
+                    e.RenderMessage().Contains("Failed to remove", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RowWriteFailsAndCopyStays_KeepsClaimsAndLogsDestination()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows has no Unix file modes");
+            return;
+        }
+
+        ImportTaskTests.SkipUnlessReadOnlyFolderKeepsFiles();
+        string srcDir = ImportTaskTests.TempDir();
+        string otherDir = ImportTaskTests.TempDir();
+        string outDir = ImportTaskTests.TempDir();
+        string dbPath = ImportTaskTests.TempDb();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+            string stub = ImportTaskTests.ReadOnlyFolderStub(srcDir, "exit 0\n");
+            (string jpg, string dest) = await ImportTaskTests.CreateTaggedSourceAsync(
+                media,
+                srcDir
+            );
+            string destPath = Path.Combine(outDir, dest);
+            string copy = Path.Combine(otherDir, "photo.jpg");
+            File.Copy(jpg, copy);
+            await using (Database writable = new(dbPath))
+            {
+                await writable.InitializeAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using Database db = new(dbPath, readOnly: true);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            ImportTask task = new(
+                ImportTaskTests.CreateOptions(outDir, tags: "extra"),
+                database: db,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            (int organized, _, int skipped, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg, copy],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(0);
+            skipped.Should().Be(1);
+            failed.Should().Be(1);
+            File.Exists(destPath).Should().BeTrue();
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Error
+                    && e.RenderMessage().Contains("no database row", StringComparison.Ordinal)
+                    && e.RenderMessage().Contains(destPath, StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            ImportTaskTests.RestoreFolder(Path.Combine(outDir, "2024-06"));
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(otherDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_TypeExifToolCannotWrite_WarnsSkippedTagsAndDate()
     {
         string srcDir = ImportTaskTests.TempDir();
@@ -2986,6 +3573,56 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
         finally
         {
             Log.Logger = savedLogger;
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("trip", false, 1)]
+    [InlineData("trip", true, 1)]
+    [InlineData(null, false, 0)]
+    public async Task ExecuteAsync_TypeExifToolCannotWriteWithFailUnwritable_FailsBeforeCopy(
+        string? tags,
+        bool dryRun,
+        int expectedFailed
+    )
+    {
+        string srcDir = ImportTaskTests.TempDir();
+        string outDir = ImportTaskTests.TempDir();
+        try
+        {
+            string avi = Path.Combine(srcDir, "clip.avi");
+            File.Copy(media.SourceFile(TempDirectoryFixture.AviFile), avi);
+
+            ImportTask task = new(
+                ImportTaskTests.CreateOptions(
+                    outDir,
+                    dryRun: dryRun,
+                    tags: tags,
+                    failUnwritable: true
+                ),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [avi],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1 - expectedFailed);
+            failed.Should().Be(expectedFailed);
+            File.Exists(avi).Should().BeTrue();
+            Directory
+                .GetFiles(outDir, "*", SearchOption.AllDirectories)
+                .Should()
+                .HaveCount(expectedFailed == 0 && !dryRun ? 1 : 0);
+        }
+        finally
+        {
             Directory.Delete(srcDir, recursive: true);
             Directory.Delete(outDir, recursive: true);
         }

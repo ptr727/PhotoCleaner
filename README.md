@@ -86,11 +86,15 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   EXIF (XMP for a GIF) or QuickTime creation dates from filenames or directory path
   structures when metadata is absent. It is opt-in, and it applies before the file is moved
   to a date-based directory so the source path is still available.
-  A failed `--tagpath`, `--tags`, or `--datepath` write counts the file as failed, so `import`
-  exits non-zero. So does a failed mtime restore or database write. A copy is removed after any
-  such failure, so the next run imports it again. A moved file stays at its destination without
+  A failed `--tagpath`, `--tags`, or `--datepath` write, including one exiftool reports as
+  unchanged, counts the file as failed, so `import` exits non-zero. So does a failed mtime
+  restore or database write. A copy is removed after any
+  such failure, so the next run imports it again. A copy that cannot be removed stays, and gets
+  its `--db` row unless the database write failed, so the next run skips the source.
+  A moved file stays at its destination without
   the failed write. After a failed date, tag, or mtime write it still gets its `--db` row, so a
-  later copy of the same file is skipped.
+  later copy of the same file is skipped. A `--db` that cannot be written stops the run before
+  any file is copied or moved.
   The opt-in `--imagehash` also skips a file whose image data hash is already in the database.
 - **Syncs Immich trash hashes** (via `trash` command): Connects to an Immich server via its
   REST API, fetches all trashed asset checksums (SHA-1), and stores them in a local SQLite
@@ -186,6 +190,7 @@ Options:
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
   --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
   --datepath                     Set missing creation date from file path
+  --failunwritable               Count a file as failed when its type cannot take a requested --tags, --tagpath or --datepath write (default: warn)
   --db <db>                      SQLite database file for file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
   --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
@@ -269,6 +274,9 @@ Options:
   the source path context is only available during `import` (before files move to date-based
   directories). A type outside that write list imports without the date, with a warning naming
   the skipped date.
+- `--failunwritable`: optional (`import` only). A type outside that write list counts as
+  failed when given a `--tagpath`, `--tags`, or `--datepath` write it cannot take. It is not
+  copied or moved, where by default it imports with a warning.
 - `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,
@@ -357,14 +365,15 @@ Options:
 
 ### Exit Codes
 
-Every command uses the same three codes, so a pipeline can branch on the result without parsing
+Every command uses the same codes, so a pipeline can branch on the result without parsing
 logs:
 
 | Code | Meaning |
 | ---- | ------- |
 | `0` | Success. The command completed and every file succeeded. |
-| `1` | Error. The command could not complete: unhandled exception, fatal configuration error, cancellation, or a failed `verify` preflight. |
+| `1` | Error. The command could not complete: unhandled exception, fatal configuration error, or a failed `verify` preflight. |
 | `2` | Completed with failures. The command ran to completion, but one or more files failed or failed verification, or `trash` synced only part of the server. |
+| `130`, `143` | Ended by a signal, `130` for SIGINT and `143` for SIGTERM. After its cleanup the process dies by the signal, which a shell reports as 128 plus the signal number. So a Ctrl+C also stops a calling shell loop. Where the signal cannot end the process, as PID 1 or on Windows, it exits with that code instead. |
 
 The distinction between `1` and `2` matters most for `verify`. A `1` means the check itself could
 not run at all, because Docker was unreachable or the Immich image could not be prepared, and it

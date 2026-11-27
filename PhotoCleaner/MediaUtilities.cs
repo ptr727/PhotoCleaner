@@ -196,6 +196,14 @@ internal static class MediaUtilities
         string outputFile,
         string exifTool,
         CancellationToken cancellationToken = default
+    ) => TrySetCreateDateAsync(createdDate, outputFile, exifTool, false, cancellationToken);
+
+    internal static Task<string?> TrySetCreateDateAsync(
+        string createdDate,
+        string outputFile,
+        string exifTool,
+        bool failUnchanged,
+        CancellationToken cancellationToken = default
     )
     {
         Log.Debug(
@@ -206,14 +214,23 @@ internal static class MediaUtilities
         return WriteExifToolAsync(
             exifTool,
             CreateDateArguments(createdDate, outputFile),
+            failUnchanged,
             cancellationToken
         );
     }
 
+    internal static Task<string?> WriteExifToolAsync(
+        string exifTool,
+        string[] arguments,
+        CancellationToken cancellationToken = default
+    ) => WriteExifToolAsync(exifTool, arguments, false, cancellationToken);
+
     // Returns exiftool's exit code and output for a failed write, or null for a successful one.
+    // Only import passes failUnchanged, so process keeps an unchanged write as a success.
     internal static async Task<string?> WriteExifToolAsync(
         string exifTool,
         string[] arguments,
+        bool failUnchanged,
         CancellationToken cancellationToken = default
     )
     {
@@ -221,7 +238,9 @@ internal static class MediaUtilities
             .WithArguments(arguments)
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(cancellationToken);
-        return IsWriteFailure(result.ExitCode, result.StandardOutput, result.StandardError)
+        return
+            IsWriteFailure(result.ExitCode, result.StandardOutput, result.StandardError)
+            || (failUnchanged && IsWriteUnchanged(result.StandardOutput))
             ? $"exit {result.ExitCode}: {(result.StandardError + result.StandardOutput).Trim()}"
             : null;
     }
@@ -250,6 +269,23 @@ internal static class MediaUtilities
         || $"{standardError}\n{standardOutput}"
             .Split('\n')
             .Any(line => line.TrimStart().StartsWith("Error", StringComparison.Ordinal));
+
+    // A write exiftool could not apply exits 0 and reports the file as unchanged.
+    internal static bool IsWriteUnchanged(string standardOutput) =>
+        standardOutput
+            .Split('\n')
+            .Select(line =>
+                line.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+                )
+            )
+            .Any(words =>
+                words.Length > 1
+                && string.Equals(words[^1], "unchanged", StringComparison.Ordinal)
+                && int.TryParse(words[0], CultureInfo.InvariantCulture, out int count)
+                && count > 0
+            );
 
     private static string[] CreateDateArguments(string createdDate, string outputFile)
     {

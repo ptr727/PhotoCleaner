@@ -695,4 +695,289 @@ public sealed class DatabaseTests
             File.Delete(dbPath);
         }
     }
+
+    [Fact]
+    public async Task InitializeAsync_WriteCheck_LeavesNoTableBehind()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using (Database db = new(dbPath))
+            {
+                await db.InitializeAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using SqliteConnection conn = new($"Data Source={dbPath};Pooling=False");
+            await conn.OpenAsync(TestContext.Current.CancellationToken);
+            using SqliteCommand cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+            List<string> tables = [];
+            using SqliteDataReader reader = await cmd.ExecuteReaderAsync(
+                TestContext.Current.CancellationToken
+            );
+            while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+            {
+                tables.Add(reader.GetString(0));
+            }
+
+            tables.Should().Equal("files");
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_FileCannotBeWritten_Throws()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix file modes and a non-privileged process");
+        }
+        else
+        {
+            string dbPath = TempDb();
+            try
+            {
+                await using (Database writable = new(dbPath))
+                {
+                    await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                }
+
+                File.SetUnixFileMode(dbPath, UnixFileMode.UserRead);
+                await using Database db = new(dbPath);
+                Func<Task> act = () => db.InitializeAsync(TestContext.Current.CancellationToken);
+
+                (await act.Should().ThrowAsync<InvalidOperationException>())
+                    .WithMessage("*cannot be written*")
+                    .WithInnerException<SqliteException>();
+            }
+            finally
+            {
+                File.SetUnixFileMode(dbPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                File.Delete(dbPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_DirectoryCannotBeWritten_Throws()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
+        }
+        else
+        {
+            string dir = TempDirectoryFixture.CreateWorkDir();
+            string dbPath = Path.Combine(dir, "files.db");
+            try
+            {
+                await using (Database writable = new(dbPath))
+                {
+                    await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                }
+
+                // The file stays writable, but its rollback journal cannot be created.
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                await using Database db = new(dbPath);
+                Func<Task> act = () => db.InitializeAsync(TestContext.Current.CancellationToken);
+
+                (await act.Should().ThrowAsync<InvalidOperationException>())
+                    .WithMessage("*cannot be written*")
+                    .WithInnerException<SqliteException>();
+            }
+            finally
+            {
+                File.SetUnixFileMode(
+                    dir,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+                TempDirectoryFixture.DeleteWorkDir(dir);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_InMemoryCopy_ReadsTheRowsAndLeavesTheFile()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using (Database live = new(dbPath))
+            {
+                await live.InitializeAsync(TestContext.Current.CancellationToken);
+                await live.InsertAsync(
+                    MakeRecord("/source/a.jpg", "sha256-a"),
+                    TestContext.Current.CancellationToken
+                );
+            }
+            byte[] before = await File.ReadAllBytesAsync(
+                dbPath,
+                TestContext.Current.CancellationToken
+            );
+
+            await using (Database copy = new(dbPath, inMemory: true))
+            {
+                await copy.InitializeAsync(TestContext.Current.CancellationToken);
+                (await copy.Sha256ExistsAsync("sha256-a", TestContext.Current.CancellationToken))
+                    .Should()
+                    .BeTrue();
+                await copy.InsertAsync(
+                    MakeRecord("/source/b.jpg", "sha256-b"),
+                    TestContext.Current.CancellationToken
+                );
+                await copy.SetProcessedAsync(
+                    "/source/a.jpg",
+                    TestContext.Current.CancellationToken
+                );
+                (await copy.Sha256ExistsAsync("sha256-b", TestContext.Current.CancellationToken))
+                    .Should()
+                    .BeTrue();
+            }
+
+            (await File.ReadAllBytesAsync(dbPath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(before);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_InMemoryCopyOfOldSchema_UpgradesOnlyTheCopy()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using (SqliteConnection connection = new($"Data Source={dbPath};Pooling=False"))
+            {
+                await connection.OpenAsync(TestContext.Current.CancellationToken);
+                using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE files (
+                        path         TEXT NOT NULL PRIMARY KEY,
+                        sha256       TEXT NOT NULL,
+                        sha1         TEXT NOT NULL,
+                        file_size    INTEGER NOT NULL,
+                        mtime_ticks  INTEGER NOT NULL,
+                        is_processed INTEGER NOT NULL DEFAULT 0
+                    )
+                    """;
+                _ = await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using (Database copy = new(dbPath, inMemory: true))
+            {
+                await copy.InitializeAsync(TestContext.Current.CancellationToken);
+                copy.HasImageHash.Should().BeTrue();
+            }
+
+            await using SqliteConnection check = new(
+                $"Data Source={dbPath};Mode=ReadOnly;Pooling=False"
+            );
+            await check.OpenAsync(TestContext.Current.CancellationToken);
+            (
+                await Database.GetColumnNamesAsync(
+                    check,
+                    "files",
+                    TestContext.Current.CancellationToken
+                )
+            )
+                .Should()
+                .NotContain("image_hash");
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_InMemoryMissingFile_StartsEmptyAndCreatesNothing()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"db_{Path.GetRandomFileName()}");
+        string dbPath = Path.Combine(dir, "files.db");
+
+        await using Database copy = new(dbPath, inMemory: true);
+        await copy.InitializeAsync(TestContext.Current.CancellationToken);
+        (await copy.GetByPathAsync("/source/a.jpg", TestContext.Current.CancellationToken))
+            .Should()
+            .BeNull();
+        await copy.InsertAsync(
+            MakeRecord("/source/a.jpg", "sha256-a"),
+            TestContext.Current.CancellationToken
+        );
+
+        Directory.Exists(dir).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task InitializeAsync_InMemoryCopyOfFileThatCannotBeWritten_DoesNotThrow()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix file modes and a non-privileged process");
+        }
+        else
+        {
+            string dbPath = TempDb();
+            try
+            {
+                await using (Database writable = new(dbPath))
+                {
+                    await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                }
+
+                File.SetUnixFileMode(dbPath, UnixFileMode.UserRead);
+                await using Database copy = new(dbPath, inMemory: true);
+                Func<Task> act = () => copy.InitializeAsync(TestContext.Current.CancellationToken);
+
+                await act.Should().NotThrowAsync();
+            }
+            finally
+            {
+                File.SetUnixFileMode(dbPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                File.Delete(dbPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_InMemoryCopyBehindDirectoryThatCannotBeSearched_Throws()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
+        }
+        else
+        {
+            string dir = TempDirectoryFixture.CreateWorkDir();
+            string dbPath = Path.Combine(dir, "files.db");
+            try
+            {
+                await using (Database writable = new(dbPath))
+                {
+                    await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                }
+
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                await using Database copy = new(dbPath, inMemory: true);
+                Func<Task> act = () => copy.InitializeAsync(TestContext.Current.CancellationToken);
+
+                _ = await act.Should().ThrowAsync<UnauthorizedAccessException>();
+            }
+            finally
+            {
+                File.SetUnixFileMode(
+                    dir,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+                TempDirectoryFixture.DeleteWorkDir(dir);
+            }
+        }
+    }
 }

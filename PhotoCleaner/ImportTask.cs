@@ -142,7 +142,7 @@ internal sealed class ImportTask(
     }
 
     // A file that does not import releases its claims, and a file waiting on one of them tries again.
-    // A moved file kept after a failure other than a cancel holds its claims instead.
+    // A file kept in the library after a failure holds its claims instead, unless a cancel kept a moved file.
     private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
@@ -384,9 +384,19 @@ internal sealed class ImportTask(
             )
             : [];
         string[] allTags = canWriteTags ? [.. pathTags, .. explicitTags] : [];
-        if (!canWriteTags)
+        if (
+            !canWriteTags
+            && ReportSkippedWrites(
+                file,
+                meta,
+                [.. pathTags, .. explicitTags],
+                inferredDateStr,
+                options.FailUnwritable
+            )
+            && options.FailUnwritable
+        )
         {
-            WarnSkippedWrites(file, meta, [.. pathTags, .. explicitTags], inferredDateStr);
+            return ImportResult.Failed;
         }
         if (allTags.Length > 0)
         {
@@ -420,6 +430,52 @@ internal sealed class ImportTask(
 
         // FileInfo reads lazily, and a move leaves nothing at the source path to read.
         FileInfo sourceInfo = new(file);
+
+        // A copy that cannot be removed is in the library, so its row and claims keep a second copy out, as for a kept move.
+        // The row is written even after a cancel, since the copy stays either way.
+        [System.Diagnostics.CodeAnalysis.SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "A failed row write is logged naming the copy, which stays either way"
+        )]
+        async Task KeepCopyAsync(bool rowFailed)
+        {
+            _ = RestoreSourceTime(file, finalDest, sourceInfo.LastWriteTimeUtc);
+            Exception? rowFailure = null;
+            if (!rowFailed)
+            {
+                try
+                {
+                    await WriteRowAsync(
+                            file,
+                            sha256,
+                            sha1,
+                            cached,
+                            sourceInfo,
+                            meta,
+                            CancellationToken.None
+                        )
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    rowFailure = ex;
+                }
+            }
+
+            if (rowFailed || rowFailure is not null)
+            {
+                Log.Error(
+                    rowFailure,
+                    "Kept '{DestinationPath}' copied from '{SourcePath}' with no database row",
+                    finalDest,
+                    file
+                );
+            }
+
+            KeepClaims(claimed);
+        }
+
         try
         {
             sourceInfo.Refresh();
@@ -446,6 +502,7 @@ internal sealed class ImportTask(
             return ImportResult.Failed;
         }
 
+        bool rowAttempted = false;
         try
         {
             string? failedWrite = await WriteMetadataAsync(
@@ -470,10 +527,15 @@ internal sealed class ImportTask(
 
             if (failedWrite is not null && !options.Move)
             {
-                RemoveCopy(file, finalDest);
+                if (!RemoveCopy(file, finalDest))
+                {
+                    await KeepCopyAsync(false).ConfigureAwait(false);
+                }
+
                 return ImportResult.Failed;
             }
 
+            rowAttempted = true;
             await WriteRowAsync(file, sha256, sha1, cached, sourceInfo, meta, cancellationToken)
                 .ConfigureAwait(false);
             if (failedWrite is null)
@@ -494,24 +556,32 @@ internal sealed class ImportTask(
         catch (OperationCanceledException)
         {
             // A cancel after the copy removes it, and a moved file stays where it landed.
-            if (!options.Move)
+            if (!options.Move && !RemoveCopy(file, finalDest))
             {
-                RemoveCopy(file, finalDest);
+                await KeepCopyAsync(false).ConfigureAwait(false);
             }
 
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Done before the claims are freed, so a file waiting on them cannot import a second copy.
             // The moved file is in the library even without its row, so its claims stay held.
             if (options.Move)
             {
+                Log.Error(
+                    ex,
+                    "Kept '{DestinationPath}' moved from '{SourcePath}' with no database row",
+                    finalDest,
+                    file
+                );
                 KeepClaims(claimed);
+                return ImportResult.Failed;
             }
-            else
+
+            if (!RemoveCopy(file, finalDest))
             {
-                RemoveCopy(file, finalDest);
+                await KeepCopyAsync(rowAttempted).ConfigureAwait(false);
             }
 
             throw;
@@ -543,6 +613,7 @@ internal sealed class ImportTask(
                         inferredDate,
                         destFile,
                         ExifToolCommand,
+                        true,
                         cancellationToken
                     )
                     .ConfigureAwait(false),
@@ -799,7 +870,12 @@ internal sealed class ImportTask(
             destFile
         );
         Log.Debug("exiftool: Setting XMP:Subject on '{FilePath}'", destFile);
-        return MediaUtilities.WriteExifToolAsync(ExifToolCommand, [.. args], cancellationToken);
+        return MediaUtilities.WriteExifToolAsync(
+            ExifToolCommand,
+            [.. args],
+            true,
+            cancellationToken
+        );
     }
 
     // A caller may delete the source after an import succeeds, so a failed write fails the file.
@@ -846,11 +922,13 @@ internal sealed class ImportTask(
         return ReportWrite(failure, What, sourceFile, destFile) ? null : What;
     }
 
-    private static void WarnSkippedWrites(
+    // Returns whether a requested write was skipped, which fails the file under --failunwritable.
+    private static bool ReportSkippedWrites(
         string file,
         ExifToolJson? meta,
         string[] tags,
-        string inferredDate
+        string inferredDate,
+        bool fail
     )
     {
         List<string> skipped = [];
@@ -864,28 +942,51 @@ internal sealed class ImportTask(
             skipped.Add($"created date '{inferredDate}'");
         }
 
-        if (skipped.Count > 0)
+        if (skipped.Count == 0)
+        {
+            return false;
+        }
+
+        string reason =
+            meta is null ? "its metadata could not be read"
+            : string.IsNullOrEmpty(meta.FileTypeExtension) ? "exiftool reported no file type"
+            : $"type '{meta.FileTypeExtension}' is not in the exiftool write list";
+        if (fail)
+        {
+            Log.Error(
+                "Failed to import '{FilePath}', which cannot take {Skipped}, since {Reason}",
+                file,
+                string.Join(" and ", skipped),
+                reason
+            );
+        }
+        else
         {
             Log.Warning(
                 "Skipping {Skipped} for '{FilePath}', since {Reason}",
                 string.Join(" and ", skipped),
                 file,
-                meta is null ? "its metadata could not be read"
-                    : string.IsNullOrEmpty(meta.FileTypeExtension)
-                        ? "exiftool reported no file type"
-                    : $"type '{meta.FileTypeExtension}' is not in the exiftool write list"
+                reason
             );
         }
+
+        return true;
     }
 
     // A copy is removed, so the untouched source imports cleanly on the next run.
-    private static void RemoveCopy(string sourceFile, string destFile)
+    // Returns false when the copy stays, and a copy gone with its folder counts as removed.
+    private static bool RemoveCopy(string sourceFile, string destFile)
     {
         Exception? failure = MediaUtilities.TryDeleteFile(destFile);
-        if (failure is not null)
+        if (failure is not null and not DirectoryNotFoundException)
         {
-            Log.Warning(failure, "Failed to remove '{DestinationPath}'", destFile);
-            return;
+            Log.Error(
+                failure,
+                "Failed to remove '{DestinationPath}' copied from '{SourcePath}'",
+                destFile,
+                sourceFile
+            );
+            return false;
         }
 
         Log.Warning(
@@ -893,5 +994,6 @@ internal sealed class ImportTask(
             destFile,
             sourceFile
         );
+        return true;
     }
 }
