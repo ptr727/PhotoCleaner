@@ -24,7 +24,7 @@ internal sealed partial class Program
             exitCode = await RunAsync(args, terminationSource.Token).ConfigureAwait(false);
         }
 
-        // The log is flushed and the handlers are gone, so the signal now takes its default action.
+        // The log is flushed and the managed handlers are disposed, so ExitBySignal restores the default action and re-sends.
         return receivedSignal is PosixSignal signal ? ExitBySignal(signal) : exitCode;
     }
 
