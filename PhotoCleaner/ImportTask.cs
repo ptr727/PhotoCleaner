@@ -479,14 +479,12 @@ internal sealed class ImportTask(
                 file,
                 failedWrite
             );
-            ReleaseClaims(claimed, true);
-            claimed.Clear();
+            KeepClaims(claimed);
             return ImportResult.Failed;
         }
         catch (OperationCanceledException)
         {
-            // Only a cancelled copy can leave a partial destination.
-            // A move is atomic on one filesystem, and cross-device failure leaves the source intact.
+            // A cancel after the copy removes it, and a moved file stays where it landed.
             if (!options.Move && File.Exists(finalDest))
             {
                 _ = DeleteCopy(finalDest);
@@ -494,12 +492,28 @@ internal sealed class ImportTask(
 
             throw;
         }
-        catch (Exception) when (!options.Move)
+        catch (Exception)
         {
-            // Removed before the claims are freed, so a file waiting on them cannot import a second copy.
-            RemoveCopy(file, finalDest);
+            // Done before the claims are freed, so a file waiting on them cannot import a second copy.
+            // The moved file is in the library even without its row, so its claims stay held.
+            if (options.Move)
+            {
+                KeepClaims(claimed);
+            }
+            else
+            {
+                RemoveCopy(file, finalDest);
+            }
+
             throw;
         }
+    }
+
+    // The outer release then frees nothing.
+    private void KeepClaims(List<(string Key, Claim Claim)> claimed)
+    {
+        ReleaseClaims(claimed, true);
+        claimed.Clear();
     }
 
     // Returns the name of the write that failed, or null when every write landed.

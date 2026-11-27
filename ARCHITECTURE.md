@@ -643,9 +643,9 @@ flowchart TD
   ihQ -->|"no"| exec["ImportTask.ExecuteAsync(): run files in parallel, up to --threads"]
   ihVer --> exec
   exec -->|"each file"| perFile["ImportTask.ImportFileAsync(): import one file, see the stages below"]
-  perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported or kept with its row, else free them"]
+  perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported or a moved file was kept, else free them"]
   release --> counted(["Counted under the returned result"])
-  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims, then log the file"]
+  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims unless a moved file was kept, then log the file"]
   perFileCatch --> countedFailed(["Counted Failed"])
   perFile -->|"cancel"| exitError
   exec -->|"all files done"| deQ{"--deleteempty?"}
@@ -791,7 +791,7 @@ flowchart TD
   insert -->|"other exception"| rowMvQ{"--move?"}
   update -->|"other exception"| rowMvQ
   rowMvQ -->|"no"| rollback
-  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row"]
+  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row, claims kept"]
   rowFail --> failed
   insert -->|"cancel"| cancelQ
   update -->|"cancel"| cancelQ
@@ -806,7 +806,7 @@ flowchart TD
 
 Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. That exception still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed.
 
-A moved file has no source left to return to, so a failed write keeps it in `--outpath` with the source mtime. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too.
+A moved file has no source left to return to, so a failed write keeps it in `--outpath` with the source mtime. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move also keeps the claims, since the moved file is in the library without its row.
 
 ### Index
 
