@@ -165,13 +165,17 @@ internal sealed class ImportTask(
 
     internal void ReleaseClaims(List<(string Key, Claim Claim)> claimed, bool imported)
     {
-        foreach ((string key, Claim claim) in claimed)
+        // Every claim is freed before any waiter wakes, so a waiter retrying finds the name free too.
+        if (!imported)
         {
-            if (!imported)
+            foreach ((string key, Claim claim) in claimed)
             {
                 _ = ClaimsFor(key).TryRemove(new KeyValuePair<string, Claim>(key, claim));
             }
+        }
 
+        foreach ((_, Claim claim) in claimed)
+        {
             _ = claim.Imported.TrySetResult(imported);
         }
     }
