@@ -897,8 +897,8 @@ flowchart TD
   T6 -->|"no"| T8
   T8 -->|"exception"| TE
   T8 -->|"cancel"| T9["CommandRunner.RunAsync(): log Trash cancelled at Information"]
-  T8 -->|"request timeout"| TT["TrashCommand.FetchTrashedAssetsAsync(): throw a TimeoutException naming the request, logged at Error"]
-  TT --> T14
+  T8 -->|"request timeout"| TT["TrashCommand.FetchTrashedAssetsAsync(): throw a TimeoutException naming the request"]
+  TT --> TE
   T9 --> T10(["Exit 1, Error"])
   T8 --> T11{"partial flag set?"}
   T11 -->|"yes"| T12(["Exit 2, Failed"])
