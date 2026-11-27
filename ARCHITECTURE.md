@@ -896,7 +896,9 @@ flowchart TD
   T7 --> T8["TrashCommand.SyncAsync(): fetch and store hashes, see next diagram"]
   T6 -->|"no"| T8
   T8 -->|"exception"| TE
-  T8 -->|"cancel or HTTP timeout"| T9["CommandRunner.RunAsync(): log Trash cancelled at Information, S15"]:::suspect
+  T8 -->|"cancel"| T9["CommandRunner.RunAsync(): log Trash cancelled at Information"]
+  T8 -->|"request timeout"| TT["TrashCommand.FetchTrashedAssetsAsync(): throw a TimeoutException naming the request, logged at Error"]
+  TT --> T14
   T9 --> T10(["Exit 1, Error"])
   T8 --> T11{"partial flag set?"}
   T11 -->|"yes"| T12(["Exit 2, Failed"])
@@ -1144,7 +1146,7 @@ Each entry describes a branch the diagrams mark, as the code behaves today, and 
 - **S8.** A dry run with `--db` creates, upgrades and writes the database, #316.
 - **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
-- **S15.** `trash` stops at an empty page without marking the sync partial, and logs a timeout as a cancel, #323.
+- **S15.** `trash` stops at an empty page without reading `NextPage` or marking the sync partial, #335.
 - **S16.** A moved file whose row write fails stays in `--outpath` with no row, so the next run imports a copy of it again, #340.
 
 ## State Management Pattern

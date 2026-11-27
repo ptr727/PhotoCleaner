@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using PhotoCleaner;
+using Serilog;
 using Serilog.Events;
 
 namespace PhotoCleanerTests;
@@ -10,7 +11,10 @@ public sealed class TrashCommandTests
     private static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"trashcmd_{Path.GetRandomFileName()}.db");
 
-    private static CommandLine.Options CreateOptions(string dbPath, string? processDbPath = null) =>
+    internal static CommandLine.Options CreateOptions(
+        string dbPath,
+        string? processDbPath = null
+    ) =>
         new()
         {
             Path = new DirectoryInfo(Path.GetTempPath()),
@@ -438,5 +442,94 @@ public sealed class TrashCommandTests
                 }
             );
         }
+    }
+}
+
+[Collection(GlobalLoggerDefinition.Name)]
+public sealed class TrashCommandLogTests
+{
+    private static async Task<(int ExitCode, CapturingSink Sink)> RunAsync(
+        HttpMessageHandler handler,
+        CancellationToken token
+    )
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"trashcmd_{Path.GetRandomFileName()}.db");
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Information()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999/"),
+            };
+            int exitCode = await new TrashCommand(
+                TrashCommandTests.CreateOptions(dbPath),
+                token,
+                client
+            ).ExecuteAsync();
+            return (exitCode, sink);
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RequestTimesOut_LogsErrorNamingRequest()
+    {
+        using ThrowingHandler handler = new(() =>
+            new TaskCanceledException("timed out", new TimeoutException())
+        );
+
+        (int exitCode, CapturingSink sink) = await RunAsync(
+            handler,
+            TestContext.Current.CancellationToken
+        );
+
+        exitCode.Should().Be(1);
+        sink.Events.Should()
+            .Contain(e =>
+                e.Level == LogEventLevel.Error
+                && e.Exception != null
+                && e.Exception.Message.Contains("api/search/metadata", StringComparison.Ordinal)
+                && e.Exception.Message.Contains("timed out", StringComparison.Ordinal)
+            );
+        sink.Events.Should()
+            .NotContain(e => e.RenderMessage().Contains("cancelled", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UserCancels_LogsCancelNotError()
+    {
+        using CancellationTokenSource cts = new();
+        using ThrowingHandler handler = new(() =>
+        {
+            cts.Cancel();
+            return new TaskCanceledException("canceled", null, cts.Token);
+        });
+
+        (int exitCode, CapturingSink sink) = await RunAsync(handler, cts.Token);
+
+        exitCode.Should().Be(1);
+        sink.Events.Should()
+            .Contain(e =>
+                e.Level == LogEventLevel.Information
+                && e.RenderMessage().Contains("cancelled", StringComparison.Ordinal)
+            );
+        sink.Events.Should().NotContain(e => e.Level == LogEventLevel.Error);
+    }
+
+    private sealed class ThrowingHandler(Func<Exception> create) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        ) => Task.FromException<HttpResponseMessage>(create());
     }
 }
