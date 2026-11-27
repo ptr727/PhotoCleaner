@@ -306,7 +306,7 @@ flowchart TD
   flag{"Which flag did the stopping step set?"}
   reproc(["Reprocess, counted Modified"])
   delStep(["Deleted, counted Deleted"])
-  dryMod(["Modified, counted Modified, nothing changed and the row not marked processed"])
+  dryMod(["Modified, counted Modified, nothing changed, this run does not mark the row"])
   failStep(["Failure, counted Failed"])
   setdb{"--db given?"}
   mark["Database.SetProcessedAsync(): mark the row processed, also under --dryrun, S8"]:::suspect
@@ -351,7 +351,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-The trash check runs only with `--db`, before the already-processed skip. A file is marked processed only when every step passes, so a deleted or renamed file keeps its old row unmarked. This run marks neither a trashed file whose delete failed nor a file a dry run would change.
+The trash check runs only with `--db`, before the already-processed skip. A file is marked processed only when every step passes. So this run does not mark a deleted or renamed file, a trashed file whose delete failed, or a file a dry run would change.
 
 #### Process Trash Check
 

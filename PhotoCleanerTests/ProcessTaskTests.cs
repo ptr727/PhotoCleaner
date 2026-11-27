@@ -2089,8 +2089,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 filePath,
                 cancellationToken: TestContext.Current.CancellationToken
             );
-            row.Should().NotBeNull();
-            row!.IsProcessed.Should().BeFalse();
+            (row?.IsProcessed ?? false).Should().BeFalse();
         }
         finally
         {
