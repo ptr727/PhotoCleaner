@@ -188,8 +188,7 @@ flowchart TD
   enum["FileEnumerator.Enumerate(): list every file under --path"]
   fixcase{"ProcessCommand.FixCaseConflicts(): two full paths equal ignoring case?"}
   dry{"--dryrun?"}
-  dryloop["ProcessCommand.RenamedMixedCaseFiles(): log only, nothing moves, S6"]:::suspect
-  hang(["Enumerates and finds the same conflict forever, no exit code"])
+  dryloop["ProcessCommand.RenamedMixedCaseFiles(): log each conflict once, nothing moves"]
   move["ProcessCommand.RenamedMixedCaseFiles(): rename every variant to name_N"]
   hasdb{"--db given?"}
   catalog["ProcessCommand.CatalogAsync(): IndexTask.ExecuteAsync on every media file"]
@@ -212,7 +211,7 @@ flowchart TD
   enum -->|"exception"| err
   enum --> fixcase
   fixcase -->|"yes"| dry
-  dry -->|"yes"| dryloop --> hang
+  dry -->|"yes"| dryloop -->|"keep the names as found"| hasdb
   dry -->|"no"| move
   move -->|"File.Move fails"| err
   move -->|"enumerate again"| enum
@@ -274,7 +273,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Modified counts each step that queued a new name, not each file. A file renamed and then converted counts twice. No path returns Modified without also queuing, so Modified results come from Reprocess.
+Modified counts each step that queued a new name, not each file. A file renamed and then converted counts twice. Outside a dry run no path returns Modified without also queuing, so Modified results come from Reprocess. A dry run queues nothing, so it counts each file it would change once, by the first step that would change it.
 
 #### Process Per-File Pipeline
 
@@ -291,8 +290,9 @@ flowchart TD
   hasdb{"--db given?"}
   index["IndexTask.IndexFileAsync(): hash, insert or update the row, also under --dryrun, S8"]:::suspect
   hastrash{"--trashdb given?"}
-  trashed{"ProcessTask.TryDeleteIfTrashedAsync(): trashed and handled?"}
+  trashed{"ProcessTask.TryDeleteIfTrashedAsync(): trashed?"}
   del(["Deleted, counted Deleted"])
+  trashFail(["Failure, counted Failed, the next run retries the delete"])
   skip{"Row unchanged and processed, and no --reprocess?"}
   skipped(["Skipped, counted Skipped"])
   exif["MediaUtilities.GetExifToolJsonAsync(): read the metadata and validation"]
@@ -306,7 +306,8 @@ flowchart TD
   flag{"Which flag did the stopping step set?"}
   reproc(["Reprocess, counted Modified"])
   delStep(["Deleted, counted Deleted"])
-  failStep(["Failure, counted Failed, also every change skipped by --dryrun, S7"]):::suspect
+  dryMod(["Modified, counted Modified, nothing changed and the row not marked processed"])
+  failStep(["Failure, counted Failed"])
   setdb{"--db given?"}
   mark["Database.SetProcessedAsync(): mark the row processed, also under --dryrun, S8"]:::suspect
   mod{"Modified flag set?"}
@@ -322,8 +323,9 @@ flowchart TD
   hasdb -->|"yes"| index --> hastrash
   hastrash -->|"yes"| trashed
   hastrash -->|"no"| skip
-  trashed -->|"true"| del
-  trashed -->|"false"| skip
+  trashed -->|"Deleted"| del
+  trashed -->|"Failure"| trashFail
+  trashed -->|"not trashed"| skip
   skip -->|"yes"| skipped
   skip -->|"no"| exif
   exif --> valid
@@ -339,7 +341,8 @@ flowchart TD
   s4 -->|"false"| flag
   flag -->|"Reprocess flag"| reproc
   flag -->|"Deleted flag only"| delStep
-  flag -->|"neither flag"| failStep
+  flag -->|"would-modify flag, set only under --dryrun"| dryMod
+  flag -->|"no flag"| failStep
   s5 --> setdb
   setdb -->|"yes"| mark --> mod
   setdb -->|"no"| mod
@@ -348,7 +351,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-The trash check runs only with `--db`, before the already-processed skip. A file is marked processed only on Success or Modified, so a deleted or renamed file keeps its old row unmarked.
+The trash check runs only with `--db`, before the already-processed skip. A file is marked processed only when every step passes, so a deleted or renamed file keeps its old row unmarked. So does a trashed file whose delete failed, and a file a dry run would change.
 
 #### Process Trash Check
 
@@ -359,13 +362,12 @@ flowchart TD
   start["ProcessTask.TryDeleteIfTrashedAsync(): check the SHA-1 and image hash"]
   sha{"TrashDatabase.Sha1ExistsAsync(): SHA-1 in the trash DB?"}
   img{"TrashDatabase.ImageHashExistsAsync(): image hash in the trash DB?"}
-  keep(["Returns false, pipeline continues"])
+  keep(["Returns no result, pipeline continues"])
   dry{"--dryrun?"}
-  dryDel(["Returns true, Deleted, counted Deleted, nothing removed"])
+  dryDel(["Returns Deleted, counted Deleted, nothing removed"])
   del["MediaUtilities.TryDeleteFile(): delete with no backup, even without --skipbackup"]
-  delOk(["Returns true, row kept, Deleted, counted Deleted"])
-  delFail["Log an error and return false, S9"]:::suspect
-  cont(["Pipeline continues, the file can end Success or Skipped"])
+  delOk(["Returns Deleted, row kept, counted Deleted"])
+  delFail(["Log an error, return Failure, counted Failed, the row stays unmarked"])
 
   start --> sha
   sha -->|"yes"| dry
@@ -375,7 +377,7 @@ flowchart TD
   dry -->|"yes"| dryDel
   dry -->|"no"| del
   del -->|"deleted"| delOk
-  del -->|"IOException or UnauthorizedAccessException"| delFail --> cont
+  del -->|"IOException or UnauthorizedAccessException"| delFail
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
@@ -397,7 +399,7 @@ flowchart TD
   c2{"--dryrun?"}
   c3["ProcessTask.RenameToFreeName(): same name with a lower-case extension"]
   pass(["Step passes, next step runs"])
-  dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
+  dryEnd(["Set the would-modify flag and return false, Modified, counted Modified, nothing renamed"])
   taken{"ProcessTask.IsNameTaken(): target held by another file?"}
   r1["ProcessTask.RenameFile(): move to the target name"]
   r2["MediaUtilities.GetUniqueFileName(): pick name_N, then move there"]
@@ -438,7 +440,7 @@ flowchart TD
   l2["ProcessTask.GetDurationAsync(): ffprobe format duration"]
   l3{"Duration at or below --duration, default 1s?"}
   sdry{"--dryrun?"}
-  dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
+  dryEnd(["Set the Deleted flag and return false, counted Deleted, nothing removed"])
   sskip{"--skipbackup?"}
   sdel["File.Delete the clip"]
   smark{"ProcessTask.CullFile(): this run converted the clip?"}
@@ -522,7 +524,7 @@ flowchart TD
   reenc["Re-encode to H.264 and AAC in MP4"]
   aac["Re-encode the PCM audio to AAC and copy the video"]
   dry{"--dryrun?"}
-  dryEnd(["Returns false, no flag, Failure, counted Failed, S7"]):::suspect
+  dryEnd(["Set the would-modify flag and return false, Modified, counted Modified, nothing converted"])
   tmp["Delete any existing stem.temp beside the file"]
   ff["ffmpeg writes stem.temp"]
   ffEnd(["Exception to the per-file catch, stem.temp removed, counted Failed"])
@@ -1140,10 +1142,7 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
-- **S6.** A `process` dry run loops forever on names that differ only in case, #314.
-- **S7.** A `process` dry run counts every file it would change as Failed and exits 2, #315.
 - **S8.** A dry run with `--db` creates, upgrades and writes the database, #316.
-- **S9.** A trashed file whose delete fails continues through the pipeline, and the run exits 0, #317.
 - **S11.** `import --deleteempty` throws when `--outpath` does not exist, so the run exits 1, #319.
 - **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S13.** Two parallel imports with the same name and date can pick the same destination, #321.
