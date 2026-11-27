@@ -263,15 +263,17 @@ public sealed class TrashCommandTests
     {
         using MockImmichHandler handler = new();
         handler.EnqueueResponse(MakeResponse([Sha1Base64(0x01)], nextCursor: "c1"));
-        handler.EnqueueResponse(MakeResponse([Sha1Base64(0x02)]));
+        handler.EnqueueResponse(MakeResponse([Sha1Base64(0x02)], nextCursor: "c2"));
+        handler.EnqueueResponse(MakeResponse([Sha1Base64(0x03)]));
 
         (int exitCode, _, _) = await RunSyncAsync(handler);
 
         exitCode.Should().Be(0);
-        handler.RequestBodies.Should().HaveCount(2);
+        handler.RequestBodies.Should().HaveCount(3);
         using JsonDocument first = JsonDocument.Parse(handler.RequestBodies[0]);
         using JsonDocument second = JsonDocument.Parse(handler.RequestBodies[1]);
-        foreach (JsonDocument body in new[] { first, second })
+        using JsonDocument third = JsonDocument.Parse(handler.RequestBodies[2]);
+        foreach (JsonDocument body in new[] { first, second, third })
         {
             body.RootElement.EnumerateObject()
                 .Select(property => property.Name)
@@ -284,6 +286,7 @@ public sealed class TrashCommandTests
         }
         first.RootElement.TryGetProperty("cursor", out _).Should().BeFalse();
         second.RootElement.GetProperty("cursor").GetString().Should().Be("c1");
+        third.RootElement.GetProperty("cursor").GetString().Should().Be("c2");
     }
 
     [Fact]
