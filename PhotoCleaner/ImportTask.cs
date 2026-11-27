@@ -137,7 +137,8 @@ internal sealed class ImportTask(
         );
     }
 
-    // A file that does not import releases its claims, and a file waiting on one of them tries again.
+    // A file that does not import releases its claims, unless it moved into the library.
+    // A file waiting on a released claim tries again.
     private async Task<ImportResult> ImportFileAsync(
         string file,
         DirectoryInfo sourceDir,
@@ -795,22 +796,18 @@ internal sealed class ImportTask(
         DateTime lastWriteTimeUtc
     )
     {
+        const string What = "modified time";
+        string? failure = null;
         try
         {
             File.SetLastWriteTimeUtc(destFile, lastWriteTimeUtc);
-            return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Error(
-                ex,
-                "Failed to write {What} to '{DestinationPath}' imported from '{SourcePath}'",
-                "modified time",
-                destFile,
-                sourceFile
-            );
-            return "modified time";
+            failure = ex.Message;
         }
+
+        return ReportWrite(failure, What, sourceFile, destFile) ? null : What;
     }
 
     private static void WarnSkippedWrites(

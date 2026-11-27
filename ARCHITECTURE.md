@@ -786,7 +786,7 @@ flowchart TD
   insert --> keptQ{"Moved file kept after a failed write?"}
   update --> keptQ
   keptQ -->|"no"| imported(["Counted Imported"])
-  keptQ -->|"yes"| keepMoved["Moved file kept in --outpath with its row, writes missing, claims kept"]
+  keptQ -->|"yes"| keepMoved["Moved file kept in --outpath, row written under --db, writes missing, claims kept"]
   keepMoved --> failed
   insert -->|"other exception"| rowMvQ{"--move?"}
   update -->|"other exception"| rowMvQ
