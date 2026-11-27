@@ -178,6 +178,9 @@ public sealed class ExifToolJson
 
     private static readonly string[] s_exifDateFormats =
     [
+        "yyyy:MM:dd",
+        "yyyy:MM:dd HH:mm",
+        "yyyy:MM:dd HH:mmK",
         "yyyy:MM:dd HH:mm:ss",
         "yyyy:MM:dd HH:mm:ssK",
         "yyyy:MM:dd HH:mm:ss.FFFFFFF",
@@ -190,7 +193,7 @@ public sealed class ExifToolJson
         {
             if (
                 DateTimeOffset.TryParseExact(
-                    dateStr,
+                    TrimFraction(dateStr),
                     s_exifDateFormats,
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.AssumeUniversal,
@@ -202,6 +205,24 @@ public sealed class ExifToolJson
             }
         }
         return null;
+    }
+
+    private static string TrimFraction(string dateStr)
+    {
+        const int fractionStart = 20;
+        const int maxDigits = 7;
+        if (dateStr.Length <= fractionStart || dateStr[fractionStart - 1] != '.')
+        {
+            return dateStr;
+        }
+        int end = fractionStart;
+        while (end < dateStr.Length && char.IsAsciiDigit(dateStr[end]))
+        {
+            end++;
+        }
+        return end - fractionStart <= maxDigits
+            ? dateStr
+            : string.Concat(dateStr.AsSpan(0, fractionStart + maxDigits), dateStr.AsSpan(end));
     }
 
     public string? GetDateString() => GetDateStrings().FirstOrDefault();

@@ -413,6 +413,20 @@ public sealed class ExifToolJsonTests
         json.GetDateString().Should().Be("2024:01:21 18:00:00");
     }
 
+    [Theory]
+    [InlineData("2021:03:04 23:30:00.123456001281738Z")]
+    [InlineData("2021:03:04 23:30:00")]
+    [InlineData("2021:03:04 23:30")]
+    [InlineData("2021:03:04 23:30+02:00")]
+    [InlineData("2021:03:04")]
+    public void GetDate_WhenMatroskaOrLessPreciseDate_Parses(string value)
+    {
+        ExifToolJson json = new() { MatroskaDateTimeOriginal = value };
+
+        json.GetDate().Should().NotBeNull();
+        json.GetDate()!.Value.Date.Should().Be(new DateTime(2021, 3, 4));
+    }
+
     [Fact]
     public void GetDate_WhenFirstDateIsZero_UsesNextDateThatParses()
     {

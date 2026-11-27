@@ -712,11 +712,11 @@ The folder date comes from the inferred path date, else the parsed metadata date
 
 ```mermaid
 flowchart TD
-  start["ExifToolJson.GetDateString(): first date tag set, Matroska and RIFF dates included"]
+  start["ExifToolJson.GetDate(): walk the date tags in priority order, Matroska and RIFF last"]
   start --> dpQ{"--datepath?"}
   dpQ -->|"no"| getDate
   dpQ -->|"yes"| setQ{"ExifToolJson.IsDateSet(): metadata has a date that parses?"}
-  setQ -->|"yes"| getDate{"ExifToolJson.GetDate(): date string parses, with or without sub-seconds or a time zone offset?"}
+  setQ -->|"yes"| getDate{"ExifToolJson.GetDate(): date string parses, with or without sub-seconds, a time zone offset, or a seconds part?"}
   setQ -->|"no"| infer{"DateFromPath.InferCreatedDate(): date in the file name or directories?"}
   infer -->|"yes"| inferred["Use the inferred date for the folder and the later date write"]
   infer -->|"no"| inferWarn["Log a warning, no inferred date"]
@@ -737,7 +737,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-`ExifToolJson.IsDateSet()` is true only when `GetDate()` parses the date, so `--datepath` is tried for a zero or malformed date too. A date with a time zone offset files under its recorded wall-clock date, the same reading a date without an offset gets. `GetDate()` takes the first date tag that parses, so a zero date in one tag does not hide a valid one in another. The Matroska date is read from `Matroska:DateTimeOriginal`, with `RIFF:DateTimeOriginal` after it for an AVI.
+`ExifToolJson.IsDateSet()` is true only when `GetDate()` parses the date, so `--datepath` is tried for a zero or malformed date too. A date with a time zone offset files under the clock time it records, the same reading a date without an offset gets. A `Z` date, as Matroska stores, is that UTC clock time. `GetDate()` takes the first date tag that parses, so a zero date in one tag does not hide a valid one in another. The Matroska date is read from `Matroska:DateTimeOriginal`, with `RIFF:DateTimeOriginal` after it for an AVI.
 
 #### Import Copy and Writes
 
