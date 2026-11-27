@@ -403,6 +403,7 @@ public sealed class ExifToolJsonTests
 
         json.GetDate().Should().BeNull();
         json.IsDateSet().Should().BeFalse();
+        json.GetDateString().Should().BeNull();
     }
 
     [Fact]
