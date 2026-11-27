@@ -791,7 +791,7 @@ flowchart TD
   insert -->|"other exception"| rowMvQ{"--move?"}
   update -->|"other exception"| rowMvQ
   rowMvQ -->|"no"| rollback
-  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row, claims kept"]
+  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row, claims kept, S16"]:::suspect
   rowFail --> failed
   insert -->|"cancel"| cancelQ
   update -->|"cancel"| cancelQ
@@ -1152,6 +1152,7 @@ Each entry describes a branch the diagrams mark, as the code behaves today, and 
 - **S13.** Two parallel imports with the same name and date can pick the same destination, #321.
 - **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
 - **S15.** `trash` stops at an empty page without marking the sync partial, and logs a timeout as a cancel, #323.
+- **S16.** A moved file whose row write fails stays in `--outpath` with no row, so the next run imports a copy of it again, #340.
 
 ## State Management Pattern
 

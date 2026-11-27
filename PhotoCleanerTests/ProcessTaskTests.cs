@@ -3,7 +3,6 @@ using CliWrap;
 using CliWrap.Buffered;
 using PhotoCleaner;
 using Serilog;
-using Serilog.Core;
 using Serilog.Events;
 
 namespace PhotoCleanerTests;
