@@ -1804,6 +1804,42 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     public void IsWriteUnchanged_ReadsUnchangedCount(string standardOutput, bool expected) =>
         MediaUtilities.IsWriteUnchanged(standardOutput).Should().Be(expected);
 
+    [Fact]
+    public async Task WriteExifToolAsync_UnchangedWrite_FailsOnlyWhenAsked()
+    {
+        string stubDir = TempDir();
+        try
+        {
+            string stub = UnchangedWriteStub(stubDir);
+            string file = Path.Combine(stubDir, "photo.jpg");
+            CancellationToken ct = TestContext.Current.CancellationToken;
+
+            // Process takes the overloads without the flag, so an unchanged write succeeds there.
+            (await MediaUtilities.WriteExifToolAsync(stub, [file], ct)).Should().BeNull();
+            (await MediaUtilities.TrySetCreateDateAsync("2021:05:02 00:00:00", file, stub, ct))
+                .Should()
+                .BeNull();
+            (await MediaUtilities.WriteExifToolAsync(stub, [file], true, ct))
+                .Should()
+                .Contain("1 image files unchanged");
+            (
+                await MediaUtilities.TrySetCreateDateAsync(
+                    "2021:05:02 00:00:00",
+                    file,
+                    stub,
+                    true,
+                    ct
+                )
+            )
+                .Should()
+                .Contain("1 image files unchanged");
+        }
+        finally
+        {
+            Directory.Delete(stubDir, recursive: true);
+        }
+    }
+
     // -- datePath: missing EXIF date inferred from path -----------------------
 
     [Fact]

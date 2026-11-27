@@ -711,6 +711,8 @@ A claim waiter blocks until the owner finishes, then loops if the owner freed th
 
 #### Import Destination
 
+<!-- cspell:ignore failunwritable -->
+
 The folder date comes from the inferred path date, else the parsed metadata date, else `DateTime.MinValue`. A dry run ends here, before any file or database write. A file failed by `--failunwritable` ends here too, in a dry run as in a live one.
 
 ```mermaid
