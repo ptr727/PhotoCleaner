@@ -45,7 +45,7 @@ public sealed class TrashCommandTests
             },
         };
 
-    private static ImmichSearchResponse MakeResponse(
+    internal static ImmichSearchResponse MakeResponse(
         string[] base64Checksums,
         string? nextPage = null
     )
@@ -564,6 +564,35 @@ public sealed class TrashCommandLogTests
             Log.Logger = savedLogger;
             File.Delete(dbPath);
         }
+    }
+
+    [Theory]
+    [InlineData("3", "names later page")]
+    [InlineData("not-a-page", "invalid NextPage value")]
+    [InlineData("2", "invalid NextPage value")]
+    [InlineData("1", "invalid NextPage value")]
+    public async Task ExecuteAsync_EmptyPageWithNextPage_LogsMatchingError(
+        string emptyNextPage,
+        string expected
+    )
+    {
+        using TrashCommandTests.MockImmichHandler handler = new();
+        handler.EnqueueResponse(
+            TrashCommandTests.MakeResponse([Convert.ToBase64String(new byte[20])], nextPage: "2")
+        );
+        handler.EnqueueResponse(TrashCommandTests.MakeResponse([], nextPage: emptyNextPage));
+
+        (int exitCode, CapturingSink sink) = await RunAsync(
+            handler,
+            TestContext.Current.CancellationToken
+        );
+
+        exitCode.Should().Be(2);
+        sink.Events.Should()
+            .ContainSingle(e =>
+                e.Level == LogEventLevel.Error
+                && e.RenderMessage().Contains(expected, StringComparison.Ordinal)
+            );
     }
 
     [Fact]

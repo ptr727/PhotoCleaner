@@ -932,9 +932,9 @@ flowchart TD
   S2 --> S3["TrashCommand.FetchTrashedAssetsAsync(): POST api/search/metadata, 1000 per page"]
   S3 -->|"HTTP error, timeout, or bad JSON"| SE
   S3 --> S4{"page has items?"}
-  S4 -->|"no"| S5{"NextPage names a later page?"}
-  S5 -->|"yes"| S13
-  S5 -->|"no"| S14
+  S4 -->|"no"| S5{"NextPage value?"}
+  S5 -->|"null"| S14
+  S5 -->|"any other value"| S13
   S4 -->|"yes"| S6{"for each asset: isTrashed?"}
   S6 -->|"no"| S7["Log warning, skip the asset"]
   S6 -->|"yes"| S8["TrashCommand.ConvertChecksum(): base64 checksum to hex SHA-1"]
