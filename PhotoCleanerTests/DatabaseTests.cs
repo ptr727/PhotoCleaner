@@ -695,4 +695,107 @@ public sealed class DatabaseTests
             File.Delete(dbPath);
         }
     }
+
+    [Fact]
+    public async Task InitializeAsync_WriteCheck_LeavesNoTableBehind()
+    {
+        string dbPath = TempDb();
+        try
+        {
+            await using (Database db = new(dbPath))
+            {
+                await db.InitializeAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using SqliteConnection conn = new($"Data Source={dbPath};Pooling=False");
+            await conn.OpenAsync(TestContext.Current.CancellationToken);
+            using SqliteCommand cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+            List<string> tables = [];
+            using SqliteDataReader reader = await cmd.ExecuteReaderAsync(
+                TestContext.Current.CancellationToken
+            );
+            while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+            {
+                tables.Add(reader.GetString(0));
+            }
+
+            tables.Should().Equal("files");
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_FileCannotBeWritten_Throws()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix file modes and a non-privileged process");
+        }
+        else
+        {
+            string dbPath = TempDb();
+            try
+            {
+                await using (Database writable = new(dbPath))
+                {
+                    await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                }
+
+                File.SetUnixFileMode(dbPath, UnixFileMode.UserRead);
+                await using Database db = new(dbPath);
+                Func<Task> act = () => db.InitializeAsync(TestContext.Current.CancellationToken);
+
+                (await act.Should().ThrowAsync<InvalidOperationException>())
+                    .WithMessage("*cannot be written*")
+                    .WithInnerException<SqliteException>();
+            }
+            finally
+            {
+                File.SetUnixFileMode(dbPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                File.Delete(dbPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_DirectoryCannotBeWritten_Throws()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
+        }
+        else
+        {
+            string dir = TempDirectoryFixture.CreateWorkDir();
+            string dbPath = Path.Combine(dir, "files.db");
+            try
+            {
+                await using (Database writable = new(dbPath))
+                {
+                    await writable.InitializeAsync(TestContext.Current.CancellationToken);
+                }
+
+                // The file stays writable, but its rollback journal cannot be created.
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                await using Database db = new(dbPath);
+                Func<Task> act = () => db.InitializeAsync(TestContext.Current.CancellationToken);
+
+                (await act.Should().ThrowAsync<InvalidOperationException>())
+                    .WithMessage("*cannot be written*")
+                    .WithInnerException<SqliteException>();
+            }
+            finally
+            {
+                File.SetUnixFileMode(
+                    dir,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+                TempDirectoryFixture.DeleteWorkDir(dir);
+            }
+        }
+    }
 }

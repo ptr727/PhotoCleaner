@@ -60,6 +60,7 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
         }
         else
         {
+            await CheckWritableAsync(cancellationToken).ConfigureAwait(false);
             HasImageHash = true;
             using SqliteCommand createCmd = _connection.CreateCommand();
             createCmd.CommandText = """
@@ -87,6 +88,33 @@ internal sealed class Database(string dbPath, bool readOnly = false) : IDisposab
                 CREATE INDEX IF NOT EXISTS idx_files_image_hash ON files (image_hash)
                 """;
             _ = await indexCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // A file the user cannot write still opens, so the run proves a write before any file moves.
+    private async Task CheckWritableAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            DbTransaction dbTransaction = await _connection!
+                .BeginTransactionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await using (dbTransaction.ConfigureAwait(false))
+            {
+                // Creating a table dirties a page, so the rollback journal must be writable too.
+                using SqliteCommand cmd = _connection.CreateCommand();
+                cmd.Transaction = (SqliteTransaction)dbTransaction;
+                cmd.CommandText = "CREATE TABLE write_check (id INTEGER)";
+                _ = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await dbTransaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (SqliteException ex)
+        {
+            throw new InvalidOperationException(
+                $"Database '{dbPath}' cannot be written: {ex.Message}",
+                ex
+            );
         }
     }
 
