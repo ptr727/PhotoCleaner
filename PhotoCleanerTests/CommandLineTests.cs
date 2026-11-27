@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using PhotoCleaner;
 
@@ -925,23 +926,118 @@ public sealed class CommandLineTests
     {
         using CancellationTokenSource terminationSource = new();
         PosixSignalContext context = new(signal);
+        PosixSignal? recorded = null;
 
-        Program.OnTerminationSignal(context, terminationSource);
+        Program.OnTerminationSignal(context, terminationSource, received => recorded = received);
 
         context.Cancel.Should().BeTrue();
         terminationSource.IsCancellationRequested.Should().BeTrue();
+        recorded.Should().Be(signal);
     }
 
     [Fact]
     public void OnTerminationSignal_SecondSignal_TakesDefaultAction()
     {
         using CancellationTokenSource terminationSource = new();
-        Program.OnTerminationSignal(new PosixSignalContext(PosixSignal.SIGINT), terminationSource);
-        PosixSignalContext second = new(PosixSignal.SIGINT);
+        List<PosixSignal> recorded = [];
+        Program.OnTerminationSignal(
+            new PosixSignalContext(PosixSignal.SIGINT),
+            terminationSource,
+            recorded.Add
+        );
+        PosixSignalContext second = new(PosixSignal.SIGTERM);
 
-        Program.OnTerminationSignal(second, terminationSource);
+        Program.OnTerminationSignal(second, terminationSource, recorded.Add);
 
         second.Cancel.Should().BeFalse();
+        recorded.Should().Equal(PosixSignal.SIGINT);
+    }
+
+    [Theory]
+    [InlineData(PosixSignal.SIGINT, 2, ExitCode.Interrupted)]
+    [InlineData(PosixSignal.SIGTERM, 15, ExitCode.Terminated)]
+    public void SignalExit_MapsSignalToNumberAndExitCode(
+        PosixSignal signal,
+        int number,
+        int exitCode
+    )
+    {
+        Program.SignalExit(signal).Should().Be((number, exitCode));
+        exitCode.Should().Be(128 + number);
+    }
+
+    [Fact]
+    public async Task Main_SigInt_DiesBySignalAfterCleanupSoCallingLoopStops()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("Requires setsid, env --default-signal, and bash");
+        }
+
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("PhotoCleanerTests_");
+        using TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using System.Diagnostics.Process loop = new();
+        loop.StartInfo = new System.Diagnostics.ProcessStartInfo("setsid")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = directory.FullName,
+        };
+        foreach (
+            string argument in (string[])
+                [
+                    "env",
+                    "--default-signal=INT",
+                    "bash",
+                    "-c",
+                    "\"$@\"; echo \"loop continued\"",
+                    "bash",
+                    "dotnet",
+                    Path.Combine(AppContext.BaseDirectory, "PhotoCleaner.dll"),
+                    "trash",
+                    "--url",
+                    $"http://127.0.0.1:{port}",
+                    "--apikey",
+                    "test-key",
+                    "--trashdb",
+                    Path.Combine(directory.FullName, "trash.db"),
+                ]
+        )
+        {
+            loop.StartInfo.ArgumentList.Add(argument);
+        }
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
+        bool started = false;
+        try
+        {
+            started = loop.Start();
+            Task<string> output = loop.StandardOutput.ReadToEndAsync(timeout.Token);
+            Task<string> error = loop.StandardError.ReadToEndAsync(timeout.Token);
+            using TcpClient request = await listener.AcceptTcpClientAsync(timeout.Token);
+
+            using System.Diagnostics.Process kill = System.Diagnostics.Process.Start(
+                "kill",
+                ["-s", "INT", "--", $"-{loop.Id}"]
+            );
+            await kill.WaitForExitAsync(timeout.Token);
+            await loop.WaitForExitAsync(timeout.Token);
+
+            kill.ExitCode.Should().Be(0);
+            string log = await output + await error;
+            log.Should().Contain("Trash cancelled");
+            log.Should().NotContain("loop continued");
+            loop.ExitCode.Should().Be(ExitCode.Interrupted);
+        }
+        finally
+        {
+            if (started && !loop.HasExited)
+            {
+                loop.Kill(entireProcessTree: true);
+            }
+            directory.Delete(true);
+        }
     }
 
     [Fact]
