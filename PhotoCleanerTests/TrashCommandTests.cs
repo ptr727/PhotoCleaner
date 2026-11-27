@@ -253,6 +253,7 @@ public sealed class TrashCommandTests
     [InlineData("""{"assets":{"items":[],"nextPage":null,"nextCursor":"c2"}}""", 0)]
     [InlineData("""{"assets":{"items":[]}}""", 0)]
     [InlineData("""{}""", 0)]
+    [InlineData("""{"assets":null}""", 0)]
     [InlineData("""null""", 0)]
     public async Task ExecuteAsync_UnfollowedAnswerShape_ExitsFailed(
         string answerJson,
