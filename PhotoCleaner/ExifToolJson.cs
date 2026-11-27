@@ -174,72 +174,100 @@ public sealed class ExifToolJson
     public string FileDetails =>
         $"type='{FileType}', extension='{FileTypeExtension}', MIME='{MIMEType}'";
 
-    public bool IsDateSet() => GetDateString() is not null;
+    public bool IsDateSet() => GetDate() is not null;
 
-    private const string ExifDateFormat = "yyyy:MM:dd HH:mm:ss";
+    private static readonly string[] s_exifDateFormats =
+    [
+        "yyyy:MM:dd HH:mm",
+        "yyyy:MM:dd HH:mmK",
+        "yyyy:MM:dd HH:mm:ss",
+        "yyyy:MM:dd HH:mm:ssK",
+        "yyyy:MM:dd HH:mm:ss.FFFFFFF",
+        "yyyy:MM:dd HH:mm:ss.FFFFFFFK",
+    ];
 
-    public DateTime? GetDate()
+    public DateTime? GetDate() => FindDate()?.Date;
+
+    private (string Raw, DateTime Date)? FindDate()
     {
-        string? dateStr = GetDateString();
-        return
-            !string.IsNullOrEmpty(dateStr)
-            && DateTime.TryParseExact(
-                dateStr,
-                ExifDateFormat,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out DateTime date
+        foreach (string dateStr in GetDateStrings())
+        {
+            if (
+                DateTimeOffset.TryParseExact(
+                    TrimFraction(dateStr),
+                    s_exifDateFormats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal,
+                    out DateTimeOffset date
+                )
             )
-            ? date
-            : null;
+            {
+                return (dateStr, date.DateTime);
+            }
+        }
+        return null;
     }
 
-    public string? GetDateString()
+    private static string TrimFraction(string dateStr)
     {
-        // EXIF:DateTimeOriginal
+        const int fractionStart = 20;
+        const int maxDigits = 7;
+        if (dateStr.Length <= fractionStart || dateStr[fractionStart - 1] != '.')
+        {
+            return dateStr;
+        }
+        int end = fractionStart;
+        while (end < dateStr.Length && char.IsAsciiDigit(dateStr[end]))
+        {
+            end++;
+        }
+        return end - fractionStart <= maxDigits
+            ? dateStr
+            : string.Concat(dateStr.AsSpan(0, fractionStart + maxDigits), dateStr.AsSpan(end));
+    }
+
+    public string? GetDateString() => FindDate()?.Raw;
+
+    private IEnumerable<string> GetDateStrings()
+    {
         if (!string.IsNullOrEmpty(EXIFDateTimeOriginal))
         {
-            return EXIFDateTimeOriginal;
+            yield return EXIFDateTimeOriginal;
         }
-
-        // EXIF:CreateDate
         if (!string.IsNullOrEmpty(EXIFCreateDate))
         {
-            return EXIFCreateDate;
+            yield return EXIFCreateDate;
         }
-
-        // XMP:CreateDate
         if (!string.IsNullOrEmpty(XMPCreateDate))
         {
-            return XMPCreateDate;
+            yield return XMPCreateDate;
         }
-
-        // QuickTime:CreateDate
         if (
             !string.IsNullOrEmpty(QuickTimeCreateDate)
             && QuickTimeCreateDate != "0000:00:00 00:00:00"
         )
         {
-            return QuickTimeCreateDate;
+            yield return QuickTimeCreateDate;
         }
-
-        // H264:DateTimeOriginal
         if (!string.IsNullOrEmpty(H264DateTimeOriginal))
         {
-            return H264DateTimeOriginal;
+            yield return H264DateTimeOriginal;
         }
-
-        // ASF:CreationDate
         if (
             !string.IsNullOrEmpty(ASFCreationDate)
             && !ASFCreationDate.StartsWith("0000:", StringComparison.Ordinal)
         )
         {
-            return ASFCreationDate;
+            yield return ASFCreationDate;
         }
-
-        // Matroska:DateTimeOriginal
-        return !string.IsNullOrEmpty(RIFFDateTimeOriginal) ? RIFFDateTimeOriginal : null;
+        if (!string.IsNullOrEmpty(MatroskaDateTimeOriginal))
+        {
+            yield return MatroskaDateTimeOriginal;
+        }
+        if (!string.IsNullOrEmpty(RIFFDateTimeOriginal))
+        {
+            yield return RIFFDateTimeOriginal;
+        }
     }
 
     // Verdicts read "OK", "4 Warnings (all minor)", or "2 Errors, 3 Warnings".

@@ -1831,6 +1831,51 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData("2020:01:02 03:04:05+02:00", false)]
+    [InlineData("2020:01:02 03:04:05.25-08:00", false)]
+    [InlineData("2020:01:02 03:04:05+02:00", true)]
+    public async Task ExecuteAsync_DateWithOffsetOrSubSeconds_FilesUnderRecordedDate(
+        string xmpDate,
+        bool datePath
+    )
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        try
+        {
+            string datedDir = Path.Combine(srcDir, "2021", "05", "02");
+            Directory.CreateDirectory(datedDir);
+            string jpg = Path.Combine(datedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), jpg);
+            _ = await Cli.Wrap("exiftool")
+                .WithArguments(["-overwrite_original", $"-XMP:CreateDate={xmpDate}", jpg])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+
+            ImportTask task = new(
+                CreateOptions(outDir, datePath: datePath),
+                database: null,
+                skipDatabase: null,
+                trashDatabase: null,
+                new()
+            );
+            (int organized, _, _, _, _, _, int failed, _) = await task.ExecuteAsync(
+                [jpg],
+                new DirectoryInfo(srcDir),
+                TestContext.Current.CancellationToken
+            );
+
+            organized.Should().Be(1);
+            failed.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "2020-01", "photo.jpg")).Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_DatePath_Gif_SetsXmpDate()
     {
