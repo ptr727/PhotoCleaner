@@ -918,7 +918,7 @@ flowchart TD
   S1["TrashCommand.SyncAsync(): warn if --processdb lacks image_hash, count rows"] --> S2["TrashCommand.CreateDefaultHttpClient(): needs --url and an API key"]
   S2 -->|"missing, throws"| SE
   S2 --> S3["TrashCommand.FetchTrashedAssetsAsync(): POST api/search/metadata, 1000 per page"]
-  S3 -->|"HTTP error or bad JSON"| SE
+  S3 -->|"HTTP error, timeout, or bad JSON"| SE
   S3 --> S4{"page has items?"}
   S4 -->|"no"| S5["TrashCommand.SyncAsync(): stop paging without reading NextPage, S15"]:::suspect
   S4 -->|"yes"| S6{"for each asset: isTrashed?"}
