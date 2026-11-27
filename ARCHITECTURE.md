@@ -932,7 +932,7 @@ flowchart TD
   S2 --> S3["TrashCommand.FetchTrashedAssetsAsync(): POST api/search/metadata, 1000 per page"]
   S3 -->|"HTTP error, timeout, or bad JSON"| SE
   S3 --> S4{"page has items?"}
-  S4 -->|"no"| S5{"nextCursor and NextPage?"}
+  S4 -->|"no"| S5{"nextCursor and NextPage values?"}
   S5 -->|"nextCursor set, or no nextPage key"| S13
   S5 -->|"NextPage null"| S14
   S5 -->|"NextPage any other value"| S13
@@ -945,7 +945,7 @@ flowchart TD
   S9 -->|"after the last asset"| S10
   S10 -->|"yes"| S11["TrashDatabase.InsertHashesAsync(): upsert the page, rows never removed"]
   S10 -->|"no"| S12
-  S11 --> S12{"nextCursor and NextPage?"}
+  S11 --> S12{"nextCursor and NextPage values?"}
   S12 -->|"nextCursor set, or no nextPage key"| S13
   S12 -->|"NextPage integer above this page"| S3
   S12 -->|"NextPage null"| S14
