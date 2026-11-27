@@ -420,6 +420,7 @@ internal sealed class ImportTask(
 
         // FileInfo reads lazily, and a move leaves nothing at the source path to read.
         FileInfo sourceInfo = new(file);
+        bool timeTried = false;
 
         // A copy that cannot be removed is in the library, so its row and claims keep a second copy out, as for a kept move.
         // The row is written even after a cancel, since the copy stays either way.
@@ -430,6 +431,11 @@ internal sealed class ImportTask(
         )]
         async Task KeepCopyAsync(bool rowFailed)
         {
+            if (!timeTried)
+            {
+                _ = RestoreSourceTime(file, finalDest, sourceInfo.LastWriteTimeUtc);
+            }
+
             Exception? rowFailure = null;
             if (!rowFailed)
             {
@@ -506,6 +512,7 @@ internal sealed class ImportTask(
             // A moved file has no source left to return to, so it stays and keeps the source time.
             if (failedWrite is null || options.Move)
             {
+                timeTried = true;
                 string? timeFailure = RestoreSourceTime(
                     file,
                     finalDest,

@@ -3000,9 +3000,11 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         {
             string stub = ReadOnlyFolderStub(
                 srcDir,
-                "echo 'Error: stub write failure' >&2\nexit 1\n"
+                "touch \"$last\"\necho 'Error: stub write failure' >&2\nexit 1\n"
             );
             (string jpg, string dest) = await CreateTaggedSourceAsync(fixture, srcDir);
+            DateTime sourceTime = new(2020, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(jpg, sourceTime);
             string copy = Path.Combine(otherDir, "photo.jpg");
             File.Copy(jpg, copy);
             (string sha256, _) = await Database.ComputeHashesAsync(
@@ -3031,7 +3033,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             organized.Should().Be(0);
             skipped.Should().Be(1);
             failed.Should().Be(1);
-            File.Exists(Path.Combine(outDir, dest)).Should().BeTrue();
+            File.GetLastWriteTimeUtc(Path.Combine(outDir, dest)).Should().Be(sourceTime);
             FileRecord? row = await db.GetByPathAsync(jpg, TestContext.Current.CancellationToken);
             row.Should().NotBeNull();
             row!.Sha256.Should().Be(sha256);
