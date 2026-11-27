@@ -174,8 +174,6 @@ Options:
   --dryrun                      Perform a dry run without making changes
 ```
 
-<!-- cspell:ignore failunwritable -->
-
 ```text
 $> PhotoCleaner import --help
 Description:
