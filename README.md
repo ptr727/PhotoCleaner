@@ -365,14 +365,15 @@ Options:
 
 ### Exit Codes
 
-Every command uses the same three codes, so a pipeline can branch on the result without parsing
+Every command uses the same codes, so a pipeline can branch on the result without parsing
 logs:
 
 | Code | Meaning |
 | ---- | ------- |
 | `0` | Success. The command completed and every file succeeded. |
-| `1` | Error. The command could not complete: unhandled exception, fatal configuration error, cancellation, or a failed `verify` preflight. |
+| `1` | Error. The command could not complete: unhandled exception, fatal configuration error, or a failed `verify` preflight. |
 | `2` | Completed with failures. The command ran to completion, but one or more files failed or failed verification, or `trash` synced only part of the server. |
+| `130`, `143` | Ended by a signal, `130` for SIGINT and `143` for SIGTERM. After its cleanup the process dies by the signal, which a shell reports as 128 plus the signal number. So a Ctrl+C also stops a calling shell loop. Where the signal cannot end the process, as PID 1 or on Windows, it exits with that code instead. |
 
 The distinction between `1` and `2` matters most for `verify`. A `1` means the check itself could
 not run at all, because Docker was unreachable or the Immich image could not be prepared, and it

@@ -10,4 +10,9 @@ internal static class ExitCode
 
     // The command completed, but at least one file failed.
     internal const int Failed = 2;
+
+    // A signal ended the run but could not end the process, so 128 plus the signal number reports it.
+    internal const int Interrupted = 130;
+
+    internal const int Terminated = 143;
 }

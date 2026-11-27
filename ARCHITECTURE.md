@@ -7,11 +7,11 @@ PhotoCleaner is a .NET 10 console application that processes media files in prep
 - **Docker/**: Docker configuration
   - `Dockerfile`: Two-stage build (SDK Alpine build -> runtime Alpine final) that installs `exiftool` and `ffmpeg` in the final stage
 - **PhotoCleaner/**: Main console application
-  - `Program.cs`: Entry point with logger setup (Main only)
+  - `Program.cs`: Entry point with logger setup, signal handling, and the exit by signal
   - `CommandLine.cs`: System.CommandLine implementation for CLI parsing (`process`, `undo`, `import`, `index`, `trash`, and `verify` subcommands)
   - `MediaUtilities.cs`: Shared static utilities, `SupportedExtensions` (FrozenSet), `GetUniqueFileName`, `GetExifToolJsonAsync`, `TrySetCreateDateAsync`, `WriteExifToolAsync`, video/duration constants
   - `CommandRunner.cs`: Thin wrapper for command start/complete/error logging, taking `Func<Task<int>>` and returning the command's exit code
-  - `ExitCode.cs`: The shared exit-code contract, being `Success` (0), `Error` (1, command could not run), and `Failed` (2, ran to completion with per-file failures)
+  - `ExitCode.cs`: The shared exit-code contract, being `Success` (0), `Error` (1, command could not run), and `Failed` (2, ran to completion with per-file failures). `Interrupted` (130) and `Terminated` (143) report a signal that could not end the process
   - `DatabaseScope.cs`: Generic async DB lifecycle helper (create, init, dispose)
   - `TrashDatabaseScope.cs`: Same lifecycle helper pattern for `TrashDatabase`
   - `FileEnumerator.cs`: Parallel file enumeration returning `(IReadOnlyList<string>, int)`
@@ -131,15 +131,18 @@ flowchart TD
   verify["VerifyCommand.ExecuteAsync(): verify"]
   runner["CommandRunner.RunAsync(): log start and run the command work"]
   how{"How did the work end?"}
-  cancelled(["ExitCode.Error 1, logged as cancelled"])
+  cancelled["ExitCode.Error 1, logged as cancelled"]
   thrown(["ExitCode.Error 1, exception logged"])
   code{"Returned code?"}
   ok(["ExitCode.Success 0, logged complete"])
   failed(["ExitCode.Failed 2, logged complete with failures"])
   other(["Other code returned as is, logged as not complete"])
   mainCatch(["Exit 1 from the catch in Program.Main, not logged since Log.Logger is not set yet"])
-  signal["Program.OnTerminationSignal(): the first SIGINT or SIGTERM at any point cancels the token"]
+  signal["Program.OnTerminationSignal(): the first SIGINT or SIGTERM at any point records it and cancels the token"]
   killed(["Process ends at once by the signal's default action, no cleanup"])
+  reraise["Program.ExitBySignal(): after the log is flushed and the handlers are disposed, re-send the recorded signal with its default action"]
+  died(["Process dies by the signal, so a calling shell loop stops"])
+  signalCode(["Exit 130 for SIGINT or 143 for SIGTERM"])
 
   main --> bypass
   bypass -->|"yes"| scl --> sclEnd
@@ -167,10 +170,14 @@ flowchart TD
   code -->|"anything else"| other
   signal -->|"the work throws OperationCanceledException"| how
   signal -->|"a second signal, unless the process is PID 1"| killed
+  cancelled --> reraise
+  signal -->|"whatever the run returned"| reraise
+  reraise --> died
+  reraise -->|"PID 1, or Windows"| signalCode
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main registers its own SIGINT and SIGTERM handler and sets ProcessTerminationTimeout to null. That keeps System.CommandLine's own handler off. With a timeout set, that handler returns 130 or 143 once it expires, even while the cancel path still runs. The first signal cancels the token the command runs with, so CliWrap kills the child tool and the command's cleanup runs before the exit. A second signal takes the default action and ends the process at once, for a cancel path that hangs. Run as PID 1, as the container image's exec-form entrypoint runs it, the kernel drops that default action. There only a SIGKILL ends a hung cancel path, such as the one `docker kill` sends or the one `docker stop` sends after its timeout.
+An exception outside CommandRunner.RunAsync, such as one while building the options, reaches the catch in Program.Main and exits 1. Program.Main registers its own SIGINT and SIGTERM handler and sets ProcessTerminationTimeout to null. That keeps System.CommandLine's own handler off. With a timeout set, that handler returns 130 or 143 once it expires, even while the cancel path still runs. The first signal cancels the token the command runs with, so CliWrap kills the child tool and the command's cleanup runs before the exit. Program.Main then re-sends that signal, so the process dies by it and a calling shell's loop stops. Where it cannot die by it, as PID 1 or on Windows, it exits 128 plus the signal number. A second signal takes the default action and ends the process at once, for a cancel path that hangs. Run as PID 1, as the container image's exec-form entrypoint runs it, the kernel drops that default action. There only a SIGKILL ends a hung cancel path, such as the one `docker kill` sends or the one `docker stop` sends after its timeout.
 
 ### Process
 
@@ -249,7 +256,7 @@ flowchart TD
   cNone(["Not counted"])
   gone["Log at Information that the file no longer exists"]
   goneEnd(["Not counted, the run is not failed"])
-  cancel(["Rethrown, the run ends ExitCode.Error 1"])
+  cancel(["Rethrown, continues in Run Flow"])
   logFail["Log the exception with the path"]
   merge["Add the held files to the queue that ReProcess filled"]
   empty{"Queue empty?"}
@@ -650,7 +657,7 @@ flowchart TD
   release --> counted(["Counted under the returned result"])
   perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims, then log the file"]
   perFileCatch --> countedFailed(["Counted Failed"])
-  perFile -->|"cancel"| exitError
+  perFile -->|"cancel"| cancelled(["Rethrown, continues in Run Flow"])
   exec -->|"all files done"| deQ{"--deleteempty?"}
   deQ -->|"no"| summary["ImportCommand.ExecuteAsync(): log every counter"]
   deQ -->|"yes"| outQ{"--outpath exists?"}
@@ -802,7 +809,7 @@ flowchart TD
   dateW -->|"cancel"| cancelQ{"--move?"}
   tagW -->|"cancel"| cancelQ
   cancelQ -->|"no"| cancelDel["ImportTask.RemoveCopy(): remove the copy"]
-  cancelDel --> exitError(["Rethrown, run exits 1 Error"])
+  cancelDel --> exitError(["Rethrown, continues in Run Flow"])
   cancelDel -->|"removal fails"| cancelLeft["Log an error naming the copy, copy kept with the source mtime, row written under --db despite the cancel unless the row write failed, claims kept, S12"]:::suspect
   cancelLeft --> exitError
   cancelQ -->|"yes"| cancelMoved["Moved file stays, no row"]
@@ -839,7 +846,7 @@ flowchart TD
   file -->|"Updated"| updated(["Counted Updated"])
   file -->|"Unchanged"| unchanged(["Counted Unchanged"])
   file -->|"exception other than cancel"| failed(["Counted Failed"])
-  file -->|"cancel"| exitError
+  file -->|"cancel"| cancelled(["Rethrown, continues in Run Flow"])
   exec -->|"all files done"| stale["Rows for files gone from --path stay in --db"]
   stale --> summary["IndexCommand.ExecuteAsync(): log every counter"]
   summary --> exitQ{"Failed above 0?"}
@@ -850,7 +857,7 @@ flowchart TD
 
 #### Index Per-File
 
-Metadata is read only for a new row, new content, or a row whose metadata was never read. Exceptions from every step here go to the per-file catch in `IndexTask.ExecuteAsync()`, which counts the file Failed. A cancel is rethrown instead, and the run exits 1.
+Metadata is read only for a new row, new content, or a row whose metadata was never read. Exceptions from every step here go to the per-file catch in `IndexTask.ExecuteAsync()`, which counts the file Failed. A cancel is rethrown instead.
 
 ```mermaid
 flowchart TD
@@ -904,7 +911,7 @@ flowchart TD
   T8 -->|"cancel"| T9["CommandRunner.RunAsync(): log Trash cancelled at Information"]
   T8 -->|"request timeout"| TT["TrashCommand.FetchTrashedAssetsAsync(): throw a TimeoutException naming the request"]
   TT --> TE
-  T9 --> T10(["Exit 1, Error"])
+  T9 --> T10(["Continues in Run Flow"])
   T8 --> T11{"partial flag set?"}
   T11 -->|"yes"| T12(["Exit 2, Failed"])
   T11 -->|"no"| T13(["Exit 0, Success"])
@@ -1016,7 +1023,7 @@ flowchart TD
   U10 -->|"yes"| U11["UndoTask.ResolveMarkerOutput(): take the output's file name, beside the backup"]
   U11 -->|"marker unreadable"| U9
   U11 --> U13["UndoTask.Execute(): reverse each recorded output, then restore each original, see the next two diagrams"]
-  U13 -->|"cancelled"| U14(["Exit 1, Error"])
+  U13 -->|"cancelled"| U14(["Continues in Run Flow"])
   U13 --> U15{"failed count above zero?"}
   U15 -->|"yes"| U16(["Exit 2, Failed"])
   U15 -->|"no"| U17(["Exit 0, Success"])
