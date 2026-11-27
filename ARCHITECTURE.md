@@ -1148,7 +1148,7 @@ Each entry describes a branch the diagrams mark, as the code behaves today, and 
 - **S11.** `import --deleteempty` throws when `--outpath` does not exist, so the run exits 1, #319.
 - **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S13.** Two parallel imports with the same name and date can pick the same destination, #321.
-- **S14.** For a type exiftool cannot write, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
+- **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
 - **S15.** `trash` stops at an empty page without marking the sync partial, and logs a timeout as a cancel, #323.
 
 ## State Management Pattern

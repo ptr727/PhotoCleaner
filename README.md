@@ -257,17 +257,18 @@ Options:
   `--path` into tokens and writes each token as an `XMP:Subject` tag on the destination file
   using exiftool. Files at the root of `--path` receive no tags. Tags are applied with a
   remove-then-add pattern (`-XMP:Subject-= / -XMP:Subject+=`) so existing tags are preserved
-  and duplicates are not created. Only file types exiftool can write are tagged, and any other
-  type imports with a warning naming the tags it skipped.
+  and duplicates are not created. Only the detected types in `import`'s exiftool write list are
+  tagged, and any other type imports with a warning naming the tags it skipped.
 - `--tags`: optional (`import` only). A comma-separated list of `XMP:Subject` tags applied to
   every organized file (e.g. `--tags "vacation,family trip,2018"`). Tags are applied using the
   same remove-then-add pattern as `--tagpath`. Can be combined with `--tagpath`, and both sets of
-  tags are merged. Only file types exiftool can write are tagged, as with `--tagpath`.
+  tags are merged. Only types in the same write list are tagged, as with `--tagpath`.
 - `--datepath`: optional (`import` only). When a file has no embedded creation date, infers
   one from the filename or directory path structure (via `DateFromPath`) and writes it to the
   destination file before restoring mtime. Opt-in because writing to files is destructive and
   the source path context is only available during `import` (before files move to date-based
-  directories). A type exiftool cannot write imports without the date, with a warning naming the skipped date.
+  directories). A type outside that write list imports without the date, with a warning naming
+  the skipped date.
 - `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,

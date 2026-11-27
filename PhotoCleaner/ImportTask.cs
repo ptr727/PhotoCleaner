@@ -837,7 +837,7 @@ internal sealed class ImportTask(
                 meta is null ? "its metadata could not be read"
                     : string.IsNullOrEmpty(meta.FileTypeExtension)
                         ? "exiftool reported no file type"
-                    : $"exiftool cannot write type '{meta.FileTypeExtension}'"
+                    : $"type '{meta.FileTypeExtension}' is not in the exiftool write list"
             );
         }
     }
