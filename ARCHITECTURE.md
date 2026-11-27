@@ -932,9 +932,10 @@ flowchart TD
   S2 --> S3["TrashCommand.FetchTrashedAssetsAsync(): POST api/search/metadata, 1000 per page"]
   S3 -->|"HTTP error, timeout, or bad JSON"| SE
   S3 --> S4{"page has items?"}
-  S4 -->|"no"| S5{"NextPage value?"}
-  S5 -->|"null"| S14
-  S5 -->|"any other value"| S13
+  S4 -->|"no"| S5{"nextCursor and NextPage values?"}
+  S5 -->|"nextCursor set, or no nextPage key"| S13
+  S5 -->|"NextPage null"| S14
+  S5 -->|"NextPage any other value"| S13
   S4 -->|"yes"| S6{"for each asset: isTrashed?"}
   S6 -->|"no"| S7["Log warning, skip the asset"]
   S6 -->|"yes"| S8["TrashCommand.ConvertChecksum(): base64 checksum to hex SHA-1"]
@@ -944,10 +945,11 @@ flowchart TD
   S9 -->|"after the last asset"| S10
   S10 -->|"yes"| S11["TrashDatabase.InsertHashesAsync(): upsert the page, rows never removed"]
   S10 -->|"no"| S12
-  S11 --> S12{"NextPage value?"}
-  S12 -->|"integer above this page"| S3
-  S12 -->|"null"| S14
-  S12 -->|"any other value"| S13["Log error, set the partial flag, stop paging"]
+  S11 --> S12{"nextCursor and NextPage values?"}
+  S12 -->|"nextCursor set, or no nextPage key"| S13
+  S12 -->|"NextPage integer above this page"| S3
+  S12 -->|"NextPage null"| S14
+  S12 -->|"NextPage any other value"| S13["Log error, set the partial flag, stop paging"]
   S13 --> S14
   S14["TrashDatabase.GetCountAsync(): log fetched and newly inserted counts"]
   S14 --> S15{"--processdb given?"}
@@ -962,7 +964,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Exceptions from every step, including the count and backfill steps, go to CommandRunner.RunAsync() and exit 1. The upsert keeps an existing file name and only fills an image hash that is still null.
+The request asks for page-based answers, so an answer naming a cursor or lacking the nextPage key is one the loop cannot follow. Such an answer stops paging as a short sync rather than a complete one. Exceptions from every step, including the count and backfill steps, go to CommandRunner.RunAsync() and exit 1. The upsert keeps an existing file name and only fills an image hash that is still null.
 
 ### Undo
 

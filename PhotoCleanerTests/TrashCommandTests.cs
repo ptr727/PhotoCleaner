@@ -242,6 +242,95 @@ public sealed class TrashCommandTests
         }
     }
 
+    internal const string AssetJson =
+        """{"id":"asset-0","checksum":"AQAAAAAAAAAAAAAAAAAAAAAAAAA=","originalFileName":"photo_0.jpg","isTrashed":true}""";
+
+    [Theory]
+    [InlineData("""{"assets":{"items":[ASSET],"nextPage":null,"nextCursor":"c2"}}""", 1)]
+    [InlineData("""{"assets":{"items":[ASSET],"nextPage":"2","nextCursor":"c2"}}""", 1)]
+    [InlineData("""{"assets":{"items":[ASSET]}}""", 1)]
+    [InlineData("""{"assets":{"items":[ASSET],"nextCursor":null}}""", 1)]
+    [InlineData("""{"assets":{"items":[],"nextPage":null,"nextCursor":"c2"}}""", 0)]
+    [InlineData("""{"assets":{"items":[]}}""", 0)]
+    [InlineData("""{}""", 0)]
+    [InlineData("""{"assets":null}""", 0)]
+    [InlineData("""null""", 0)]
+    public async Task ExecuteAsync_UnfollowedAnswerShape_ExitsFailed(
+        string answerJson,
+        long expectedCount
+    )
+    {
+        string dbPath = TempDb();
+        try
+        {
+            using MockImmichHandler handler = new();
+            handler.EnqueueJson(answerJson.Replace("ASSET", AssetJson, StringComparison.Ordinal));
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath),
+                TestContext.Current.CancellationToken,
+                client
+            );
+
+            int exitCode = await command.ExecuteAsync();
+
+            exitCode.Should().Be(2);
+            handler.RequestCount.Should().Be(1);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
+            count.Should().Be(expectedCount);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("""{"assets":{"items":[ASSET],"nextPage":null,"nextCursor":null}}""", 1)]
+    [InlineData("""{"assets":{"items":[ASSET],"nextPage":null}}""", 1)]
+    [InlineData("""{"assets":{"items":[],"nextPage":null,"nextCursor":null}}""", 0)]
+    public async Task ExecuteAsync_ExplicitNullNextPage_ExitsSuccess(
+        string answerJson,
+        long expectedCount
+    )
+    {
+        string dbPath = TempDb();
+        try
+        {
+            using MockImmichHandler handler = new();
+            handler.EnqueueJson(answerJson.Replace("ASSET", AssetJson, StringComparison.Ordinal));
+
+            using HttpClient client = new(handler, disposeHandler: false)
+            {
+                BaseAddress = new Uri("http://localhost:9999"),
+            };
+            TrashCommand command = new(
+                CreateOptions(dbPath),
+                TestContext.Current.CancellationToken,
+                client
+            );
+
+            int exitCode = await command.ExecuteAsync();
+
+            exitCode.Should().Be(0);
+            handler.RequestCount.Should().Be(1);
+            await using TrashDatabase db = new(dbPath);
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
+            count.Should().Be(expectedCount);
+        }
+        finally
+        {
+            File.Delete(dbPath);
+        }
+    }
+
     [Fact]
     public async Task ExecuteAsync_SinglePage_InsertsHashes()
     {
@@ -503,12 +592,16 @@ public sealed class TrashCommandTests
 
     internal sealed class MockImmichHandler : DelegatingHandler
     {
-        private readonly Queue<ImmichSearchResponse> _responses = new();
+        private readonly Queue<string> _responses = new();
 
         internal int RequestCount { get; private set; }
 
         internal void EnqueueResponse(ImmichSearchResponse response) =>
-            _responses.Enqueue(response);
+            _responses.Enqueue(
+                JsonSerializer.Serialize(response, ImmichJsonContext.Default.ImmichSearchResponse)
+            );
+
+        internal void EnqueueJson(string json) => _responses.Enqueue(json);
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -516,11 +609,7 @@ public sealed class TrashCommandTests
         )
         {
             RequestCount++;
-            ImmichSearchResponse response = _responses.Dequeue();
-            string json = JsonSerializer.Serialize(
-                response,
-                ImmichJsonContext.Default.ImmichSearchResponse
-            );
+            string json = _responses.Dequeue();
             return Task.FromResult(
                 new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -581,6 +670,35 @@ public sealed class TrashCommandLogTests
             TrashCommandTests.MakeResponse([Convert.ToBase64String(new byte[20])], nextPage: "2")
         );
         handler.EnqueueResponse(TrashCommandTests.MakeResponse([], nextPage: emptyNextPage));
+
+        (int exitCode, CapturingSink sink) = await RunAsync(
+            handler,
+            TestContext.Current.CancellationToken
+        );
+
+        exitCode.Should().Be(2);
+        sink.Events.Should()
+            .ContainSingle(e =>
+                e.Level == LogEventLevel.Error
+                && e.RenderMessage().Contains(expected, StringComparison.Ordinal)
+            );
+    }
+
+    [Theory]
+    [InlineData(
+        """{"assets":{"items":[ASSET],"nextPage":null,"nextCursor":"c2"}}""",
+        "names cursor"
+    )]
+    [InlineData("""{"assets":{"items":[ASSET]}}""", "has no nextPage field")]
+    public async Task ExecuteAsync_UnfollowedAnswerShape_LogsMatchingError(
+        string answerJson,
+        string expected
+    )
+    {
+        using TrashCommandTests.MockImmichHandler handler = new();
+        handler.EnqueueJson(
+            answerJson.Replace("ASSET", TrashCommandTests.AssetJson, StringComparison.Ordinal)
+        );
 
         (int exitCode, CapturingSink sink) = await RunAsync(
             handler,
