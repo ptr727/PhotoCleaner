@@ -115,8 +115,10 @@ public sealed class TrashCommandTests
     public void ConvertChecksum_InvalidBase64_ReturnsNull() =>
         TrashCommand.ConvertChecksum("not-valid-base64!!!").Should().BeNull();
 
-    private static async Task<(int ExitCode, long Count, int Requests)> RunSyncAsync(
-        MockImmichHandler handler
+    internal static async Task<(int ExitCode, long Count)> RunCommandAsync(
+        HttpMessageHandler handler,
+        CancellationToken cancellationToken,
+        Func<TrashDatabase, Task>? inspect = null
     )
     {
         string dbPath = TempDb();
@@ -124,24 +126,40 @@ public sealed class TrashCommandTests
         {
             using HttpClient client = new(handler, disposeHandler: false)
             {
-                BaseAddress = new Uri("http://localhost:9999"),
+                BaseAddress = new Uri("http://localhost:9999/"),
             };
-            TrashCommand command = new(
+            int exitCode = await new TrashCommand(
                 CreateOptions(dbPath),
-                TestContext.Current.CancellationToken,
+                cancellationToken,
                 client
-            );
-            int exitCode = await command.ExecuteAsync();
+            ).ExecuteAsync();
 
             await using TrashDatabase db = new(dbPath);
             await db.InitializeAsync(TestContext.Current.CancellationToken);
             long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
-            return (exitCode, count, handler.RequestCount);
+            if (inspect is not null)
+            {
+                await inspect(db);
+            }
+            return (exitCode, count);
         }
         finally
         {
             File.Delete(dbPath);
         }
+    }
+
+    private static async Task<(int ExitCode, long Count, int Requests)> RunSyncAsync(
+        MockImmichHandler handler,
+        Func<TrashDatabase, Task>? inspect = null
+    )
+    {
+        (int exitCode, long count) = await RunCommandAsync(
+            handler,
+            TestContext.Current.CancellationToken,
+            inspect
+        );
+        return (exitCode, count, handler.RequestCount);
     }
 
     private static string Sha1Base64(byte first)
@@ -271,55 +289,29 @@ public sealed class TrashCommandTests
     [Fact]
     public async Task ExecuteAsync_SinglePage_InsertsHashes()
     {
-        string dbPath = TempDb();
-        try
+        string sha1a = Sha1Base64(0x01);
+        string sha1b = Sha1Base64(0x02);
+        using MockImmichHandler handler = new();
+        handler.EnqueueResponse(MakeResponse([sha1a, sha1b], nextCursor: "c1"));
+        handler.EnqueueResponse(EmptyResponse()); // page 2 empty, no cursor -> stop
+
+        (int exitCode, long count, _) = await RunSyncAsync(handler, async db =>
         {
-            // Create two checksums (base64 of 20-byte SHA-1 values)
-            byte[] sha1a = new byte[20];
-            sha1a[0] = 0x01;
-            byte[] sha1b = new byte[20];
-            sha1b[0] = 0x02;
-
-            using MockImmichHandler handler = new();
-            handler.EnqueueResponse(
-                MakeResponse(
-                    [Convert.ToBase64String(sha1a), Convert.ToBase64String(sha1b)],
-                    nextCursor: "c1"
-                )
-            );
-            handler.EnqueueResponse(EmptyResponse()); // page 2 empty, no cursor -> stop
-
-            using HttpClient client = new(handler, disposeHandler: false)
+            foreach (string base64 in new[] { sha1a, sha1b })
             {
-                BaseAddress = new Uri("http://localhost:9999"),
-            };
-            TrashCommand command = new(
-                CreateOptions(dbPath),
-                TestContext.Current.CancellationToken,
-                client
-            );
-            await command.ExecuteAsync();
+                (
+                    await db.Sha1ExistsAsync(
+                        TrashCommand.ConvertChecksum(base64)!,
+                        cancellationToken: TestContext.Current.CancellationToken
+                    )
+                )
+                    .Should()
+                    .BeTrue();
+            }
+        });
 
-            await using TrashDatabase db = new(dbPath);
-            await db.InitializeAsync(TestContext.Current.CancellationToken);
-            long count = await db.GetCountAsync(TestContext.Current.CancellationToken);
-            count.Should().Be(2);
-
-            bool exists1 = await db.Sha1ExistsAsync(
-                Convert.ToHexStringLower(sha1a),
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-            exists1.Should().BeTrue();
-            bool exists2 = await db.Sha1ExistsAsync(
-                Convert.ToHexStringLower(sha1b),
-                cancellationToken: TestContext.Current.CancellationToken
-            );
-            exists2.Should().BeTrue();
-        }
-        finally
-        {
-            File.Delete(dbPath);
-        }
+        exitCode.Should().Be(0);
+        count.Should().Be(2);
     }
 
     [Fact]
@@ -503,7 +495,6 @@ public sealed class TrashCommandLogTests
         CancellationToken token
     )
     {
-        string dbPath = Path.Combine(Path.GetTempPath(), $"trashcmd_{Path.GetRandomFileName()}.db");
         CapturingSink sink = new();
         ILogger savedLogger = Log.Logger;
         try
@@ -512,21 +503,12 @@ public sealed class TrashCommandLogTests
                 .MinimumLevel.Information()
                 .WriteTo.Sink(sink)
                 .CreateLogger();
-            using HttpClient client = new(handler, disposeHandler: false)
-            {
-                BaseAddress = new Uri("http://localhost:9999/"),
-            };
-            int exitCode = await new TrashCommand(
-                TrashCommandTests.CreateOptions(dbPath),
-                token,
-                client
-            ).ExecuteAsync();
+            (int exitCode, _) = await TrashCommandTests.RunCommandAsync(handler, token);
             return (exitCode, sink);
         }
         finally
         {
             Log.Logger = savedLogger;
-            File.Delete(dbPath);
         }
     }
 
