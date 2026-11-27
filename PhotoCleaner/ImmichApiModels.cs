@@ -4,14 +4,27 @@ namespace PhotoCleaner;
 
 internal sealed class ImmichSearchRequest
 {
-    [JsonPropertyName("trashedAfter")]
-    public string TrashedAfter { get; set; } = "1970-01-01T00:00:00.000Z";
-
-    [JsonPropertyName("page")]
-    public int Page { get; set; } = 1;
+    [JsonPropertyName("filter")]
+    public ImmichSearchFilter Filter { get; set; } = new();
 
     [JsonPropertyName("size")]
     public int Size { get; set; } = 1000;
+
+    [JsonPropertyName("cursor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Cursor { get; set; }
+}
+
+internal sealed class ImmichSearchFilter
+{
+    [JsonPropertyName("trashedAt")]
+    public ImmichNullableDateFilter TrashedAt { get; set; } = new();
+}
+
+internal sealed class ImmichNullableDateFilter
+{
+    [JsonPropertyName("ne")]
+    public string? Ne { get; set; }
 }
 
 internal sealed class ImmichSearchResponse
@@ -25,22 +38,19 @@ internal sealed class ImmichSearchAssets
     [JsonPropertyName("items")]
     public List<ImmichAssetDto> Items { get; set; } = [];
 
-    [JsonPropertyName("nextPage")]
-    public string? NextPage
+    [JsonPropertyName("nextCursor")]
+    public string? NextCursor
     {
         get;
         set
         {
             field = value;
-            HasNextPageKey = true;
+            HasNextCursorKey = true;
         }
     }
 
     [JsonIgnore]
-    public bool HasNextPageKey { get; private set; }
-
-    [JsonPropertyName("nextCursor")]
-    public string? NextCursor { get; set; }
+    public bool HasNextCursorKey { get; private set; }
 }
 
 internal sealed class ImmichAssetDto

@@ -66,114 +66,43 @@ internal sealed class TrashCommand(
         using HttpClient? ownedClient = httpClient is null ? CreateDefaultHttpClient() : null;
         HttpClient client = httpClient ?? ownedClient!;
         int page = 1;
+        string? cursor = null;
+        HashSet<string> seenCursors = new(StringComparer.Ordinal);
         bool hasMore = true;
 
         while (hasMore)
         {
             Log.Information("Fetching trashed assets page {Page}", page);
-            ImmichSearchRequest request = new() { Page = page };
+            ImmichSearchRequest request = new() { Cursor = cursor };
             ImmichSearchAssets result = await FetchTrashedAssetsAsync(client, request)
                 .ConfigureAwait(false);
             List<ImmichAssetDto> assets = result.Items;
 
-            if (assets.Count == 0)
+            if (assets.Count > 0)
             {
-                // An empty page that names any page at all leaves the database short of the server
-                if (IsUnfollowedShape(result, page))
-                {
-                    partialSync = true;
-                }
-                else if (result.NextPage is not null)
-                {
-                    if (int.TryParse(result.NextPage, out int laterPage) && laterPage > page)
-                    {
-                        Log.Error(
-                            "Stopping pagination: empty page {Page} names later page '{NextPage}'",
-                            page,
-                            result.NextPage
-                        );
-                    }
-                    else
-                    {
-                        Log.Error(
-                            "Stopping pagination: invalid NextPage value '{NextPage}' after empty page {Page}",
-                            result.NextPage,
-                            page
-                        );
-                    }
-                    partialSync = true;
-                }
-
-                hasMore = false;
-                continue;
-            }
-
-            totalFetched += assets.Count;
-
-            List<(string Sha1Hex, string? OriginalFileName, string? ImageHash)> batch = [];
-            foreach (ImmichAssetDto asset in assets)
-            {
-                if (!asset.IsTrashed)
-                {
-                    Log.Warning(
-                        "Skipping non-trashed asset '{FileName}' (id: {AssetId})",
-                        asset.OriginalFileName,
-                        asset.Id
-                    );
-                    continue;
-                }
-
-                string? sha1Hex = ConvertChecksum(asset.Checksum);
-                if (sha1Hex is null)
-                {
-                    Log.Warning(
-                        "Skipping asset '{FileName}' (id: {AssetId}) with invalid checksum '{Checksum}'",
-                        asset.OriginalFileName,
-                        asset.Id,
-                        asset.Checksum
-                    );
-                    continue;
-                }
-
-                Log.Debug(
-                    "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
-                    asset.OriginalFileName,
-                    sha1Hex
+                totalFetched += assets.Count;
+                await StorePageAsync(trashDatabase, assets).ConfigureAwait(false);
+                Log.Information(
+                    "Fetched {Count} trashed assets on page {Page}",
+                    assets.Count,
+                    page
                 );
-                batch.Add((sha1Hex, asset.OriginalFileName, null));
             }
 
-            if (batch.Count > 0)
-            {
-                await trashDatabase
-                    .InsertHashesAsync(batch, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            Log.Information("Fetched {Count} trashed assets on page {Page}", assets.Count, page);
-
-            if (IsUnfollowedShape(result, page))
+            (string? nextCursor, bool shortSync) = NextCursorToFollow(result, page, seenCursors);
+            if (shortSync)
             {
                 partialSync = true;
-                hasMore = false;
             }
-            else if (result.NextPage is null)
+
+            if (nextCursor is null)
             {
                 hasMore = false;
-            }
-            else if (int.TryParse(result.NextPage, out int nextPage) && nextPage > page)
-            {
-                page = nextPage;
             }
             else
             {
-                Log.Error(
-                    "Stopping pagination: invalid NextPage value '{NextPage}' after page {Page}",
-                    result.NextPage,
-                    page
-                );
-                partialSync = true;
-                hasMore = false;
+                cursor = nextCursor;
+                page++;
             }
         }
 
@@ -253,25 +182,88 @@ internal sealed class TrashCommand(
         return client;
     }
 
-    private static bool IsUnfollowedShape(ImmichSearchAssets result, int page)
+    private async Task StorePageAsync(TrashDatabase trashDatabase, List<ImmichAssetDto> assets)
     {
-        if (result.NextCursor is not null)
+        List<(string Sha1Hex, string? OriginalFileName, string? ImageHash)> batch = [];
+        foreach (ImmichAssetDto asset in assets)
+        {
+            if (!asset.IsTrashed)
+            {
+                Log.Warning(
+                    "Skipping non-trashed asset '{FileName}' (id: {AssetId})",
+                    asset.OriginalFileName,
+                    asset.Id
+                );
+                continue;
+            }
+
+            string? sha1Hex = ConvertChecksum(asset.Checksum);
+            if (sha1Hex is null)
+            {
+                Log.Warning(
+                    "Skipping asset '{FileName}' (id: {AssetId}) with invalid checksum '{Checksum}'",
+                    asset.OriginalFileName,
+                    asset.Id,
+                    asset.Checksum
+                );
+                continue;
+            }
+
+            Log.Debug(
+                "Trashed asset '{FileName}' with SHA-1 '{Sha1}'",
+                asset.OriginalFileName,
+                sha1Hex
+            );
+            batch.Add((sha1Hex, asset.OriginalFileName, null));
+        }
+
+        if (batch.Count > 0)
+        {
+            await trashDatabase.InsertHashesAsync(batch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static (string? NextCursor, bool ShortSync) NextCursorToFollow(
+        ImmichSearchAssets result,
+        int page,
+        HashSet<string> seenCursors
+    )
+    {
+        if (!result.HasNextCursorKey)
         {
             Log.Error(
-                "Stopping pagination: page {Page} names cursor '{NextCursor}', which a paged request cannot follow",
+                "Stopping pagination: page {Page} answer has no nextCursor field, which Immich v3.2.0 and later always send",
+                page
+            );
+            return (null, true);
+        }
+
+        if (result.NextCursor is null)
+        {
+            return (null, false);
+        }
+
+        if (result.Items.Count == 0)
+        {
+            Log.Error(
+                "Stopping pagination: empty page {Page} names cursor '{NextCursor}'",
                 page,
                 result.NextCursor
             );
-            return true;
+            return (null, true);
         }
 
-        if (!result.HasNextPageKey)
+        if (string.IsNullOrWhiteSpace(result.NextCursor) || !seenCursors.Add(result.NextCursor))
         {
-            Log.Error("Stopping pagination: page {Page} answer has no nextPage field", page);
-            return true;
+            Log.Error(
+                "Stopping pagination: invalid or repeated NextCursor value '{NextCursor}' after page {Page}",
+                result.NextCursor,
+                page
+            );
+            return (null, true);
         }
 
-        return false;
+        return (result.NextCursor, false);
     }
 
     private async Task<ImmichSearchAssets> FetchTrashedAssetsAsync(
