@@ -2799,9 +2799,9 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
     [Fact]
     public async Task ExecuteAsync_DeleteEmptyWithUnreadableSubdirectory_KeepsItAndReturnsCounters()
     {
-        if (!OperatingSystem.IsLinux())
+        if (OperatingSystem.IsWindows())
         {
-            Assert.Skip("File mode permissions are only enforced on Linux");
+            Assert.Skip("Windows has no Unix file modes");
             return;
         }
 
@@ -3043,6 +3043,11 @@ public sealed class ImportTaskLogTests(TempDirectoryFixture media)
                     Path.Combine(outDir, "0001-01", "IMG_0001.jpg"),
                     Path.Combine(outDir, "0001-01", "IMG_0001_1.jpg")
                 );
+            sink.Events.Should()
+                .ContainSingle(e => e.Level == LogEventLevel.Warning)
+                .Which.RenderMessage()
+                .Should()
+                .Contain(Path.Combine(outDir, "0001-01", "IMG_0001_1.jpg"));
         }
         finally
         {

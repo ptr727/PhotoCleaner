@@ -393,6 +393,15 @@ internal sealed class ImportTask(
             );
         }
 
+        if (finalDest != requestedDest)
+        {
+            Log.Warning(
+                "Destination '{RequestedPath}' exists or another file in this run holds it, using '{FinalPath}'",
+                requestedDest,
+                finalDest
+            );
+        }
+
         Log.Information(
             options.Move
                 ? "Moving '{SourcePath}' to '{DestinationPath}'"
@@ -411,15 +420,6 @@ internal sealed class ImportTask(
         {
             sourceInfo.Refresh();
             _ = Directory.CreateDirectory(Path.GetDirectoryName(finalDest)!);
-            if (finalDest != requestedDest)
-            {
-                Log.Warning(
-                    "Destination '{RequestedPath}' exists or another file in this run holds it, using '{FinalPath}'",
-                    requestedDest,
-                    finalDest
-                );
-            }
-
             if (options.Move)
             {
                 File.Move(file, finalDest);
