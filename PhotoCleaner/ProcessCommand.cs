@@ -67,6 +67,7 @@ internal sealed class ProcessCommand(
                                                 .ConfigureAwait(false);
                                         }
                                     },
+                                    dryRun: options.DryRun,
                                     cancellationToken: cancellationToken
                                 )
                                 .ConfigureAwait(false),

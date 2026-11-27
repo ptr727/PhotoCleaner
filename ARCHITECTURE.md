@@ -176,13 +176,13 @@ An exception outside CommandRunner.RunAsync, such as one while building the opti
 
 #### Process Run
 
-The trash database opens read-only and the process database opens read-write. Both stay open for the whole run. Any exception that escapes this diagram reaches CommandRunner.RunAsync and exits 1.
+The trash database opens read-only and the process database opens read-write, or under `--dryrun` as an in-memory copy. Both stay open for the whole run. Any exception that escapes this diagram reaches CommandRunner.RunAsync and exits 1.
 
 ```mermaid
 flowchart TD
   run["ProcessCommand.ExecuteAsync(): wrapped by CommandRunner.RunAsync"]
   tscope["TrashDatabaseScope.RunAsync(): open --trashdb read-only when given"]
-  dscope["DatabaseScope.RunAsync(): open --db read-write, also under --dryrun, S8"]:::suspect
+  dscope["DatabaseScope.RunAsync(): open --db read-write, or under --dryrun an in-memory copy"]
   hashver["MediaUtilities.EnsureImageHashSupportAsync(): with --db, need exiftool 12.63 or newer"]
   warn["TrashDatabase.WarnIfImageHashMissing(): under --imagehash only"]
   enum["FileEnumerator.Enumerate(): list every file under --path"]
@@ -288,7 +288,7 @@ flowchart TD
   track["SkippedExtensionTracker.Track(): record the extension"]
   unknown(["UnknownExtension, not counted"])
   hasdb{"--db given?"}
-  index["IndexTask.IndexFileAsync(): hash, insert or update the row, also under --dryrun, S8"]:::suspect
+  index["IndexTask.IndexFileAsync(): hash, insert or update the row"]
   hastrash{"--trashdb given?"}
   trashed{"ProcessTask.TryDeleteIfTrashedAsync(): trashed?"}
   del(["Deleted, counted Deleted"])
@@ -309,7 +309,7 @@ flowchart TD
   dryMod(["Modified, counted Modified, nothing changed, this run does not mark the row"])
   failStep(["Failure, counted Failed"])
   setdb{"--db given?"}
-  mark["Database.SetProcessedAsync(): mark the row processed, also under --dryrun, S8"]:::suspect
+  mark["Database.SetProcessedAsync(): mark the row processed"]
   mod{"Modified flag set?"}
   modEnd(["Modified, counted Modified"])
   okEnd(["Success, not counted"])
@@ -636,7 +636,7 @@ flowchart TD
   skipQ -->|"yes"| skipOpen["Database.InitializeAsync(): open the skip database read-only"]
   skipQ -->|"no"| dbQ{"--db given?"}
   skipOpen --> dbQ
-  dbQ -->|"yes"| dbOpen["Database.InitializeAsync(): check that --db takes a write, create or upgrade the catalog, also on --dryrun, S8"]:::suspect
+  dbQ -->|"yes"| dbOpen["Database.InitializeAsync(): check that --db takes a write, create or upgrade the catalog, under --dryrun an in-memory copy with no write check"]
   dbOpen -->|"--db cannot be written"| exitError
   dbOpen --> dbVer["MediaUtilities.EnsureImageHashSupportAsync(): require exiftool 12.63 or newer"]
   dbQ -->|"no"| ihQ{"--imagehash?"}
@@ -1144,7 +1144,6 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
-- **S8.** A dry run with `--db` creates, upgrades and writes the database, #316.
 - **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
 - **S15.** `trash` stops at an empty page without reading `NextPage` or marking the sync partial, #335.

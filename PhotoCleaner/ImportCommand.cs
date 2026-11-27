@@ -61,6 +61,7 @@ internal sealed class ImportCommand(
                                                         )
                                                         .ConfigureAwait(false);
                                                 },
+                                                dryRun: options.DryRun,
                                                 cancellationToken: cancellationToken
                                             )
                                             .ConfigureAwait(false),

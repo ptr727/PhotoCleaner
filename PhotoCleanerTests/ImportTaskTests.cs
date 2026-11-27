@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
+using Microsoft.Data.Sqlite;
 using PhotoCleaner;
 using Serilog;
 using Serilog.Core;
@@ -35,11 +36,13 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
         bool datePath = false,
         bool imageHash = false,
         string? tags = null,
-        int threads = 1
+        int threads = 1,
+        string? path = null,
+        FileInfo? dbFile = null
     ) =>
         new()
         {
-            Path = new DirectoryInfo(Path.GetTempPath()),
+            Path = new DirectoryInfo(path ?? Path.GetTempPath()),
             Threads = threads,
             DryRun = dryRun,
             DatePath = datePath,
@@ -50,7 +53,7 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             Move = move,
             TagPath = tagPath,
             Tags = tags,
-            DbFile = null,
+            DbFile = dbFile,
             Rehash = rehash,
             ShortVideoDuration = MediaUtilities.ShortVideoDuration,
             Reprocess = false,
@@ -2554,6 +2557,80 @@ public sealed class ImportTaskTests(TempDirectoryFixture fixture)
             Directory.Delete(outDir, recursive: true);
             File.Delete(dbPath);
             File.Delete(trashDbPath);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ImportCommand_DryRunWithDatabase_LeavesTheDatabaseUntouched(bool dbExists)
+    {
+        string srcDir = TempDir();
+        string outDir = TempDir();
+        string dbDir = TempDir();
+        try
+        {
+            File.Copy(
+                fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                Path.Combine(srcDir, "photo.jpg")
+            );
+            string dbPath = Path.Combine(dbDir, "new", "Import.db");
+            byte[]? before = null;
+            if (dbExists)
+            {
+                _ = Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+                await using (
+                    SqliteConnection connection = new($"Data Source={dbPath};Pooling=False")
+                )
+                {
+                    await connection.OpenAsync(TestContext.Current.CancellationToken);
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = """
+                        CREATE TABLE files (
+                            path         TEXT NOT NULL PRIMARY KEY,
+                            sha256       TEXT NOT NULL,
+                            sha1         TEXT NOT NULL,
+                            file_size    INTEGER NOT NULL,
+                            mtime_ticks  INTEGER NOT NULL,
+                            is_processed INTEGER NOT NULL DEFAULT 0
+                        )
+                        """;
+                    _ = await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+                }
+                before = await File.ReadAllBytesAsync(
+                    dbPath,
+                    TestContext.Current.CancellationToken
+                );
+            }
+
+            int exitCode = await new ImportCommand(
+                CreateOptions(outDir, dryRun: true, path: srcDir, dbFile: new FileInfo(dbPath)),
+                TestContext.Current.CancellationToken
+            ).ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Should().BeEmpty();
+            if (before is null)
+            {
+                Directory.Exists(Path.GetDirectoryName(dbPath)).Should().BeFalse();
+            }
+            else
+            {
+                Directory
+                    .GetFiles(Path.GetDirectoryName(dbPath)!)
+                    .Select(Path.GetFileName)
+                    .Should()
+                    .Equal("Import.db");
+                (await File.ReadAllBytesAsync(dbPath, TestContext.Current.CancellationToken))
+                    .Should()
+                    .Equal(before);
+            }
+        }
+        finally
+        {
+            Directory.Delete(srcDir, recursive: true);
+            Directory.Delete(outDir, recursive: true);
+            Directory.Delete(dbDir, recursive: true);
         }
     }
 
