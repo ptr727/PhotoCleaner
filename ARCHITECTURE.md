@@ -712,7 +712,7 @@ The folder date comes from the inferred path date, else the parsed metadata date
 
 ```mermaid
 flowchart TD
-  start["ExifToolJson.GetDateString(): first date tag set, Matroska date included"]
+  start["ExifToolJson.GetDateString(): first date tag set, Matroska and RIFF dates included"]
   start --> dpQ{"--datepath?"}
   dpQ -->|"no"| getDate
   dpQ -->|"yes"| setQ{"ExifToolJson.IsDateSet(): metadata has a date that parses?"}
@@ -737,7 +737,7 @@ flowchart TD
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-`ExifToolJson.IsDateSet()` is true only when `GetDate()` parses the date, so `--datepath` is tried for a zero or malformed date too. A date with a time zone offset files under its recorded wall-clock date, the same reading a date without an offset gets. The Matroska date is read from `Matroska:DateTimeOriginal`.
+`ExifToolJson.IsDateSet()` is true only when `GetDate()` parses the date, so `--datepath` is tried for a zero or malformed date too. A date with a time zone offset files under its recorded wall-clock date, the same reading a date without an offset gets. `GetDate()` takes the first date tag that parses, so a zero date in one tag does not hide a valid one in another. The Matroska date is read from `Matroska:DateTimeOriginal`, with `RIFF:DateTimeOriginal` after it for an AVI.
 
 #### Import Copy and Writes
 
