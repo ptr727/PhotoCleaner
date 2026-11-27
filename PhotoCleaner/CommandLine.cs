@@ -349,7 +349,7 @@ internal sealed class CommandLine
         new("--dryrun") { Description = "Perform a dry run without making changes" };
 
     private static Option<bool> CreateDatePathOption() =>
-        new("--datepath") { Description = "Set missing EXIF creation date from file path" };
+        new("--datepath") { Description = "Set missing creation date from file path" };
 
     private static Option<bool> CreateSkipBackupOption() =>
         new("--skipbackup") { Description = "Skip creating backup files (disables undo)" };
@@ -464,7 +464,7 @@ internal sealed class CommandLine
         Option<double> option = new("--duration")
         {
             Description =
-                "Maximum duration in seconds below which a video is considered a short clip and deleted",
+                "Duration in seconds at or below which a video is deleted as a short clip and a GIF becomes a still image",
             DefaultValueFactory = _ => MediaUtilities.ShortVideoDuration,
         };
         option.Validators.Add(result =>

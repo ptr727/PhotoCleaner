@@ -70,10 +70,11 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   whatever its name or folder. Without `--db` it is the same-folder file with the same basename,
   or the basename with the `_hevc` suffix stripped.
   Longer videos with a matching image trigger a warning but are kept.
-- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, re-encodes WMV, AVI, 3GP, and
-  GIF to MP4 (H.264/AAC), and re-encodes PCM audio to AAC in MOV and MP4 files while preserving
-  the video stream. All source metadata (including `ContentIdentifier` and other QuickTime tags)
-  is copied to the converted file using `exiftool -TagsFromFile`.
+- **Converts video formats**: Remuxes MTS, M2TS, and MKV to MP4, and re-encodes WMV, ASF, AVI, 3GP,
+  and GIF to MP4 (H.264/AAC). It re-encodes PCM audio to AAC in MOV and MP4 files while
+  preserving the video stream. A GIF with one frame, no duration, or one no longer than
+  `--duration` becomes a PNG instead. All source metadata (including `ContentIdentifier` and other
+  QuickTime tags) is copied to the converted file using `exiftool -TagsFromFile`.
 - **Imports into date folders** (via `import` command): Copies (default) or moves supported
   media files from source directories into `outpath/date/filename` using EXIF date metadata.
   Falls back to a deterministic `0001/01` bucket when no date is found. Supports a custom
@@ -82,9 +83,14 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   re-runs skip already-imported files. `--tagpath` writes the source sub-directory path
   components as `XMP:Subject` tags on the destination file. `--tags` applies explicit
   comma-separated `XMP:Subject` tags to every imported file. `--datepath` infers and writes
-  EXIF/QuickTime creation dates from filenames or directory path structures when metadata is
-  absent (opt-in, applied before the file is moved to a date-based directory so the source
-  path is still available).
+  EXIF (XMP for a GIF) or QuickTime creation dates from filenames or directory path
+  structures when metadata is absent. It is opt-in, and it applies before the file is moved
+  to a date-based directory so the source path is still available.
+  A failed `--tagpath`, `--tags`, or `--datepath` write counts the file as failed, so `import`
+  exits non-zero. So does a failed mtime restore or database write. A copy is removed after any
+  such failure, so the next run imports it again. A moved file stays at its destination without
+  the failed write. After a failed date, tag, or mtime write it still gets its `--db` row, so a
+  later copy of the same file is skipped.
   The opt-in `--imagehash` also skips a file whose image data hash is already in the database.
 - **Syncs Immich trash hashes** (via `trash` command): Connects to an Immich server via its
   REST API, fetches all trashed asset checksums (SHA-1), and stores them in a local SQLite
@@ -148,7 +154,7 @@ Options:
   --deleteempty                 Delete empty subdirectories under the target directory after the command completes
   --db <db>                     SQLite database file for file state tracking
   --rehash                      Force rehashing of all files, ignoring size/mtime cache
-  --duration <duration>         Maximum duration in seconds below which a video is considered a short clip and deleted [default: 1]
+  --duration <duration>         Duration in seconds at or below which a video is deleted as a short clip and a GIF becomes a still image [default: 1]
   --reprocess                   Re-run every file even if the database marks it done
   --trashdb <trashdb>           SQLite database with Immich trash hashes (read-only)
   --imagehash                   Also match files by image data hash, so a copy differing only in metadata counts as already imported or trashed
@@ -179,7 +185,7 @@ Options:
   --move                         Move files instead of copying (default: copy)
   --tagpath                      Apply path sub-directory components as XMP Subject tags to the organized file
   --tags <tags>                  Comma-separated XMP Subject tags to apply to every organized file (e.g. "vacation,family")
-  --datepath                     Set missing EXIF creation date from file path
+  --datepath                     Set missing creation date from file path
   --db <db>                      SQLite database file for file state tracking
   --rehash                       Force rehashing of all files, ignoring size/mtime cache
   --trashdb <trashdb>            SQLite database with Immich trash hashes (read-only)
@@ -231,8 +237,9 @@ Options:
 - `--path`: must point to an existing directory. Accepts exactly one directory per command
   invocation.
 - `--threads`: defaults to `min(CPU count, 4)`. Must be `> 0` and `<= CPU count`.
-- `--skipbackup`: opt-in (`process` only). Leaves no `.bak` file behind. The `undo`
-  command cannot reverse a run made with this flag.
+- `--skipbackup`: opt-in (`process` only). Leaves no `.bak` file behind once a change completes.
+  A failed rollback can still leave one, with no `.out` marker. The `undo` command cannot reverse
+  a run made with this flag.
 - `--outpath`: required for `import`. Target directory (created on demand).
 - `--format`: optional (`import` only). A C# date format string used to name date
   subdirectories (default `"yyyy/MM/dd"`). Must be date-only, so time components are rejected.
@@ -250,16 +257,18 @@ Options:
   `--path` into tokens and writes each token as an `XMP:Subject` tag on the destination file
   using exiftool. Files at the root of `--path` receive no tags. Tags are applied with a
   remove-then-add pattern (`-XMP:Subject-= / -XMP:Subject+=`) so existing tags are preserved
-  and duplicates are not created. Only file types that support XMP writes are tagged.
+  and duplicates are not created. Only the detected types in `import`'s exiftool write list are
+  tagged, and any other type imports with a warning naming the tags it skipped.
 - `--tags`: optional (`import` only). A comma-separated list of `XMP:Subject` tags applied to
   every organized file (e.g. `--tags "vacation,family trip,2018"`). Tags are applied using the
   same remove-then-add pattern as `--tagpath`. Can be combined with `--tagpath`, and both sets of
-  tags are merged. Only file types that support XMP writes are tagged.
+  tags are merged. Only types in the same write list are tagged, as with `--tagpath`.
 - `--datepath`: optional (`import` only). When a file has no embedded creation date, infers
   one from the filename or directory path structure (via `DateFromPath`) and writes it to the
   destination file before restoring mtime. Opt-in because writing to files is destructive and
   the source path context is only available during `import` (before files move to date-based
-  directories).
+  directories). A type outside that write list imports without the date, with a warning naming
+  the skipped date.
 - `--db <path>`: optional for `import` and `process`, **required** for `index`. Path to a
   SQLite database file. Uses a single `files` table (`path` PRIMARY KEY, `sha256`, `sha1`,
   `file_size`, `mtime_ticks`, `is_processed`, `content_identifier`, `image_hash`,
@@ -336,7 +345,8 @@ Options:
   updated.
 - `--duration`: optional (`process` only). Overrides the short-video deletion threshold
   (default `1.0` seconds). Videos in a live-photo-compatible format whose duration is <= this
-  value are always deleted. Must be `> 0`.
+  value are always deleted. A GIF at or under it becomes a PNG of its first frame, so raising it
+  also turns longer animated GIFs into stills. Must be `> 0`.
 - `--reprocess`: optional (`process`, `verify`). When set, ignores the `is_processed` flag in
   the database and processes every file regardless of prior run history. Useful after changing
   pipeline settings (e.g. `--duration`) without wiping the database.
@@ -404,7 +414,7 @@ PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --dele
 # Import with path-based XMP:Subject tagging (sub-directory names become tags)
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --tagpath
 
-# Import inferring missing EXIF dates from the source path
+# Import inferring missing creation dates from the source path
 PhotoCleaner import --path "${HOME}/Photos" --outpath "${HOME}/Organized" --datepath
 
 # Import with explicit XMP:Subject tags applied to every file
@@ -474,8 +484,12 @@ PhotoCleaner verify --path "${HOME}/Intermediate" --db /data/verify.db
       `_hevc`-suffix match in the same folder is used.
    4. Convert legacy or incompatible video formats to MP4:
       - Remux: MTS, M2TS, MKV (stream copy, no quality loss)
-      - Re-encode: WMV, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
+      - Re-encode: WMV, ASF, AVI, 3GP, GIF (H.264 CRF 21 / AAC 128k, padded to even dimensions)
+      - Still image: a GIF with one frame, no duration, or no longer than `--duration` takes its
+        first frame to PNG. As an MP4 the short clip rule would delete it
       - Re-encode PCM audio: MOV, MP4 with PCM audio (AAC 128k, video stream copied)
+      - A short clip converted from MTS, M2TS, MKV, WMV, ASF, AVI, or 3GP is deleted by the next
+        round. Under `--skipbackup` nothing of it is kept
       - After every conversion: all source metadata copied to output via `exiftool -TagsFromFile`
    5. Warn on DNG version > v1.4.
 5. **Reprocess loop**: Any file that was renamed or converted is re-queued until stable.
@@ -488,21 +502,29 @@ rather than pulling it into the collection.
 ## Undo Flow
 
 Every file modification or deletion made by `process` creates a `.bak` backup alongside the
-original: the first backup is `X.bak`, and if that already exists (from a prior run) the next is
-`X.bak1`, then `X.bak2`, etc. The `undo` command reverses all processing by scanning the given
-directories for backup files and applying a two-pass algorithm:
+original, with these exceptions. A file deleted because it matches the Immich trash database has no backup.
+Neither does a rename, such as the extension renames described below, and `--skipbackup` keeps none once a change completes.
+A converted output culled in the same run is deleted with no backup, since its original already has one.
+So is a converted output converted again in the same run, such as a PCM remux re-encoded to AAC.
+The first backup is `X.bak`. When that already exists from a prior run, the next is
+`X.bak1`, then `X.bak2`, and so on. The `undo` command reverses each change that left a backup.
+It scans the given directories for backup files of supported media types and reverses only what
+`process` recorded:
 
-1. **Identify derived files** - an output file is "derived" (not original) when either:
-   - a numbered backup (`.bak1`, `.bak2`, ...) exists for it (processed more than once), or
-   - it is a `.mp4` file whose stem has a non-`.mp4` primary backup in the same directory
-     (it was the conversion output).
-2. **Restore or delete**:
-   - *Derived* base: delete the current file and all its backup files.
-   - *Non-derived* base: delete the current file if it exists (overwritten in-place), rename
-     `X.bak` -> `X` to restore the original. The converted output is located via the
-     `X.bak.out` companion file written at conversion time (handles uniquified names like
-     `stem_1.mp4`). If no companion exists, falls back to deleting `stem.mp4` when present
-     and untracked (legacy single-run heuristic).
+1. **Remove converted outputs** - a conversion writes an `X.bak.out` marker naming its output.
+   Undo deletes that output, found by file name beside the backup, so a moved tree still works.
+   `process` can cull an output it converted in the same run, as a short clip or a live photo
+   video. It then deletes the output and the marker rather than backing them up. When undo
+   cannot tell which file is the output, it changes nothing in that group and counts it as failed.
+2. **Restore originals** - every other backup is an original and moves back to its own name.
+   Another file can hold that name, such as the original from `X.bak` when `X.bak1` restores.
+   The backup then takes the next free name (e.g. `clip_1.mov`) and undo logs a warning. Undo
+   never deletes an original's backup and never overwrites a file it has no record of. An empty
+   or unreadable backup is left in place and counted as failed, and the run carries on.
+
+A backup of another file type, such as `notes.txt.bak` from another tool, is left alone. A
+conversion from a release that predates the `.out` marker has no record, so its `.mp4` output
+stays beside the restored original.
 
 **Known limitation**: extension renames (e.g. `photo.JPEG` -> `photo.jpg`) create no backup and
 cannot be undone by this command. When another file already holds the target name, the renamed
@@ -546,8 +568,9 @@ directories to `outpath/date/filename`:
    tokens and writes each as an `XMP:Subject` tag. `--tags` applies explicit comma-separated
    tags to every file. Both can be combined, and tags are merged and deduplicated. Applied after
    copy/move, before mtime restore. Files at the root of `--path` receive no path tags.
-7. **Collision handling**: if a file with the same name already exists in the destination,
-   `_1`, `_2`, ... suffixes are appended (e.g. `photo_1.jpg`). A warning is logged.
+7. **Collision handling**: a taken name gets a `_1`, `_2`, ... suffix (e.g. `photo_1.jpg`),
+   and a warning is logged. A name is taken when a file in the destination already has it,
+   or when another file in the same run took it first.
 8. **Unsupported files**: non-media files are counted as ignored and left in place.
 9. **Empty directory cleanup** (opt-in via `--deleteempty`): after all files are imported,
    iterates `--outpath` and deletes empty child subdirectories deepest-first. The target
@@ -624,6 +647,8 @@ container. There is no offline mode, because the decoder is the whole check.
 
 Before any file is judged, the command runs a preflight against the image. If Docker is
 unreachable or the image cannot be prepared, it exits `1` without marking a single file invalid.
+The preflight runs the image and video checks on a generated JPEG and MP4. So an Immich update
+that changes the decode or transcode calls also exits `1`, rather than reporting every file invalid.
 
 ## Supported File Types
 
@@ -817,7 +842,9 @@ docker run --rm \
 `process` removes a Live Photo video when all of these hold. The video is a `.mov` or `.mp4`. The
 process database knows a HEIC, HEIF, JPG, or JPEG still with the same Apple `ContentIdentifier`. The video
 is under the Live Photo length bound. File names and date folders do not matter. It also removes a
-`.mov` or `.mp4` video at or under the `--duration` threshold. `import` keeps the original and the
+video at or under the `--duration` threshold. That covers a clip in any supported video format
+except GIF, which becomes a PNG. A clip that needs conversion is deleted after `process` converts
+it to MP4. `import` keeps the original and the
 edited rendition. The `-edited` name tells them apart.
 
 The Immich trash database keeps removed photos out at import and at process.
@@ -878,7 +905,7 @@ docker run -it --rm --name immichcli \
     -v /photos/processed:/upload:ro \
     -e IMMICH_INSTANCE_URL=https://your.immich.server/api \
     -e IMMICH_API_KEY=yourapikey \
-    -e TZ=America/Los_Angeles \
+    -e TZ=Etc/UTC \
     ghcr.io/immich-app/immich-cli:latest \
     upload \
         --recursive \

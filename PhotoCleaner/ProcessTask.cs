@@ -11,6 +11,7 @@ internal sealed class ProcessTask(
     TrashDatabase? trashDatabase,
     ConcurrentBag<string> reProcessNames,
     SkippedExtensionTracker skippedExtensions,
+    ConcurrentDictionary<string, string> convertedOutputs,
     CancellationToken cancellationToken
 )
 {
@@ -26,11 +27,14 @@ internal sealed class ProcessTask(
         Invalid,
     }
 
+    internal string ExifToolCommand { get; init; } = "exiftool";
+
     private ExifToolJson? _exifToolJson;
     private string? _preProcessSha256;
     private bool _modified;
     private bool _reprocess;
     private bool _deleted;
+    private bool _wouldModify;
 
     private static readonly FrozenSet<string> s_remuxExtensions = new[]
     {
@@ -71,6 +75,28 @@ internal sealed class ProcessTask(
         ConcurrentBag<string> reProcessNames,
         SkippedExtensionTracker skippedExtensions,
         CancellationToken cancellationToken = default
+    ) =>
+        ExecuteAsync(
+            options,
+            fileInfo,
+            database,
+            trashDatabase,
+            reProcessNames,
+            skippedExtensions,
+            new ConcurrentDictionary<string, string>(),
+            cancellationToken
+        );
+
+    // The converted outputs are this run's record, which lets a cull delete its own output without a backup.
+    public static Task<ProcessResult> ExecuteAsync(
+        CommandLine.Options options,
+        FileInfo fileInfo,
+        Database? database,
+        TrashDatabase? trashDatabase,
+        ConcurrentBag<string> reProcessNames,
+        SkippedExtensionTracker skippedExtensions,
+        ConcurrentDictionary<string, string> convertedOutputs,
+        CancellationToken cancellationToken
     )
     {
         ProcessTask processTask = new(
@@ -80,12 +106,13 @@ internal sealed class ProcessTask(
             trashDatabase,
             reProcessNames,
             skippedExtensions,
+            convertedOutputs,
             cancellationToken
         );
         return processTask.ExecuteAsync();
     }
 
-    private async Task<ProcessResult> ExecuteAsync()
+    internal async Task<ProcessResult> ExecuteAsync()
     {
         // Skip files that no longer exist
         if (!fileInfo.Exists)
@@ -130,9 +157,12 @@ internal sealed class ProcessTask(
                             .ConfigureAwait(false)
                     )?.ImageHash
                     : null;
-                if (await TryDeleteIfTrashedAsync(sha1, imageHash).ConfigureAwait(false))
+                if (
+                    await TryDeleteIfTrashedAsync(sha1, imageHash).ConfigureAwait(false) is
+                    { } trashResult
+                )
                 {
-                    return ProcessResult.Deleted;
+                    return trashResult;
                 }
             }
 
@@ -158,23 +188,26 @@ internal sealed class ProcessTask(
         }
 
         // Process files
-        ProcessResult result =
-            !RenameMismatchedMimeExtensions()
-            || !RenameMixedCaseExtensions()
-            || !await DeleteLivePhotosAsync().ConfigureAwait(false)
-            || !await ConvertVideoAsync().ConfigureAwait(false)
-            || !WarnDngVersion()
-                ? _reprocess
-                    ? ProcessResult.Reprocess
-                    : _deleted
-                        ? ProcessResult.Deleted
-                        : ProcessResult.Failure
-                : _modified
-                    ? ProcessResult.Modified
-                    : ProcessResult.Success;
+        bool completed =
+            RenameMismatchedMimeExtensions()
+            && RenameMixedCaseExtensions()
+            && await DeleteLivePhotosAsync().ConfigureAwait(false)
+            && await ConvertVideoAsync().ConfigureAwait(false)
+            && WarnDngVersion();
+        ProcessResult result = completed
+            ? _modified
+                ? ProcessResult.Modified
+                : ProcessResult.Success
+            : _reprocess
+                ? ProcessResult.Reprocess
+                : _deleted
+                    ? ProcessResult.Deleted
+                    : _wouldModify
+                        ? ProcessResult.Modified
+                        : ProcessResult.Failure;
 
         // Record terminal results in DB so re-runs skip already processed files
-        if (preProcessHash is not null && result is ProcessResult.Success or ProcessResult.Modified)
+        if (preProcessHash is not null && completed)
         {
             Log.Debug(
                 "Recording processed file in database: '{FilePath}' with SHA-256 '{Sha256}'",
@@ -189,7 +222,7 @@ internal sealed class ProcessTask(
         return result;
     }
 
-    private async Task<bool> TryDeleteIfTrashedAsync(string sha1, string? imageHash)
+    private async Task<ProcessResult?> TryDeleteIfTrashedAsync(string sha1, string? imageHash)
     {
         if (await trashDatabase!.Sha1ExistsAsync(sha1, cancellationToken).ConfigureAwait(false))
         {
@@ -213,26 +246,25 @@ internal sealed class ProcessTask(
         }
         else
         {
-            return false;
+            return null;
         }
 
         if (options.DryRun)
         {
-            return true;
+            return ProcessResult.Deleted;
         }
 
-        try
+        if (MediaUtilities.TryDeleteFile(fileInfo.FullName) is { } failure)
         {
-            File.Delete(fileInfo.FullName);
+            Log.Error(failure, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
+            return ProcessResult.Failure;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Error(ex, "Failed to delete trashed file: '{FilePath}'", fileInfo.FullName);
-            return false;
-        }
+
+        // A later file taking this name must not read as this run's converted output.
+        _ = convertedOutputs.TryRemove(fileInfo.FullName, out _);
 
         // The row stays, since a Live video pairs against the cataloged ContentIdentifier of a deleted still.
-        return true;
+        return ProcessResult.Deleted;
     }
 
     private bool RenameMixedCaseExtensions()
@@ -249,6 +281,7 @@ internal sealed class ProcessTask(
         );
         if (options.DryRun)
         {
+            _wouldModify = true;
             return false;
         }
 
@@ -308,6 +341,7 @@ internal sealed class ProcessTask(
         );
         if (options.DryRun)
         {
+            _wouldModify = true;
             return false;
         }
 
@@ -342,7 +376,7 @@ internal sealed class ProcessTask(
             .StartsWith("pcm", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<float> GetDurationAsync()
+    private async Task<double> GetDurationAsync()
     {
         Log.Debug("ffprobe: Getting play duration for '{FilePath}'", fileInfo.FullName);
         BufferedCommandResult result = await Cli.Wrap("ffprobe")
@@ -358,7 +392,47 @@ internal sealed class ProcessTask(
                 fileInfo.FullName,
             ])
             .ExecuteBufferedAsync(cancellationToken);
-        return float.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
+        return double.Parse(result.StandardOutput.AsSpan().Trim(), CultureInfo.InvariantCulture);
+    }
+
+    private async Task<bool> IsStillOrShortGifAsync()
+    {
+        if (!fileInfo.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        Log.Debug("ffprobe: Counting frames and duration for '{FilePath}'", fileInfo.FullName);
+        BufferedCommandResult result = await Cli.Wrap("ffprobe")
+            .WithArguments([
+                "-loglevel",
+                "error",
+                "-count_packets",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=nb_read_packets:format=duration",
+                "-of",
+                "default=nw=1",
+                fileInfo.FullName,
+            ])
+            .ExecuteBufferedAsync(cancellationToken);
+        Dictionary<string, string> values = result
+            .StandardOutput.Split(
+                '\n',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            )
+            .Select(line => line.Split('=', 2))
+            .Where(pair => pair.Length == 2)
+            .ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
+        return values.GetValueOrDefault("nb_read_packets") == "1"
+            || !double.TryParse(
+                values.GetValueOrDefault("duration"),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double duration
+            )
+            || duration <= options.ShortVideoDuration;
     }
 
     private async Task<bool> DeleteLivePhotosAsync()
@@ -370,7 +444,7 @@ internal sealed class ProcessTask(
         }
 
         // Short videos, always delete
-        float duration = await GetDurationAsync().ConfigureAwait(false);
+        double duration = await GetDurationAsync().ConfigureAwait(false);
         if (duration <= options.ShortVideoDuration)
         {
             Log.Warning(
@@ -380,19 +454,13 @@ internal sealed class ProcessTask(
             );
             if (options.DryRun)
             {
+                _deleted = true;
                 return false;
             }
 
             _modified = true;
             _deleted = true;
-            if (options.SkipBackup)
-            {
-                File.Delete(fileInfo.FullName);
-            }
-            else
-            {
-                _ = BackupFile(fileInfo.FullName, false);
-            }
+            CullFile();
             return false;
         }
 
@@ -466,7 +534,7 @@ internal sealed class ProcessTask(
         return DeleteLiveVideo();
     }
 
-    private async Task<bool> DeleteLiveVideoByCatalogAsync(float duration)
+    private async Task<bool> DeleteLiveVideoByCatalogAsync(double duration)
     {
         // The row of a still whose file is gone still pairs, since the catalog outlives the file
         string? videoContentId = _exifToolJson?.ContentIdentifier;
@@ -526,20 +594,41 @@ internal sealed class ProcessTask(
     {
         if (options.DryRun)
         {
+            _deleted = true;
             return false;
         }
 
         _modified = true;
         _deleted = true;
+        CullFile();
+        return false;
+    }
+
+    // An output converted earlier in this run keeps its original in a backup, so it needs no backup of its own.
+    private void CullFile()
+    {
         if (options.SkipBackup)
         {
             File.Delete(fileInfo.FullName);
+            return;
         }
-        else
+
+        if (convertedOutputs.TryRemove(fileInfo.FullName, out string? marker))
         {
-            _ = BackupFile(fileInfo.FullName, false);
+            Log.Information(
+                "Deleting converted output '{FilePath}', its original stays in '{BackupPath}'",
+                fileInfo.FullName,
+                marker[..^UndoTask.MarkerExtension.Length]
+            );
+            File.Delete(fileInfo.FullName);
+            if (MediaUtilities.TryDeleteFile(marker) is { } failure)
+            {
+                Log.Warning(failure, "Failed to remove '{FilePath}'", marker);
+            }
+            return;
         }
-        return false;
+
+        _ = BackupFile(fileInfo.FullName, false);
     }
 
     private async Task<bool> ConvertVideoAsync()
@@ -547,6 +636,7 @@ internal sealed class ProcessTask(
         // Output to temp file
         string tempFile = Path.ChangeExtension(fileInfo.FullName, ".temp");
         string[] ffmpegArguments;
+        string outputExtension = MediaUtilities.VideoOutputExtension;
         if (s_remuxExtensions.Contains(fileInfo.Extension))
         {
             // Remux audio and video
@@ -566,6 +656,28 @@ internal sealed class ProcessTask(
                 "+faststart",
                 "-f",
                 "mp4",
+                tempFile,
+            ];
+        }
+        else if (await IsStillOrShortGifAsync().ConfigureAwait(false))
+        {
+            Log.Information(
+                "ffmpeg: Converting single-frame or short GIF to a still image: '{FilePath}'",
+                fileInfo.FullName
+            );
+            outputExtension = MediaUtilities.StillOutputExtension;
+            ffmpegArguments =
+            [
+                "-nostdin",
+                "-y",
+                "-i",
+                fileInfo.FullName,
+                "-frames:v",
+                "1",
+                "-c:v",
+                "png",
+                "-f",
+                "image2",
                 tempFile,
             ];
         }
@@ -643,6 +755,7 @@ internal sealed class ProcessTask(
         }
         if (options.DryRun)
         {
+            _wouldModify = true;
             return false;
         }
 
@@ -665,24 +778,49 @@ internal sealed class ProcessTask(
             _modified = true;
             string sourceForMetadata = BackupFile(fileInfo.FullName, false);
 
-            // Rename temp output to MP4; use a unique name if target already exists
-            string outputFile = MediaUtilities.GetUniqueFileName(
-                Path.ChangeExtension(fileInfo.FullName, MediaUtilities.VideoOutputExtension)
-            );
-            if (!options.SkipBackup)
+            // A failure before the metadata writes land returns the original to its own name.
+            // An output that cannot be removed keeps both files, and the error names them.
+            // The original is deleted only after every metadata write to the output has landed.
+            string? placedOutput = null;
+            string? failure;
+            try
             {
-                await File.WriteAllTextAsync(
-                        sourceForMetadata + ".out",
-                        outputFile,
-                        cancellationToken
-                    )
+                string target = MediaUtilities.GetUniqueFileName(
+                    Path.ChangeExtension(fileInfo.FullName, outputExtension)
+                );
+                if (!options.SkipBackup)
+                {
+                    await File.WriteAllTextAsync(
+                            sourceForMetadata + UndoTask.MarkerExtension,
+                            target,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+                RenameFile(tempFile, target);
+                placedOutput = target;
+
+                failure = await WriteConvertedMetadataAsync(sourceForMetadata, placedOutput)
                     .ConfigureAwait(false);
             }
-            RenameFile(tempFile, outputFile);
+            catch
+            {
+                RollBackConversion(sourceForMetadata, placedOutput);
+                throw;
+            }
+            string outputFile = placedOutput;
+            if (failure is not null)
+            {
+                Log.Error(
+                    "exiftool: Failed to write metadata to '{DestinationPath}' converted from '{SourcePath}' ({Failure})",
+                    outputFile,
+                    sourceForMetadata,
+                    failure
+                );
+                RollBackConversion(sourceForMetadata, outputFile);
+                return false;
+            }
 
-            // Copy compatible metadata from the original to the converted file
-            await CopyMetadataAsync(sourceForMetadata, outputFile, cancellationToken)
-                .ConfigureAwait(false);
             if (options.SkipBackup)
             {
                 Log.Information(
@@ -691,13 +829,9 @@ internal sealed class ProcessTask(
                 );
                 File.Delete(sourceForMetadata);
             }
-
-            // Set timestamps on remuxed file from original timestamps
-            string? createdDate = _exifToolJson!.GetDateString();
-            if (!string.IsNullOrEmpty(createdDate))
+            else
             {
-                await MediaUtilities
-                    .SetCreateDateAsync(createdDate, outputFile, cancellationToken)
+                await RecordConvertedOutputAsync(sourceForMetadata, outputFile)
                     .ConfigureAwait(false);
             }
 
@@ -709,16 +843,9 @@ internal sealed class ProcessTask(
         finally
         {
             // Clean up temp file if conversion did not complete (rename did not happen)
-            if (File.Exists(tempFile))
+            if (File.Exists(tempFile) && MediaUtilities.TryDeleteFile(tempFile) is { } failure)
             {
-                try
-                {
-                    File.Delete(tempFile);
-                }
-                catch (IOException)
-                {
-                    Log.Warning("Failed to clean up temp file: '{FilePath}'", tempFile);
-                }
+                Log.Warning(failure, "Failed to clean up temp file: '{FilePath}'", tempFile);
             }
         }
     }
@@ -770,28 +897,72 @@ internal sealed class ProcessTask(
         return true;
     }
 
-    private static async Task CopyMetadataAsync(
-        string sourceFile,
-        string outputFile,
-        CancellationToken cancellationToken = default
-    )
+    // Returns why a write failed, or null once the metadata copy and the created date have landed.
+    private async Task<string?> WriteConvertedMetadataAsync(string sourceFile, string outputFile)
     {
         Log.Debug(
             "exiftool: Copying metadata from '{SourcePath}' to '{DestinationPath}'",
             sourceFile,
             outputFile
         );
-        _ = await Cli.Wrap("exiftool")
-            .WithArguments([
-                "-TagsFromFile",
-                sourceFile,
-                "-all:all",
-                "-overwrite_original",
+        string? failure = await MediaUtilities
+            .WriteExifToolAsync(
+                ExifToolCommand,
+                ["-TagsFromFile", sourceFile, "-all:all", "-overwrite_original", outputFile],
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        string? createdDate = _exifToolJson!.GetDateString();
+        if (failure is null && !string.IsNullOrEmpty(createdDate))
+        {
+            failure = await MediaUtilities
+                .TrySetCreateDateAsync(createdDate, outputFile, ExifToolCommand, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        return failure;
+    }
+
+    // A file converted again was this run's own output, so its original's marker takes the new output.
+    private async Task RecordConvertedOutputAsync(string backupFile, string outputFile)
+    {
+        string marker = backupFile + UndoTask.MarkerExtension;
+        if (convertedOutputs.TryRemove(fileInfo.FullName, out string? originalMarker))
+        {
+            await File.WriteAllTextAsync(originalMarker, outputFile, cancellationToken)
+                .ConfigureAwait(false);
+            Log.Information("Deleting intermediate conversion: '{FilePath}'", backupFile);
+            File.Delete(backupFile);
+            File.Delete(marker);
+            marker = originalMarker;
+        }
+
+        convertedOutputs[outputFile] = marker;
+    }
+
+    // Puts the original back under its own name, so the next run converts it from the start.
+    private void RollBackConversion(string backupFile, string? outputFile)
+    {
+        if (outputFile is not null && MediaUtilities.TryDeleteFile(outputFile) is { } failure)
+        {
+            Log.Error(
+                failure,
+                "Failed to remove '{FilePath}', the original stays at '{BackupPath}'",
                 outputFile,
-            ])
-            // Ignore errors
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
+                backupFile
+            );
+            return;
+        }
+        RenameFile(backupFile, fileInfo.FullName);
+        if (
+            MediaUtilities.TryDeleteFile(backupFile + UndoTask.MarkerExtension) is { } markerFailure
+        )
+        {
+            Log.Warning(
+                markerFailure,
+                "Failed to remove '{FilePath}'",
+                backupFile + UndoTask.MarkerExtension
+            );
+        }
     }
 
     private bool ReProcess(string fileName)

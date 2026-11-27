@@ -10,18 +10,34 @@ internal static class DirectoryCleaner
     internal static int DeleteEmptyDirectories(DirectoryInfo root, bool dryRun)
     {
         int count = 0;
+        if (!Directory.Exists(root.FullName))
+        {
+            Log.Information(
+                "No empty directories to delete in missing '{DirectoryPath}'",
+                root.FullName
+            );
+            return count;
+        }
+
+        // An unreadable directory cannot be shown empty, so it and everything under it stay.
+        EnumerationOptions walk = new()
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = 0,
+        };
 
         // Order deepest-first so children are removed before their parents
         List<string> subdirs =
         [
             .. Directory
-                .EnumerateDirectories(root.FullName, "*", SearchOption.AllDirectories)
+                .EnumerateDirectories(root.FullName, "*", walk)
                 .OrderByDescending(d => d.Count(c => c == Path.DirectorySeparatorChar)),
         ];
 
         foreach (string dir in subdirs)
         {
-            if (Directory.EnumerateFileSystemEntries(dir).Any())
+            if (!IsEmpty(dir))
             {
                 continue;
             }
@@ -45,5 +61,18 @@ internal static class DirectoryCleaner
         }
 
         return count;
+    }
+
+    private static bool IsEmpty(string dir)
+    {
+        try
+        {
+            return !Directory.EnumerateFileSystemEntries(dir).Any();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(ex, "Skipping unreadable directory: '{DirectoryPath}'", dir);
+            return false;
+        }
     }
 }

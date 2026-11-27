@@ -73,6 +73,24 @@ public sealed class TempDirectoryFixture : IAsyncLifetime
 
     internal string SourceFile(string fileName) => Path.Combine(SourceDir, fileName);
 
+    // Stands in for exiftool, so a test can make a write fail without breaking the real tool.
+    internal static string WriteExifToolStub(string dir, string script)
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The exiftool stub is a shell script");
+        _ = Directory.CreateDirectory(dir);
+        string stub = Path.Combine(dir, "exiftool-stub.sh");
+        File.WriteAllText(stub, $"#!/bin/sh\n{script}");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                stub,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            );
+        }
+
+        return stub;
+    }
+
     internal static string CreateWorkDir()
     {
         string workDir = Path.Combine(

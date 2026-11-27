@@ -37,19 +37,29 @@ internal static class MediaUtilities
         }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     internal const string VideoOutputExtension = ".mp4";
+    internal const string StillOutputExtension = ".png";
 
     internal const double LiveVideoDuration = 4.0;
     internal const double ShortVideoDuration = 1.0;
 
+    // A QuickTime container takes no EXIF, and exiftool reports such a file unchanged with exit 0.
     private static readonly FrozenSet<string> s_quicktimeExtensions = new[]
     {
-        ".mp4",
+        ".3gp",
         ".mov",
+        ".mp4",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    internal static string GetUniqueFileName(string filePath)
+    // Follows each platform's default file system, where Windows and macOS ignore case.
+    internal static StringComparer PathComparer { get; } =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+
+    internal static string GetUniqueFileName(string filePath, Func<string, bool>? isTaken = null)
     {
-        if (!File.Exists(filePath))
+        isTaken ??= File.Exists;
+        if (!isTaken(filePath))
         {
             return filePath;
         }
@@ -63,7 +73,7 @@ internal static class MediaUtilities
         {
             candidate = Path.Combine(directory, $"{nameWithoutExt}_{counter}{ext}");
             counter++;
-        } while (File.Exists(candidate));
+        } while (isTaken(candidate));
         return candidate;
     }
 
@@ -181,9 +191,10 @@ internal static class MediaUtilities
         using FileStream probe = File.OpenRead(filePath);
     }
 
-    internal static async Task SetCreateDateAsync(
+    internal static Task<string?> TrySetCreateDateAsync(
         string createdDate,
         string outputFile,
+        string exifTool,
         CancellationToken cancellationToken = default
     )
     {
@@ -192,23 +203,77 @@ internal static class MediaUtilities
             createdDate,
             outputFile
         );
-        string[] arguments = s_quicktimeExtensions.Contains(Path.GetExtension(outputFile))
-            ?
+        return WriteExifToolAsync(
+            exifTool,
+            CreateDateArguments(createdDate, outputFile),
+            cancellationToken
+        );
+    }
+
+    // Returns exiftool's exit code and output for a failed write, or null for a successful one.
+    internal static async Task<string?> WriteExifToolAsync(
+        string exifTool,
+        string[] arguments,
+        CancellationToken cancellationToken = default
+    )
+    {
+        BufferedCommandResult result = await Cli.Wrap(exifTool)
+            .WithArguments(arguments)
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+        return IsWriteFailure(result.ExitCode, result.StandardOutput, result.StandardError)
+            ? $"exit {result.ExitCode}: {(result.StandardError + result.StandardOutput).Trim()}"
+            : null;
+    }
+
+    // Returns why a delete failed, or null once the file is gone, so each caller picks its log level.
+    internal static Exception? TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex;
+        }
+    }
+
+    // An exiftool write failure prints an "Error:" line, normally with a non-zero exit.
+    internal static bool IsWriteFailure(
+        int exitCode,
+        string standardOutput,
+        string standardError
+    ) =>
+        exitCode != 0
+        || $"{standardError}\n{standardOutput}"
+            .Split('\n')
+            .Any(line => line.TrimStart().StartsWith("Error", StringComparison.Ordinal));
+
+    private static string[] CreateDateArguments(string createdDate, string outputFile)
+    {
+        string extension = Path.GetExtension(outputFile);
+        if (s_quicktimeExtensions.Contains(extension))
+        {
+            return
             [
                 "-overwrite_original",
                 $"-QuickTime:CreateDate={createdDate}",
                 $"-QuickTime:ModifyDate={createdDate}",
                 outputFile,
-            ]
-            :
-            [
-                "-overwrite_original",
-                $"-EXIF:CreateDate={createdDate}",
-                $"-EXIF:DateTimeOriginal={createdDate}",
-                outputFile,
             ];
-        _ = await Cli.Wrap("exiftool")
-            .WithArguments(arguments)
-            .ExecuteBufferedAsync(cancellationToken);
+        }
+
+        string group = string.Equals(extension, ".gif", StringComparison.OrdinalIgnoreCase)
+            ? "XMP"
+            : "EXIF";
+        return
+        [
+            "-overwrite_original",
+            $"-{group}:CreateDate={createdDate}",
+            $"-{group}:DateTimeOriginal={createdDate}",
+            outputFile,
+        ];
     }
 }

@@ -3,7 +3,6 @@ using CliWrap;
 using CliWrap.Buffered;
 using PhotoCleaner;
 using Serilog;
-using Serilog.Core;
 using Serilog.Events;
 
 namespace PhotoCleanerTests;
@@ -22,15 +21,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    private sealed class InMemorySink : ILogEventSink
-    {
-        private readonly List<LogEvent> _events = [];
-
-        public IReadOnlyList<LogEvent> Events => _events;
-
-        public void Emit(LogEvent logEvent) => _events.Add(logEvent);
-    }
 
     // -- Extension / MIME handling --------------------------------------------
 
@@ -227,70 +217,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ExecuteAsync_MismatchedMimeExtensionNameTaken_RenamesToFreeName(
-        bool skipBackup
-    )
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        InMemorySink sink = new();
-        ILogger savedLogger = Log.Logger;
-        try
-        {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Warning()
-                .WriteTo.Sink(sink)
-                .CreateLogger();
-
-            // JPEG bytes saved as .dng, beside a different file already named photo.jpg
-            string filePath = Path.Combine(workDir, "photo.dng");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-            string takenPath = Path.Combine(workDir, "photo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), takenPath);
-            byte[] takenBytes = await File.ReadAllBytesAsync(
-                takenPath,
-                TestContext.Current.CancellationToken
-            );
-
-            // Act
-            ProcessTask.ProcessResult result = await CreateContext(
-                filePath,
-                skipBackup: skipBackup
-            );
-
-            // Assert
-            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
-            File.Exists(filePath).Should().BeFalse();
-            string freePath = Path.Combine(workDir, "photo_1.jpg");
-            (await File.ReadAllBytesAsync(freePath, TestContext.Current.CancellationToken))
-                .Should()
-                .Equal(
-                    await File.ReadAllBytesAsync(
-                        fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
-                        TestContext.Current.CancellationToken
-                    )
-                );
-            (await File.ReadAllBytesAsync(takenPath, TestContext.Current.CancellationToken))
-                .Should()
-                .Equal(takenBytes);
-            Directory.GetFiles(workDir, "*.bak*").Should().BeEmpty();
-            sink.Events.Should()
-                .Contain(e =>
-                    e.Level == LogEventLevel.Warning
-                    && e.RenderMessage().Contains("is taken", StringComparison.Ordinal)
-                    && e.RenderMessage().Contains("photo_1.jpg", StringComparison.Ordinal)
-                );
-        }
-        finally
-        {
-            Log.Logger = savedLogger;
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
     public async Task ExecuteAsync_MixedCaseExtensionNameTaken_RenamesToFreeName(bool skipBackup)
     {
         // Arrange
@@ -391,6 +317,80 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
             File.Exists(filePath + ".bak").Should().BeTrue();
             File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShortVideoConvertedThisRun_DeletesItAndItsMarkerWithoutBackup()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.ShortVideoFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ShortVideoFile), filePath);
+            string originalBackup = Path.Combine(workDir, "original.3gp.bak");
+            string marker = originalBackup + UndoTask.MarkerExtension;
+            await File.WriteAllBytesAsync(
+                originalBackup,
+                [1, 2, 3],
+                TestContext.Current.CancellationToken
+            );
+            await File.WriteAllTextAsync(marker, filePath, TestContext.Current.CancellationToken);
+            ConcurrentDictionary<string, string> converted = new() { [filePath] = marker };
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                converted,
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(filePath + ".bak").Should().BeFalse();
+            File.Exists(marker).Should().BeFalse();
+            File.Exists(originalBackup).Should().BeTrue();
+            converted.Should().BeEmpty();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShortVideoNamedByAStaleMarker_IsBackedUp()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.ShortVideoFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.ShortVideoFile), filePath);
+            string originalBackup = Path.Combine(workDir, "original.3gp.bak");
+            await File.WriteAllBytesAsync(
+                originalBackup,
+                [1, 2, 3],
+                TestContext.Current.CancellationToken
+            );
+            await File.WriteAllTextAsync(
+                originalBackup + UndoTask.MarkerExtension,
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+
+            ProcessTask.ProcessResult result = await RunWithRecord(filePath, new());
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath + ".bak").Should().BeTrue();
+            File.Exists(originalBackup + UndoTask.MarkerExtension).Should().BeTrue();
         }
         finally
         {
@@ -807,6 +807,419 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Theory]
+    [InlineData("color=c=red:s=32x32", "-frames:v", "1", false)]
+    [InlineData("color=c=red:s=32x32", "-frames:v", "1", true)]
+    [InlineData("color=c=red:s=32x32:r=0.5", "-frames:v", "1", false)]
+    [InlineData("color=c=red:s=32x32:r=0.5", "-frames:v", "1", true)]
+    [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", false)]
+    [InlineData("testsrc=s=32x32:r=10", "-t", "0.5", true)]
+    public async Task ExecuteAsync_StillOrShortGif_ConvertsToStillImageThatSurvives(
+        string source,
+        string lengthOption,
+        string lengthValue,
+        bool skipBackup
+    )
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "clip.gif");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    source,
+                    lengthOption,
+                    lengthValue,
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+            string stillPath = Path.ChangeExtension(filePath, ".png");
+            ProcessTask.ProcessResult reprocessResult = await CreateContext(
+                stillPath,
+                skipBackup: skipBackup
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            reprocessResult.Should().Be(ProcessTask.ProcessResult.Success);
+            File.Exists(stillPath).Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeFalse();
+            File.Exists(filePath).Should().BeFalse();
+            File.Exists(filePath + ".bak").Should().Be(!skipBackup);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PcmRemuxConvertedAgain_KeepsOneMarkerOnTheOriginal()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string source = Path.Combine(workDir, "clip.mkv");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=s=32x32:r=10:d=3",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=d=3",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-shortest",
+                    source,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+            string output = Path.Combine(workDir, "clip.mp4");
+            string originalMarker = source + ".bak" + UndoTask.MarkerExtension;
+            ConcurrentDictionary<string, string> converted = new();
+
+            ProcessTask.ProcessResult remux = await RunWithRecord(source, converted);
+
+            remux.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            converted.Should().ContainKey(output).WhoseValue.Should().Be(originalMarker);
+
+            ProcessTask.ProcessResult reencode = await RunWithRecord(output, converted);
+
+            reencode.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            converted.Should().ContainKey(output).WhoseValue.Should().Be(originalMarker);
+            File.Exists(output + ".bak").Should().BeFalse();
+            File.Exists(output + ".bak" + UndoTask.MarkerExtension).Should().BeFalse();
+            File.Exists(source + ".bak").Should().BeTrue();
+            (await File.ReadAllTextAsync(originalMarker, TestContext.Current.CancellationToken))
+                .Should()
+                .Be(output);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    private static Task<ProcessTask.ProcessResult> RunWithRecord(
+        string filePath,
+        ConcurrentDictionary<string, string> converted
+    ) =>
+        ProcessTask.ExecuteAsync(
+            CreateOptions(),
+            new FileInfo(filePath),
+            null,
+            null,
+            [],
+            new SkippedExtensionTracker(),
+            converted,
+            TestContext.Current.CancellationToken
+        );
+
+    [Fact]
+    public async Task ExecuteAsync_VideoExactlyAtDuration_DeletesShortClip()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "boundary.mp4");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=s=32x32:r=10",
+                    "-t",
+                    "1.1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(skipBackup: true, shortVideoDuration: 1.1),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_GifExactlyAtDuration_ConvertsToStillImage()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "boundary.gif");
+            _ = await Cli.Wrap("ffmpeg")
+                .WithArguments([
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=s=32x32:r=10",
+                    "-t",
+                    "1.1",
+                    filePath,
+                ])
+                .ExecuteAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(skipBackup: true, shortVideoDuration: 1.1),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.ChangeExtension(filePath, ".png")).Should().BeTrue();
+            File.Exists(Path.ChangeExtension(filePath, ".mp4")).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Gif87aStill_ConvertsToStillImage()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "still.gif");
+            await File.WriteAllBytesAsync(
+                filePath,
+                [
+                    .. "GIF87a"u8,
+                    0x01,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x80,
+                    0x00,
+                    0x00,
+                    0xFF,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x2C,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x01,
+                    0x00,
+                    0x00,
+                    0x02,
+                    0x02,
+                    0x44,
+                    0x01,
+                    0x00,
+                    0x3B,
+                ],
+                TestContext.Current.CancellationToken
+            );
+            BufferedCommandResult probe = await Cli.Wrap("ffprobe")
+                .WithArguments([
+                    "-loglevel",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=nw=1:nk=1",
+                    filePath,
+                ])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            probe.StandardOutput.Trim().Should().Be("N/A");
+
+            ProcessTask.ProcessResult result = await CreateContext(filePath, skipBackup: true);
+
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(Path.ChangeExtension(filePath, ".png")).Should().BeTrue();
+            File.Exists(filePath).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData("-TagsFromFile", false)]
+    [InlineData("-TagsFromFile", true)]
+    [InlineData("CreateDate=", false)]
+    [InlineData("CreateDate=", true)]
+    public async Task ExecuteAsync_ConvertedMetadataWriteFails_KeepsOriginal(
+        string failOn,
+        bool skipBackup
+    )
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
+            _ = await Cli.Wrap("exiftool")
+                .WithArguments([
+                    "-overwrite_original",
+                    "-QuickTime:CreateDate=2021:05:02 00:00:00",
+                    filePath,
+                ])
+                .ExecuteBufferedAsync(TestContext.Current.CancellationToken);
+            byte[] original = await File.ReadAllBytesAsync(
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+            string stub = ExifToolWriteStub(Path.Combine(workDir, "stub"), failOn);
+
+            // Act
+            ProcessTask task = new(
+                CreateOptions(skipBackup: skipBackup),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                new ConcurrentDictionary<string, string>(),
+                TestContext.Current.CancellationToken
+            )
+            {
+                ExifToolCommand = stub,
+            };
+            ProcessTask.ProcessResult result = await task.ExecuteAsync();
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Failure);
+            (await File.ReadAllBytesAsync(filePath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(original);
+            Directory.GetFiles(workDir).Should().Equal([filePath]);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ConvertedOutputCannotBePlaced_KeepsOriginal(bool skipBackup)
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
+            _ = Directory.CreateDirectory(Path.ChangeExtension(filePath, ".mp4"));
+
+            // Act
+            Func<Task> act = () => CreateContext(filePath, skipBackup: skipBackup);
+
+            // Assert
+            await act.Should().ThrowAsync<IOException>();
+            Directory.GetFiles(workDir).Should().Equal([filePath]);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ConvertedMetadataWriteThrows_KeepsOriginal(bool skipBackup)
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.PcmMovFile);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.PcmMovFile), filePath);
+            byte[] original = await File.ReadAllBytesAsync(
+                filePath,
+                TestContext.Current.CancellationToken
+            );
+            ProcessTask task = new(
+                CreateOptions(skipBackup: skipBackup),
+                new FileInfo(filePath),
+                null,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                new ConcurrentDictionary<string, string>(),
+                TestContext.Current.CancellationToken
+            )
+            {
+                ExifToolCommand = Path.Combine(workDir, "missing", "exiftool"),
+            };
+
+            // Act
+            Func<Task> act = task.ExecuteAsync;
+
+            // Assert
+            await act.Should().ThrowAsync<Exception>();
+            (await File.ReadAllBytesAsync(filePath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(original);
+            Directory.GetFiles(workDir).Should().Equal([filePath]);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    private static string ExifToolWriteStub(string dir, string failOn) =>
+        TempDirectoryFixture.WriteExifToolStub(
+            dir,
+            $"case \"$*\" in *{failOn}*) echo 'Error: stub write failure' >&2; exit 1;; esac\nexit 0\n"
+        );
+
     // -- Video conversion - odd dimensions ------------------------------------
 
     [Theory]
@@ -833,7 +1246,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                     "-i",
                     $"testsrc=s={width}x{height}:r=5",
                     "-t",
-                    "1",
+                    "2",
                     filePath,
                 ])
                 .ExecuteAsync(TestContext.Current.CancellationToken);
@@ -1115,80 +1528,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
         finally
         {
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    // -- DNG version warning ---------------------------------------------------
-
-    [Fact]
-    public async Task ExecuteAsync_DngV1_4_NoWarning()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        InMemorySink sink = new();
-        ILogger savedLogger = Log.Logger;
-        try
-        {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Warning()
-                .WriteTo.Sink(sink)
-                .CreateLogger();
-
-            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV14File);
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV14File), filePath);
-
-            // Act
-            ProcessTask.ProcessResult result = await CreateContext(filePath);
-
-            // Assert
-            result.Should().Be(ProcessTask.ProcessResult.Success);
-            sink.Events.Where(e => e.Level == LogEventLevel.Warning)
-                .Should()
-                .NotContain(e =>
-                    e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
-                );
-        }
-        finally
-        {
-            Log.Logger = savedLogger;
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_DngV1_5_LogsWarning()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        InMemorySink sink = new();
-        ILogger savedLogger = Log.Logger;
-        try
-        {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Warning()
-                .WriteTo.Sink(sink)
-                .CreateLogger();
-
-            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV15File);
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV15File), filePath);
-
-            // Act
-            ProcessTask.ProcessResult result = await CreateContext(filePath);
-
-            // Assert
-            result.Should().Be(ProcessTask.ProcessResult.Success);
-            sink.Events.Should()
-                .Contain(e =>
-                    e.Level == LogEventLevel.Warning
-                    && e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
-                    && e.RenderMessage()
-                        .Contains(TempDirectoryFixture.DngVersion15, StringComparison.Ordinal)
-                );
-        }
-        finally
-        {
-            Log.Logger = savedLogger;
             TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
@@ -1521,6 +1860,11 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 cancellationToken: TestContext.Current.CancellationToken
             );
 
+            ConcurrentDictionary<string, string> converted = new()
+            {
+                [filePath] = Path.Combine(workDir, "photo.png.bak.out"),
+            };
+
             ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
                 CreateOptions(),
                 new FileInfo(filePath),
@@ -1528,11 +1872,13 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
                 trashDb,
                 [],
                 new SkippedExtensionTracker(),
+                converted,
                 TestContext.Current.CancellationToken
             );
 
             result.Should().Be(ProcessTask.ProcessResult.Deleted);
             File.Exists(filePath).Should().BeFalse();
+            converted.Should().BeEmpty();
             FileRecord? row = await db.GetByPathAsync(
                 filePath,
                 cancellationToken: TestContext.Current.CancellationToken
@@ -1654,6 +2000,226 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_TrashDb_MatchingFileDeleteFails_FailsAndStaysUnmarked()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Requires Unix directory modes and a non-privileged process");
+            return;
+        }
+
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        string lockedDir = Path.Combine(workDir, "locked");
+        try
+        {
+            _ = Directory.CreateDirectory(lockedDir);
+            string filePath = Path.Combine(lockedDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            (string _, string sha1) = await Database.ComputeHashesAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            await using Database db = new(Path.Combine(workDir, "Process.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+            await using TrashDatabase trashDb = new(Path.Combine(workDir, "Trash.db"));
+            await trashDb.InitializeAsync(TestContext.Current.CancellationToken);
+            await trashDb.InsertHashAsync(
+                sha1,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(),
+                new FileInfo(filePath),
+                db,
+                trashDb,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Failure);
+            File.Exists(filePath).Should().BeTrue();
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            row.Should().NotBeNull();
+            row!.IsProcessed.Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(lockedDir))
+            {
+                File.SetUnixFileMode(
+                    lockedDir,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                );
+            }
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DryRunWithDatabaseWouldRename_CountsModifiedAndLeavesRowUnmarked()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.png");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            await using Database db = new(Path.Combine(workDir, "Process.db"));
+            await db.InitializeAsync(TestContext.Current.CancellationToken);
+
+            ProcessTask.ProcessResult result = await ProcessTask.ExecuteAsync(
+                CreateOptions(dryRun: true),
+                new FileInfo(filePath),
+                db,
+                null,
+                [],
+                new SkippedExtensionTracker(),
+                TestContext.Current.CancellationToken
+            );
+
+            result.Should().Be(ProcessTask.ProcessResult.Modified);
+            File.Exists(filePath).Should().BeTrue();
+            FileRecord? row = await db.GetByPathAsync(
+                filePath,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+            (row?.IsProcessed ?? false).Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Theory]
+    [InlineData(TempDirectoryFixture.SmallJpegFile, "photo.png", false)]
+    [InlineData(TempDirectoryFixture.SmallJpegFile, "photo.Jpg", false)]
+    [InlineData(TempDirectoryFixture.ShortVideoFile, "short.mp4", true)]
+    [InlineData(TempDirectoryFixture.MkvFile, "remux.mkv", false)]
+    public async Task ExecuteAsync_DryRun_CountsTheChangeAndLeavesTheFile(
+        string sourceFile,
+        string fileName,
+        bool deleted
+    )
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, fileName);
+            File.Copy(fixture.SourceFile(sourceFile), filePath);
+
+            ProcessTask.ProcessResult result = await CreateContext(filePath, dryRun: true);
+
+            result
+                .Should()
+                .Be(
+                    deleted ? ProcessTask.ProcessResult.Deleted : ProcessTask.ProcessResult.Modified
+                );
+            Directory.GetFiles(workDir).Select(Path.GetFileName).Should().Equal(fileName);
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DryRunLivePhotoVideo_CountsDeletedAndKeepsVideo()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string videoPath = Path.Combine(workDir, "livephoto.mp4");
+            string imagePath = Path.Combine(workDir, "livephoto.heic");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), videoPath);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.LiveVideoFile), imagePath);
+            await SetContentIdentifierAsync(videoPath, "test-uuid-dryrun");
+            await SetContentIdentifierAsync(imagePath, "test-uuid-dryrun");
+
+            ProcessTask.ProcessResult result = await CreateContext(videoPath, dryRun: true);
+
+            result.Should().Be(ProcessTask.ProcessResult.Deleted);
+            File.Exists(videoPath).Should().BeTrue();
+            File.Exists(videoPath + ".bak").Should().BeFalse();
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommand_DryRunWouldRename_ExitsSuccessAndLeavesTheFile()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            string filePath = Path.Combine(workDir, "photo.png");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+
+            int exitCode = await new ProcessCommand(
+                CreateOptions(dryRun: true, path: workDir),
+                TestContext.Current.CancellationToken
+            ).ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            Directory.GetFiles(workDir).Select(Path.GetFileName).Should().Equal("photo.png");
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessCommand_DryRunCaseConflict_EndsAndLeavesBothFiles()
+    {
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        try
+        {
+            if (!TempDirectoryFixture.IsFileSystemCaseSensitive(workDir))
+            {
+                Assert.Skip(
+                    "Filesystem is case-insensitive; a case-variant name cannot hold a second file"
+                );
+            }
+            File.Copy(
+                fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                Path.Combine(workDir, "a.jpg")
+            );
+            File.Copy(
+                fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                Path.Combine(workDir, "A.jpg")
+            );
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(
+                TestContext.Current.CancellationToken
+            );
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+
+            int exitCode = await new ProcessCommand(
+                CreateOptions(dryRun: true, path: workDir),
+                timeout.Token
+            ).ExecuteAsync();
+
+            exitCode.Should().Be(ExitCode.Success);
+            Directory
+                .GetFiles(workDir)
+                .Select(Path.GetFileName)
+                .Should()
+                .BeEquivalentTo("a.jpg", "A.jpg");
+        }
+        finally
+        {
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
     // -- Helpers ---------------------------------------------------------------
 
     private static async Task SetContentIdentifierAsync(string filePath, string contentId) =>
@@ -1671,11 +2237,13 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         bool dryRun = false,
         bool skipBackup = false,
         bool rehash = false,
-        bool imageHash = false
+        bool imageHash = false,
+        double shortVideoDuration = MediaUtilities.ShortVideoDuration,
+        string? path = null
     ) =>
         new()
         {
-            Path = new DirectoryInfo(Path.GetTempPath()),
+            Path = new DirectoryInfo(path ?? Path.GetTempPath()),
             Threads = 1,
             DryRun = dryRun,
             DatePath = false,
@@ -1688,7 +2256,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             Tags = null,
             DbFile = null,
             Rehash = rehash,
-            ShortVideoDuration = MediaUtilities.ShortVideoDuration,
+            ShortVideoDuration = shortVideoDuration,
             Reprocess = false,
             MarkProcessed = false,
             ImmichUrl = null,
@@ -1704,7 +2272,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             },
         };
 
-    private static Task<ProcessTask.ProcessResult> CreateContext(
+    internal static Task<ProcessTask.ProcessResult> CreateContext(
         string filePath,
         bool dryRun = false,
         bool skipBackup = false,
@@ -1719,4 +2287,158 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             new SkippedExtensionTracker(),
             default
         );
+}
+
+// Swapping the global logger is safe only while no other test class runs.
+[Collection(GlobalLoggerDefinition.Name)]
+public sealed class ProcessTaskLogTests(TempDirectoryFixture fixture)
+    : IClassFixture<TempDirectoryFixture>,
+        IAsyncLifetime
+{
+    public ValueTask InitializeAsync()
+    {
+        if (!fixture.IsAvailable)
+        {
+            Assert.Skip(fixture.SkipReason ?? "Required tools not available");
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_MismatchedMimeExtensionNameTaken_RenamesToFreeName(
+        bool skipBackup
+    )
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            // JPEG bytes saved as .dng, beside a different file already named photo.jpg
+            string filePath = Path.Combine(workDir, "photo.dng");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            string takenPath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), takenPath);
+            byte[] takenBytes = await File.ReadAllBytesAsync(
+                takenPath,
+                TestContext.Current.CancellationToken
+            );
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTaskTests.CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeFalse();
+            string freePath = Path.Combine(workDir, "photo_1.jpg");
+            (await File.ReadAllBytesAsync(freePath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(
+                    await File.ReadAllBytesAsync(
+                        fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                        TestContext.Current.CancellationToken
+                    )
+                );
+            (await File.ReadAllBytesAsync(takenPath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(takenBytes);
+            Directory.GetFiles(workDir, "*.bak*").Should().BeEmpty();
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains("is taken", StringComparison.Ordinal)
+                    && e.RenderMessage().Contains("photo_1.jpg", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DngV1_4_NoWarning()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV14File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV14File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTaskTests.CreateContext(filePath);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            sink.Events.Where(e => e.Level == LogEventLevel.Warning)
+                .Should()
+                .NotContain(e =>
+                    e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DngV1_5_LogsWarning()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV15File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV15File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTaskTests.CreateContext(filePath);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
+                    && e.RenderMessage()
+                        .Contains(TempDirectoryFixture.DngVersion15, StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
 }

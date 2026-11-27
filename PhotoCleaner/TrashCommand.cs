@@ -227,24 +227,34 @@ internal sealed class TrashCommand(
         ImmichSearchRequest request
     )
     {
-        using HttpResponseMessage response = await client
-            .PostAsJsonAsync(
-                "api/search/metadata",
-                request,
-                ImmichJsonContext.Default.ImmichSearchRequest,
-                cancellationToken
-            )
-            .ConfigureAwait(false);
-        _ = response.EnsureSuccessStatusCode();
+        try
+        {
+            using HttpResponseMessage response = await client
+                .PostAsJsonAsync(
+                    "api/search/metadata",
+                    request,
+                    ImmichJsonContext.Default.ImmichSearchRequest,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            _ = response.EnsureSuccessStatusCode();
 
-        ImmichSearchResponse? searchResponse = await response
-            .Content.ReadFromJsonAsync(
-                ImmichJsonContext.Default.ImmichSearchResponse,
-                cancellationToken
-            )
-            .ConfigureAwait(false);
+            ImmichSearchResponse? searchResponse = await response
+                .Content.ReadFromJsonAsync(
+                    ImmichJsonContext.Default.ImmichSearchResponse,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
 
-        return searchResponse?.Assets ?? new ImmichSearchAssets();
+            return searchResponse?.Assets ?? new ImmichSearchAssets();
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Request to {client.BaseAddress}api/search/metadata timed out",
+                ex
+            );
+        }
     }
 
     internal static string? ConvertChecksum(string base64Checksum)

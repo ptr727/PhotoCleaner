@@ -49,12 +49,12 @@ An import database records that bytes were imported once. It does not record tha
 
 ## Re-encoded Copies and the Limits of Each Key
 
-The measurements below come from one real migration of a cloud export. They are rates, and they describe that export. Treat them as a warning about each key, not as a guarantee for another source.
+The observations below come from a real migration of a cloud export. Treat them as a warning about each key, not as a guarantee for another source.
 
 ### What the Keys Did
 
 - **A file extension is not a format.** Some exports re-encode images and keep the original extension. A file named `.heic` or `.dng` can hold a JPEG. `image_hash` then matches nothing, even for photos the server holds.
-- **Capture time alone is weak.** Many assets share a capture second, such as bursts and scans. A match on capture second and camera model pointed at a clearly different picture in about two thirds of cases. It still did so in about one in six cases when the pixel dimensions also matched. A match on capture second and file name was clearly wrong in under 2 percent of cases.
+- **Capture time alone is weak.** Many assets share a capture second, such as bursts and scans. A match on capture second and camera model often pointed at a clearly different picture. It still did so, less often, when the pixel dimensions also matched. A match on capture second and file name was rarely wrong.
 - **A sidecar time is not a capture time.** When a file has no embedded date, the sidecar's taken-time is often an upload or file time. Do not use it as a matching key.
 - **An embedded ImageUniqueID was not usable as a key.**
 
@@ -67,7 +67,7 @@ This comparison is a method you script yourself. It is not a PhotoCleaner comman
 1. Compare the new file's grid with each server grid, in all 8 rotations and mirrors.
 1. Accept a match when the mean absolute difference is under 2 on a 0-255 scale and the correlation is at least 0.98.
 
-In a self-test, every sampled original found its own asset first. Where an embedded capture time existed, a strong visual match agreed with it to the second in about 96 percent of cases.
+In a self-test, every sampled original found its own asset first. Where an embedded capture time existed, a strong visual match almost always agreed with it to the second.
 
 HEIC needs a decoder that assembles its tiles, for example `heif-convert`. Choose the decoder by the file's content type rather than by its extension, because of the mislabeled files above.
 
@@ -81,7 +81,7 @@ Before you upload the remainder, show it to the library's owner. Contact sheets 
 
 What a library lacks after byte, image-hash, and visual matching is often what the owner removed earlier. That includes shots deleted on the phone before any import ran, which no import history can show.
 
-In the same migration, the owner reviewed the whole remainder and rejected all of it, so nothing was imported. The matching work still made the remainder small enough to review.
+The matching work is what makes the remainder small enough to review.
 
 ## Recording a Source as Already Imported
 
@@ -116,15 +116,15 @@ The trash database is append-only. A restored asset stays in it. Delete that one
 
 `process` removes a Live Photo's motion video when three things hold. The video is a `.mov` or `.mp4` under the Live Photo length bound of 4 seconds. The process database knows a HEIC, HEIF, JPG, or JPEG still with the same Apple `ContentIdentifier`. File names and date folders do not matter when `process` runs with `--db`. Without `--db`, it pairs only files in the same folder with the same base name, or the base name plus `_HEVC`. It confirms each pair by `ContentIdentifier`. See "Live Photo Detection" in [ARCHITECTURE][architecture-livephoto] for the full rules.
 
-A cloud export may deliver the motion parts as short videos with no sidecar of their own. A `.mov` or `.mp4` video at or under the `--duration` threshold is deleted in any case.
+A cloud export may deliver the motion parts as short videos with no sidecar of their own. A video at or under the `--duration` threshold is deleted in any case, whatever its format. A GIF is the exception, since a short one becomes a PNG.
 
 ## What to Check in a Cloud Export Before Importing
 
 - **JSON sidecars are not read.** The tool uses embedded metadata only.
 - **A file with no embedded date lands in the no-date folder** unless `--datepath` infers a date from its path. With the format `yyyy/MM/yyyy-MM-dd` that folder is `0001/01/0001-01-01`. File times are not used as a fallback. Review that folder by hand.
 - **`-edited` renditions are separate files.** So are copies with a `(1)`-style counter. The tool keeps each one. Import with a database skips a file identical to one already recorded, including an identical file earlier in the same run.
-- **`process` renames a file whose extension disagrees with its content.** When another file already holds the corrected name, the renamed file takes the next free name, such as `photo_1.jpg`, and the run logs a warning. It also converts every GIF to an MP4 video, animated or not. The new MP4 is then subject to the short-video rule, so a short or static GIF can vanish. Keep backups, and check short GIFs before you run with `--skipbackup`.
-- **Short videos are deleted.** A `.mov` or `.mp4` video at or under the `--duration` threshold is removed, one second by default.
+- **`process` renames a file whose extension disagrees with its content.** When another file already holds the corrected name, the renamed file takes the next free name, such as `photo_1.jpg`, and the run logs a warning. It also converts a GIF to an MP4 video. A GIF with one frame, no duration, or one no longer than `--duration` becomes a PNG of its first frame instead. The short-video rule then never deletes it. Raising `--duration` therefore also turns longer animated GIFs into stills.
+- **Short videos are deleted.** A video in any supported format except GIF at or under the `--duration` threshold is removed, one second by default. A clip in another format, such as `.avi`, `.wmv`, `.3gp`, `.asf`, `.mkv`, or `.m2t`, is converted to MP4 first. The next round then removes it. Under `--skipbackup` nothing of it is kept.
 
 <!-- Repo -->
 
