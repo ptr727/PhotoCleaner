@@ -694,8 +694,8 @@ flowchart TD
   ihDb -->|"no"| claimDbQ
   claimDbQ -->|"no"| metaQ
   claimDbQ -->|"yes"| claim{"ImportTask.ClaimedByAsync(): SHA-256 or image hash held in this run?"}
-  claim -->|"held, owner imported"| skipped
-  claim -->|"held, owner did not import"| claim
+  claim -->|"held, owner imported or kept its moved file"| skipped
+  claim -->|"held, owner freed the claim"| claim
   claim -->|"this file takes the claim"| metaQ
   metaQ -->|"yes"| validate
   metaQ -->|"no"| meta["ImportTask.GetFileMetaAsync(): read metadata, an IOException gives none"]
@@ -704,7 +704,7 @@ flowchart TD
   validate -->|"no, warnings ignored"| next(["Continues in Import Destination"])
 ```
 
-A claim waiter blocks until the owner finishes, then loops if the owner did not import. A file is Skipped by a claim only after it passed every database check.
+A claim waiter blocks until the owner finishes, then loops if the owner freed the claim. An owner that kept its moved file in `--outpath` holds the claim, though it counts Failed. A file is Skipped by a claim only after it passed every database check.
 
 #### Import Destination
 

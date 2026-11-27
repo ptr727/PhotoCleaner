@@ -831,10 +831,12 @@ internal sealed class ImportTask(
         if (skipped.Count > 0)
         {
             Log.Warning(
-                "Skipping {Skipped} for '{FilePath}', since exiftool cannot write type '{FileType}'",
+                "Skipping {Skipped} for '{FilePath}', since {Reason}",
                 string.Join(" and ", skipped),
                 file,
-                meta?.FileTypeExtension ?? "unknown"
+                meta is null
+                    ? "its metadata could not be read"
+                    : $"exiftool cannot write type '{meta.FileTypeExtension}'"
             );
         }
     }
