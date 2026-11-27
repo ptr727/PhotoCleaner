@@ -797,7 +797,7 @@ flowchart TD
   update -->|"cancel"| cancelQ
   dateW -->|"cancel"| cancelQ{"--move?"}
   tagW -->|"cancel"| cancelQ
-  cancelQ -->|"no"| cancelDel["ImportTask.DeleteCopy(): remove the copy"]
+  cancelQ -->|"no"| cancelDel["ImportTask.RemoveCopy(): remove the copy"]
   cancelDel --> exitError(["Rethrown, run exits 1 Error"])
   cancelQ -->|"yes"| cancelMoved["Moved file stays, mtime not restored, no row"]
   cancelMoved --> exitError
@@ -806,7 +806,7 @@ flowchart TD
 
 Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. That exception still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed.
 
-A moved file has no source left to return to, so a failed write keeps it in `--outpath` with the source mtime. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move also keeps the claims, since the moved file is in the library without its row.
+A moved file has no source left to return to, so a failed write keeps it in `--outpath`. It gets the source mtime unless the mtime restore is the write that failed. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move also keeps the claims, since the moved file is in the library without its row.
 
 ### Index
 

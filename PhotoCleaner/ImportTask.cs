@@ -486,9 +486,9 @@ internal sealed class ImportTask(
         catch (OperationCanceledException)
         {
             // A cancel after the copy removes it, and a moved file stays where it landed.
-            if (!options.Move && File.Exists(finalDest))
+            if (!options.Move)
             {
-                _ = DeleteCopy(finalDest);
+                RemoveCopy(file, finalDest);
             }
 
             throw;
