@@ -776,7 +776,7 @@ flowchart TD
   timeMvQ -->|"yes, keep the moved file"| rowQ
   rollback --> delQ{"Copy removed?"}
   delQ -->|"yes"| failed
-  delQ -->|"no"| copyLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
+  delQ -->|"no"| copyLeft["Log an error naming the copy, copy kept, row written under --db unless the row write failed, claims kept"]
   copyLeft --> failed
   mtime --> rowQ{"ImportTask.WriteRowAsync(): --db given?"}
   rowQ -->|"no"| keptQ
@@ -799,14 +799,14 @@ flowchart TD
   tagW -->|"cancel"| cancelQ
   cancelQ -->|"no"| cancelDel["ImportTask.RemoveCopy(): remove the copy"]
   cancelDel --> exitError(["Rethrown, run exits 1 Error"])
-  cancelDel -->|"removal fails"| cancelLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
+  cancelDel -->|"removal fails"| cancelLeft["Log an error naming the copy, copy kept, row written under --db despite the cancel, claims kept"]
   cancelLeft --> exitError
   cancelQ -->|"yes"| cancelMoved["Moved file stays, no row"]
   cancelMoved --> exitError
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. A `SqliteException` still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed. A copy that cannot be removed stays with a warning instead, S12.
+Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. A `SqliteException` still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed. A copy that cannot be removed stays instead, and the error names it. It gets its row and keeps its claims as a kept moved file does, even after a cancel. So a matching file is skipped in this run and the next. Where the row write is itself the failure, the copy stays with no row.
 
 A moved file has no source left to return to, so a failed write keeps it in `--outpath`. It gets the source mtime unless the mtime restore is the write that failed. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move, such as a failed row write, also keeps the file and its claims. The moved file is in the library without its row. The error names the destination, S16.
 
@@ -1144,7 +1144,6 @@ A verdict the container never printed is a tooling gap and counts Failed, never 
 
 Each entry describes a branch the diagrams mark, as the code behaves today, and links the issue that tracks its fix. Update the diagram and remove the entry when the fix lands.
 
-- **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
 - **S15.** `trash` stops at an empty page without reading `NextPage` or marking the sync partial, #335.
 - **S16.** A moved file whose row write fails mid-run, such as on a full disk, stays in `--outpath` with no row. The next run imports a copy of it again, #340.

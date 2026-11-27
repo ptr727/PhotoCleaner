@@ -88,7 +88,9 @@ PhotoCleaner analyzes and transforms media files through a validation pipeline t
   to a date-based directory so the source path is still available.
   A failed `--tagpath`, `--tags`, or `--datepath` write counts the file as failed, so `import`
   exits non-zero. So does a failed mtime restore or database write. A copy is removed after any
-  such failure, so the next run imports it again. A moved file stays at its destination without
+  such failure, so the next run imports it again. A copy that cannot be removed stays, and gets
+  its `--db` row unless the database write failed, so the next run skips the source.
+  A moved file stays at its destination without
   the failed write. After a failed date, tag, or mtime write it still gets its `--db` row, so a
   later copy of the same file is skipped. A `--db` that cannot be written stops the run before
   any file is copied or moved.
