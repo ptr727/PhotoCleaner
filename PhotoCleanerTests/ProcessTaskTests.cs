@@ -3,7 +3,6 @@ using CliWrap;
 using CliWrap.Buffered;
 using PhotoCleaner;
 using Serilog;
-using Serilog.Core;
 using Serilog.Events;
 
 namespace PhotoCleanerTests;
@@ -22,15 +21,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    private sealed class InMemorySink : ILogEventSink
-    {
-        private readonly List<LogEvent> _events = [];
-
-        public IReadOnlyList<LogEvent> Events => _events;
-
-        public void Emit(LogEvent logEvent) => _events.Add(logEvent);
-    }
 
     // -- Extension / MIME handling --------------------------------------------
 
@@ -220,70 +210,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
         finally
         {
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_MismatchedMimeExtensionNameTaken_RenamesToFreeName(
-        bool skipBackup
-    )
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        InMemorySink sink = new();
-        ILogger savedLogger = Log.Logger;
-        try
-        {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Warning()
-                .WriteTo.Sink(sink)
-                .CreateLogger();
-
-            // JPEG bytes saved as .dng, beside a different file already named photo.jpg
-            string filePath = Path.Combine(workDir, "photo.dng");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
-            string takenPath = Path.Combine(workDir, "photo.jpg");
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), takenPath);
-            byte[] takenBytes = await File.ReadAllBytesAsync(
-                takenPath,
-                TestContext.Current.CancellationToken
-            );
-
-            // Act
-            ProcessTask.ProcessResult result = await CreateContext(
-                filePath,
-                skipBackup: skipBackup
-            );
-
-            // Assert
-            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
-            File.Exists(filePath).Should().BeFalse();
-            string freePath = Path.Combine(workDir, "photo_1.jpg");
-            (await File.ReadAllBytesAsync(freePath, TestContext.Current.CancellationToken))
-                .Should()
-                .Equal(
-                    await File.ReadAllBytesAsync(
-                        fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
-                        TestContext.Current.CancellationToken
-                    )
-                );
-            (await File.ReadAllBytesAsync(takenPath, TestContext.Current.CancellationToken))
-                .Should()
-                .Equal(takenBytes);
-            Directory.GetFiles(workDir, "*.bak*").Should().BeEmpty();
-            sink.Events.Should()
-                .Contain(e =>
-                    e.Level == LogEventLevel.Warning
-                    && e.RenderMessage().Contains("is taken", StringComparison.Ordinal)
-                    && e.RenderMessage().Contains("photo_1.jpg", StringComparison.Ordinal)
-                );
-        }
-        finally
-        {
-            Log.Logger = savedLogger;
             TempDirectoryFixture.DeleteWorkDir(workDir);
         }
     }
@@ -1606,80 +1532,6 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
         }
     }
 
-    // -- DNG version warning ---------------------------------------------------
-
-    [Fact]
-    public async Task ExecuteAsync_DngV1_4_NoWarning()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        InMemorySink sink = new();
-        ILogger savedLogger = Log.Logger;
-        try
-        {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Warning()
-                .WriteTo.Sink(sink)
-                .CreateLogger();
-
-            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV14File);
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV14File), filePath);
-
-            // Act
-            ProcessTask.ProcessResult result = await CreateContext(filePath);
-
-            // Assert
-            result.Should().Be(ProcessTask.ProcessResult.Success);
-            sink.Events.Where(e => e.Level == LogEventLevel.Warning)
-                .Should()
-                .NotContain(e =>
-                    e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
-                );
-        }
-        finally
-        {
-            Log.Logger = savedLogger;
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_DngV1_5_LogsWarning()
-    {
-        // Arrange
-        string workDir = TempDirectoryFixture.CreateWorkDir();
-        InMemorySink sink = new();
-        ILogger savedLogger = Log.Logger;
-        try
-        {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Warning()
-                .WriteTo.Sink(sink)
-                .CreateLogger();
-
-            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV15File);
-            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV15File), filePath);
-
-            // Act
-            ProcessTask.ProcessResult result = await CreateContext(filePath);
-
-            // Assert
-            result.Should().Be(ProcessTask.ProcessResult.Success);
-            sink.Events.Should()
-                .Contain(e =>
-                    e.Level == LogEventLevel.Warning
-                    && e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
-                    && e.RenderMessage()
-                        .Contains(TempDirectoryFixture.DngVersion15, StringComparison.Ordinal)
-                );
-        }
-        finally
-        {
-            Log.Logger = savedLogger;
-            TempDirectoryFixture.DeleteWorkDir(workDir);
-        }
-    }
-
     // -- Timestamp preservation -----------------------------------------------
 
     [Fact]
@@ -2199,7 +2051,7 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             },
         };
 
-    private static Task<ProcessTask.ProcessResult> CreateContext(
+    internal static Task<ProcessTask.ProcessResult> CreateContext(
         string filePath,
         bool dryRun = false,
         bool skipBackup = false,
@@ -2214,4 +2066,158 @@ public sealed class ProcessTaskTests(TempDirectoryFixture fixture)
             new SkippedExtensionTracker(),
             default
         );
+}
+
+// Swapping the global logger is safe only while no other test class runs.
+[Collection(GlobalLoggerDefinition.Name)]
+public sealed class ProcessTaskLogTests(TempDirectoryFixture fixture)
+    : IClassFixture<TempDirectoryFixture>,
+        IAsyncLifetime
+{
+    public ValueTask InitializeAsync()
+    {
+        if (!fixture.IsAvailable)
+        {
+            Assert.Skip(fixture.SkipReason ?? "Required tools not available");
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_MismatchedMimeExtensionNameTaken_RenamesToFreeName(
+        bool skipBackup
+    )
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            // JPEG bytes saved as .dng, beside a different file already named photo.jpg
+            string filePath = Path.Combine(workDir, "photo.dng");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallJpegFile), filePath);
+            string takenPath = Path.Combine(workDir, "photo.jpg");
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.SmallPngFile), takenPath);
+            byte[] takenBytes = await File.ReadAllBytesAsync(
+                takenPath,
+                TestContext.Current.CancellationToken
+            );
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTaskTests.CreateContext(
+                filePath,
+                skipBackup: skipBackup
+            );
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Reprocess);
+            File.Exists(filePath).Should().BeFalse();
+            string freePath = Path.Combine(workDir, "photo_1.jpg");
+            (await File.ReadAllBytesAsync(freePath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(
+                    await File.ReadAllBytesAsync(
+                        fixture.SourceFile(TempDirectoryFixture.SmallJpegFile),
+                        TestContext.Current.CancellationToken
+                    )
+                );
+            (await File.ReadAllBytesAsync(takenPath, TestContext.Current.CancellationToken))
+                .Should()
+                .Equal(takenBytes);
+            Directory.GetFiles(workDir, "*.bak*").Should().BeEmpty();
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains("is taken", StringComparison.Ordinal)
+                    && e.RenderMessage().Contains("photo_1.jpg", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DngV1_4_NoWarning()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV14File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV14File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTaskTests.CreateContext(filePath);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            sink.Events.Where(e => e.Level == LogEventLevel.Warning)
+                .Should()
+                .NotContain(e =>
+                    e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DngV1_5_LogsWarning()
+    {
+        // Arrange
+        string workDir = TempDirectoryFixture.CreateWorkDir();
+        CapturingSink sink = new();
+        ILogger savedLogger = Log.Logger;
+        try
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Warning()
+                .WriteTo.Sink(sink)
+                .CreateLogger();
+
+            string filePath = Path.Combine(workDir, TempDirectoryFixture.DngV15File);
+            File.Copy(fixture.SourceFile(TempDirectoryFixture.DngV15File), filePath);
+
+            // Act
+            ProcessTask.ProcessResult result = await ProcessTaskTests.CreateContext(filePath);
+
+            // Assert
+            result.Should().Be(ProcessTask.ProcessResult.Success);
+            sink.Events.Should()
+                .Contain(e =>
+                    e.Level == LogEventLevel.Warning
+                    && e.RenderMessage().Contains("DNG version", StringComparison.Ordinal)
+                    && e.RenderMessage()
+                        .Contains(TempDirectoryFixture.DngVersion15, StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            Log.Logger = savedLogger;
+            TempDirectoryFixture.DeleteWorkDir(workDir);
+        }
+    }
 }

@@ -643,9 +643,9 @@ flowchart TD
   ihQ -->|"no"| exec["ImportTask.ExecuteAsync(): run files in parallel, up to --threads"]
   ihVer --> exec
   exec -->|"each file"| perFile["ImportTask.ImportFileAsync(): import one file, see the stages below"]
-  perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported, else free them"]
+  perFile -->|"returns a result"| release["ImportTask.ReleaseClaims(): keep claims if Imported or a moved file was kept, else free them"]
   release --> counted(["Counted under the returned result"])
-  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims, then log the file"]
+  perFile -->|"exception other than cancel"| perFileCatch["ImportTask.ReleaseClaims(): free claims unless a moved file was kept, then log the file"]
   perFileCatch --> countedFailed(["Counted Failed"])
   perFile -->|"cancel"| exitError
   exec -->|"all files done"| deQ{"--deleteempty?"}
@@ -694,8 +694,8 @@ flowchart TD
   ihDb -->|"no"| claimDbQ
   claimDbQ -->|"no"| metaQ
   claimDbQ -->|"yes"| claim{"ImportTask.ClaimedByAsync(): SHA-256 or image hash held in this run?"}
-  claim -->|"held, owner imported"| skipped
-  claim -->|"held, owner did not import"| claim
+  claim -->|"held, owner imported or kept its moved file"| skipped
+  claim -->|"held, owner freed the claim"| claim
   claim -->|"this file takes the claim"| metaQ
   metaQ -->|"yes"| validate
   metaQ -->|"no"| meta["ImportTask.GetFileMetaAsync(): read metadata, an IOException gives none"]
@@ -704,7 +704,7 @@ flowchart TD
   validate -->|"no, warnings ignored"| next(["Continues in Import Destination"])
 ```
 
-A claim waiter blocks until the owner finishes, then loops if the owner did not import. A file is Skipped by a claim only after it passed every database check.
+A claim waiter blocks until the owner finishes, then loops if the owner freed the claim. An owner that kept its moved file in `--outpath` holds the claim, though it counts Failed. A file is Skipped by a claim only after it passed every database check.
 
 #### Import Destination
 
@@ -729,7 +729,7 @@ flowchart TD
   inferred --> build["ImportTask.BuildDestinationPath(): --outpath, date by --format, file name"]
   build --> unique["MediaUtilities.GetUniqueFileName(): add _1, _2 when the name exists now"]
   unique --> writeQ{"Detected file type in the exiftool write list?"}
-  writeQ -->|"no"| dropped["--tags, --tagpath, and the inferred date dropped, no log line, S14"]:::suspect
+  writeQ -->|"no"| dropped["ImportTask.WarnSkippedWrites(): warn naming the file and the tags or date it skips, S14"]:::suspect
   writeQ -->|"yes"| tags["ImportTask.ComputePathTags(): directory names under --path, with --tagpath"]
   tags --> addTags["Add the --tags values"]
   dropped --> dryQ{"--dryrun?"}
@@ -763,43 +763,52 @@ flowchart TD
   dateW --> dateOk{"ImportTask.ReportWrite(): created-date write succeeded?"}
   dateQ -->|"no"| tagQ{"Any tags to apply?"}
   dateOk -->|"yes"| tagQ
-  dateOk -->|"no"| rollback["ImportTask.RollBackDestination(): undo the destination"]
+  dateOk -->|"no"| writeMvQ{"--move?"}
   tagQ -->|"yes"| tagW["ImportTask.ApplyTagsAsync(): write XMP Subject tags"]
   tagW --> tagOk{"ImportTask.ReportWrite(): tag write succeeded?"}
-  tagOk -->|"no"| rollback
-  rollback --> rbQ{"--move?"}
-  rbQ -->|"yes"| keepMoved["Moved file kept in --outpath, writes missing, no row"]
-  keepMoved --> failed
-  rbQ -->|"no"| delQ{"ImportTask.DeleteCopy(): copy removed?"}
+  tagOk -->|"no"| writeMvQ
+  writeMvQ -->|"no"| rollback["ImportTask.RemoveCopy(): undo the copy"]
+  writeMvQ -->|"yes, keep the moved file"| mtime
+  tagQ -->|"no"| mtime["ImportTask.RestoreSourceTime(): restore the source mtime on the destination"]
+  tagOk -->|"yes"| mtime
+  mtime -->|"IOException or access denied"| timeMvQ{"--move?"}
+  timeMvQ -->|"no"| rollback
+  timeMvQ -->|"yes, keep the moved file"| rowQ
+  rollback --> delQ{"Copy removed?"}
   delQ -->|"yes"| failed
   delQ -->|"no"| copyLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
   copyLeft --> failed
-  tagQ -->|"no"| mtime["Restore the source mtime on the destination"]
-  tagOk -->|"yes"| mtime
-  mtime -->|"IOException or access denied"| mtimeFail["Destination kept, no row, logged as a failed copy or move, S12"]:::suspect
-  mtimeFail --> failed
-  mtime --> rowQ{"--db given?"}
-  rowQ -->|"no"| imported(["Counted Imported"])
+  mtime --> rowQ{"ImportTask.WriteRowAsync(): --db given?"}
+  rowQ -->|"no"| keptQ
   rowQ -->|"yes"| cachedQ{"Cached row for the source path?"}
   cachedQ -->|"no"| insert["Database.InsertAsync(): insert or ignore the source row"]
   cachedQ -->|"yes"| update["Database.UpdateHashesAsync(): new hashes, metadata, reset is_processed"]
-  insert --> imported
-  update --> imported
-  insert -->|"SqliteException"| rowFail["Escapes to the per-file catch, destination kept, no row, S12"]:::suspect
-  update -->|"SqliteException"| rowFail
+  insert --> keptQ{"Moved file kept after a failed write?"}
+  update --> keptQ
+  keptQ -->|"no"| imported(["Counted Imported"])
+  keptQ -->|"yes"| keepMoved["Moved file kept in --outpath, row written under --db, writes missing, claims kept"]
+  keepMoved --> failed
+  insert -->|"other exception"| rowMvQ{"--move?"}
+  update -->|"other exception"| rowMvQ
+  rowMvQ -->|"no"| rollback
+  rowMvQ -->|"yes"| rowFail["Escapes to the per-file catch, moved file kept, no row, claims kept, S16"]:::suspect
+  rowFail --> failed
   insert -->|"cancel"| cancelQ
   update -->|"cancel"| cancelQ
-  rowFail --> failed
   dateW -->|"cancel"| cancelQ{"--move?"}
   tagW -->|"cancel"| cancelQ
-  cancelQ -->|"no"| cancelDel["ImportTask.DeleteCopy(): remove the copy"]
+  cancelQ -->|"no"| cancelDel["ImportTask.RemoveCopy(): remove the copy"]
   cancelDel --> exitError(["Rethrown, run exits 1 Error"])
-  cancelQ -->|"yes"| cancelMoved["Moved file stays, mtime not restored, no row"]
+  cancelDel -->|"removal fails"| cancelLeft["Copy stays with a warning, next run copies it again as _1, S12"]:::suspect
+  cancelLeft --> exitError
+  cancelQ -->|"yes"| cancelMoved["Moved file stays, no row"]
   cancelMoved --> exitError
   classDef suspect stroke:#c00,stroke-width:2px,stroke-dasharray:5 3
 ```
 
-Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. An `IOException` or `UnauthorizedAccessException` counts the file Failed. Any other exception, a `SqliteException` included, reaches the per-file catch in `ImportTask.ExecuteAsync()` with the destination left in place.
+Inside this stage a cancel removes the copy in copy mode and rethrows, even when the copy completed. In copy mode any other failure after the copy also removes the copy, before the file's claims are freed. So a failed write, a failed mtime restore, or a `SqliteException` from the row write leaves the source to import cleanly on the next run. A `SqliteException` still reaches the per-file catch in `ImportTask.ExecuteAsync()`, which counts the file Failed. A copy that cannot be removed stays with a warning instead, S12.
+
+A moved file has no source left to return to, so a failed write keeps it in `--outpath`. It gets the source mtime unless the mtime restore is the write that failed. Its row is still written, keyed by source path and hash as for an import, so a later copy is skipped. The file is counted Failed, and the error names the write that failed. Its claims stay held, so a matching file later in the run is skipped too. Any other exception after a move also keeps the claims, since the moved file is in the library without its row.
 
 ### Index
 
@@ -1139,10 +1148,11 @@ Each entry describes a branch the diagrams mark, as the code behaves today, and 
 - **S9.** A trashed file whose delete fails continues through the pipeline, and the run exits 0, #317.
 - **S10.** A created date with a time zone, or one held only in `Matroska:DateTimeOriginal`, reads as no date, #318.
 - **S11.** `import --deleteempty` throws when `--outpath` does not exist, so the run exits 1, #319.
-- **S12.** A copy-mode import that fails after the copy leaves the copy, and the next run imports it again as `_1`, #320.
+- **S12.** A copy that cannot be removed after a failed import stays with a warning, and the next run imports it again as `_1`, #338.
 - **S13.** Two parallel imports with the same name and date can pick the same destination, #321.
-- **S14.** `import` drops `--tags`, `--tagpath` and the inferred date silently for a type exiftool cannot write, #322.
+- **S14.** For a detected type outside the exiftool write list, `import` skips `--tags`, `--tagpath` and the inferred date with only a warning, #334.
 - **S15.** `trash` stops at an empty page without marking the sync partial, and logs a timeout as a cancel, #323.
+- **S16.** A moved file whose row write fails stays in `--outpath` with no row, so the next run imports a copy of it again, #340.
 
 ## State Management Pattern
 
@@ -1206,11 +1216,11 @@ BufferedCommandResult result = await Cli.Wrap("exiftool")
 - **Optional `--threads` Parameter**: Controls parallel processing degree with `DefaultValueFactory = _ => Math.Min(Environment.ProcessorCount, 4)`. Validated to be > 0 and <= Environment.ProcessorCount using `Validators.Add()` (process, import, index)
 - **Optional `--skipbackup` Flag** (process only): Leaves no `.bak` file behind, so a converted original or a deleted video is removed rather than backed up. No file is deleted to free its name for a rename, which takes a free name instead (see "Rename Collisions" below). Logs a warning at startup. Disables undo.
 - **Optional `--deleteempty` Flag** (process, import): After the command completes, deletes empty child subdirectories from the target directory (deepest first, while the target root is never deleted). For `process` the target is `--path` (operated on in-place), and for `import` it is `--outpath`. Implemented by `DirectoryCleaner.DeleteEmptyDirectories(root, dryRun)`.
-- **`import` subcommand** (formerly `organize`): Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from `--outpath` after all files are imported. `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool. It applies only to `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) via `meta.FileTypeExtension`. It uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every imported file. `--datepath` (default `false`) infers the creation date from the source file path when no date is already embedded. It applies that date to the destination file before restoring mtime. A destination write that exits non-zero or prints an `Error` line fails the file and writes no `--db` row. A failed copy is removed, and a moved file stays at its destination. **`--db <sqlite-file>` (Import.db) is the source-side dedup DB**: rows are keyed by `path = source_path` (NOT dest path) and hold the source file's hash/size/mtime. On each source file, import calls `GetByPathAsync(source_path)` for source-side hash caching, then `Sha256ExistsAsync(source_hash)` to skip already-imported sources. New imports insert a row at the source path. **No command outside `import` writes to source-keyed rows**, so dedup cannot be clobbered by later runs of `process`/`index`. `--trashdb <sqlite-file>` skips files whose **source-file** SHA-1 is in Trash.db. When import rewrites the destination via `--tags`/`--tagpath`/`--datepath`, its SHA-1 differs from the source SHA-1. Immich stored the destination SHA-1 from a prior upload, so the trash match is missed here and caught later by `process --trashdb`. `--skipdb <sqlite-file>` skips files whose SHA-256 matches a reference DB (read-only). Cross-collection dedup is typically implemented by pointing `--skipdb` at another collection's Import.db. `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
+- **`import` subcommand** (formerly `organize`): Copies (default) or moves supported media files from `--path` sources into `--outpath/date/filename` directory structure. Date comes from EXIF metadata (falls back to `DateTime.MinValue` -> `"0001/01/01"` bucket when absent). `--format` (default `"yyyy/MM/dd"`) controls subdirectory naming and is validated as a date-only format (no time components). Uses `GetUniqueFileName` for collision handling (`foo_1.jpg` etc.). Parallel via `--threads` (same as `process`). `--deleteempty` (default `false`) deletes empty child subdirectories from `--outpath` after all files are imported. `--move` (default `false`) moves files instead of copying. `--tagpath` (default `false`) splits the source sub-directory path into tokens and writes each token as an `XMP:Subject` tag on the destination file using exiftool. It applies only to `s_exiftoolWriteExtensions` (`.3gp`, `.arw`, `.cr2`, `.dng`, `.gif`, `.heic`, `.heif`, `.jpeg`, `.jpg`, `.mov`, `.mp4`, `.nef`, `.orf`, `.png`, `.psd`, `.rw2`, `.tif`, `.tiff`) via `meta.FileTypeExtension`. A file of any other type imports with a warning naming the tags or date it skips. It uses `-XMP:Subject-= / -XMP:Subject+=` to prevent duplicates while preserving existing tags. `--tags <string>` (optional) applies explicit comma-separated `XMP:Subject` tags to every imported file. `--datepath` (default `false`) infers the creation date from the source file path when no date is already embedded. It applies that date to the destination file before restoring mtime. A destination write that exits non-zero or prints an `Error` line fails the file. A failed copy is removed with no `--db` row. A moved file stays at its destination, and under `--db` it still gets its row unless the row write itself fails. **`--db <sqlite-file>` (Import.db) is the source-side dedup DB**: rows are keyed by `path = source_path` (NOT dest path) and hold the source file's hash/size/mtime. On each source file, import calls `GetByPathAsync(source_path)` for source-side hash caching, then `Sha256ExistsAsync(source_hash)` to skip already-imported sources. New imports insert a row at the source path. **No command outside `import` writes to source-keyed rows**, so dedup cannot be clobbered by later runs of `process`/`index`. `--trashdb <sqlite-file>` skips files whose **source-file** SHA-1 is in Trash.db. When import rewrites the destination via `--tags`/`--tagpath`/`--datepath`, its SHA-1 differs from the source SHA-1. Immich stored the destination SHA-1 from a prior upload, so the trash match is missed here and caught later by `process --trashdb`. `--skipdb <sqlite-file>` skips files whose SHA-256 matches a reference DB (read-only). Cross-collection dedup is typically implemented by pointing `--skipdb` at another collection's Import.db. `--rehash` forces recomputation of all hashes ignoring the size/mtime cache.
 - **`index` subcommand**: Iterates all files in `--path`, upserts each into the `files` DB table via `IndexTask.ExecuteAsync` (insert new, update if hash changed, skip unchanged). `--db <sqlite-file>` is **required**. No `--dryrun` (always writes to DB). Supports `--threads` and `--rehash`. `--processed` (optional) marks newly-INSERTED rows with `is_processed = 1`, which is useful when seeding a Process.db from existing files so `process` treats them as already-done. The flag does not flip the flag on existing rows. Reports `inserted`/`updated`/`unchanged`/`ignored`/`failed` counts.
 - **`trash` subcommand**: Syncs trashed asset checksums from an Immich server into a local SQLite trash database. It takes `--url` (Immich server URL, required) and `--trashdb <sqlite-file>` (trash database, required). The API key comes from exactly one of `--apikey` (inline) or `--apikey-file`, a file whose trimmed contents are the key. The two API-key options are mutually exclusive, and exactly one must be provided. `--apikey-file` must reference an existing, non-empty, readable file. An option validator enforces existence, and a command-level validator enforces non-empty and readable. Read failures are translated to validation errors, never thrown. The key is resolved at parse time by `CommandLine.ResolveApiKey`/`ReadApiKeyFile` (file contents preferred and `.Trim()`-med) and flows into `Options.ImmichApiKey`. Uses `POST /api/search/metadata` with `trashedAfter` to fetch all trashed assets, converts Base64 SHA-1 checksums to hex, and inserts them, keeping an existing row. Full sync (idempotent, append-only). No `--dryrun`.
 - **`--trashdb` Flag** (import, process): SQLite database file with Immich trash hashes (synced by `trash`). In `import`, files matching the trash DB are skipped, preventing re-import of photos the user trashed in Immich. The check is against the **source-file** SHA-1. Files whose destination SHA-1 `import` mutated (`--tags`/`--tagpath`/`--datepath`) do not match here, although Immich stored the mutated SHA-1. The `process --trashdb` command catches those on the next pass. In `process`, matching files are **deleted from disk** before the per-file pipeline runs. This cleans up files trashed in Immich after upload and catches the import source-vs-dest SHA-1 drift. Their Process.db rows stay, so a Live Photo video still pairs with a trashed still. The Trash.db check is the durable safety net beyond Immich's ~30-day trash retention.
-- **Optional `--imagehash` Flag** (import, process): Opt-in matching by image data hash, stored in `CommandLine.Options.ImageHash`. It is not a `required` member, so an `Options` built without it matches by whole-file hash only. `ImportCommand` checks the ExifTool version once up front. In `import`, after the whole-file checks find nothing, `ImportTask` reads the source's catalog metadata once and reuses it for the rest of the file. A hash in Trash.db returns `TrashedInImmich`. A hash in Import.db returns `Skipped`, logging the matched row from `Database.FindPathByImageHashAsync`. With `--db`, an in-run claim set lets only the first of two matching files in one run import. It is keyed by SHA-256, and also by image hash under `--imagehash`. A file that meets a claim waits for its owner's outcome. It skips when the owner imported, and tries again when the owner released the claim by not importing. The rest return `Skipped`, so the counts match a sequential run and a dry run. With more than one thread, which of the matching files imports depends on timing. In `process`, `ProcessTask` reads `image_hash` from the cataloged row and deletes the file when Trash.db holds it. Command validators require `--db` or `--trashdb` for `import`, and both for `process`.
+- **Optional `--imagehash` Flag** (import, process): Opt-in matching by image data hash, stored in `CommandLine.Options.ImageHash`. It is not a `required` member, so an `Options` built without it matches by whole-file hash only. `ImportCommand` checks the ExifTool version once up front. In `import`, after the whole-file checks find nothing, `ImportTask` reads the source's catalog metadata once and reuses it for the rest of the file. A hash in Trash.db returns `TrashedInImmich`. A hash in Import.db returns `Skipped`, logging the matched row from `Database.FindPathByImageHashAsync`. With `--db`, an in-run claim set lets only the first of two matching files in one run import. It is keyed by SHA-256, and also by image hash under `--imagehash`. A file that meets a claim waits for its owner's outcome. It skips when the owner imported or kept its moved file, and tries again when the owner released the claim by not importing. The rest return `Skipped`, so the counts match a sequential run and a dry run. With more than one thread, which of the matching files imports depends on timing. In `process`, `ProcessTask` reads `image_hash` from the cataloged row and deletes the file when Trash.db holds it. Command validators require `--db` or `--trashdb` for `import`, and both for `process`.
 - **Optional `--processdb` Flag** (trash only): A Process.db opened read-only through `DatabaseScope`. After the sync, `TrashCommand` reads every `trash_hashes` row with no `image_hash`, including assets the server has purged. It looks each up with `Database.GetImageHashBySha1Async` and stores what it finds. The insert is an upsert that fills a missing `image_hash` and keeps everything else. Without the flag `trash` stores SHA-1 hashes only.
 - **Optional `--skipdb` Flag** (import only): SQLite database of files to skip (read-only SHA-256 check). Files whose SHA-256 matches a record in this DB are skipped without being recorded. Use this to skip files already present in another collection.
 - **Optional `--rehash` Flag** (process, import, index): Forces SHA-256 recomputation for every file, ignoring the size/mtime cache. SHA-1 is also recomputed when `--trashdb` is in use. Useful after filesystem operations that preserve mtime but change content.
