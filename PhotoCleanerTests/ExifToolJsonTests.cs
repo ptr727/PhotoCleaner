@@ -428,6 +428,19 @@ public sealed class ExifToolJsonTests
     }
 
     [Fact]
+    public void GetDateString_PrioritizesMatroskaOverRIFF()
+    {
+        ExifToolJson json = new()
+        {
+            MatroskaDateTimeOriginal = "2024:01:21 18:00:00",
+            RIFFDateTimeOriginal = "2024:01:22 18:00:00",
+        };
+
+        json.GetDateString().Should().Be("2024:01:21 18:00:00");
+        json.GetDate().Should().Be(new DateTime(2024, 1, 21, 18, 0, 0));
+    }
+
+    [Fact]
     public void GetDateString_WhenFirstDateIsZero_ReturnsNextDateThatParses()
     {
         ExifToolJson json = new()
